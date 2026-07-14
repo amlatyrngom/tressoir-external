@@ -1,0 +1,77 @@
+:root {
+  --nb-bg: #1e1e2e;
+  --nb-surface: #313244;
+  --nb-surface-alt: #181825;
+  --nb-border: #585b70;
+  --nb-text: #cdd6f4;
+  --nb-muted: #a6adc8;
+  --nb-accent: #89b4fa;
+  --nb-selection: #45475a;
+  --nb-font-sans: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+  --nb-font-mono: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--nb-bg);
+  color: var(--nb-text);
+}
+
+body {
+  font-family: var(--nb-font-sans);
+}
+
+code {
+  font-family: var(--nb-font-mono);
+}
+
+#app {
+  min-height: 100vh;
+  padding: 1rem;
+}
+
+.notebook-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.notebook-banner {
+  margin: 0;
+  padding: 0.95rem 1rem;
+  border: 1px solid var(--nb-border);
+  border-left: 4px solid var(--nb-accent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--nb-surface) 92%, white 8%);
+  color: var(--nb-text);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+}
+
+.notebook-banner strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.98rem;
+}
+
+.notebook-banner p {
+  margin: 0.2rem 0 0;
+  line-height: 1.45;
+}
+
+.notebook-error-detail {
+  color: var(--nb-muted);
+}
+
+.notebook-preview-host {
+  display: block;
+  border: 1px solid var(--nb-border);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--nb-bg) 88%, var(--nb-surface) 12%);
+  overflow: hidden;
+}

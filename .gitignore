@@ -1,0 +1,7 @@
+.DS_Store
+# Local Tressoir development state is not part of the public distribution.
+IB/
+extension/node_modules/
+extension/dist/
+npm-debug.log*
+.env

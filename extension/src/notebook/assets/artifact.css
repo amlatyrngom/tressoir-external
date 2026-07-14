@@ -1,0 +1,599 @@
+
+  /* Catppuccin Latte (light, default). Base = the editor area color, not the darker gutter/mantle. */
+  :root {
+    --bg:#eff1f5; --fg:#4c4f69; --muted:#6c6f85; --soft:#e6e9ef; --soft2:#dce0e8;
+    --border:#ccd0da; --accent:#1e66f5; --ok:#40a02b; --warn:#df8e1d; --danger:#d20f39;
+    --high:#d20f39; --medium:#fe640b; --low:#df8e1d;
+    --tk-kw:#8839ef; --tk-str:#40a02b; --tk-com:#9ca0b0; --tk-num:#fe640b; --tk-fn:#1e66f5;
+    --radius: 10px;
+  }
+  /* The extension drives theme from VS Code's body class/theme-kind attribute.
+     prefers-color-scheme remains a standalone-preview fallback. */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#1e1e2e; --fg:#cdd6f4; --muted:#a6adc8; --soft:#313244; --soft2:#45475a;
+      --border:#45475a; --accent:#89b4fa; --ok:#a6e3a1; --warn:#f9e2af; --danger:#f38ba8;
+      --high:#f38ba8; --medium:#fab387; --low:#f9e2af;
+      --tk-kw:#cba6f7; --tk-str:#a6e3a1; --tk-com:#6c7086; --tk-num:#fab387; --tk-fn:#89b4fa;
+    }
+  }
+  /* Editor explicitly light / HC-light: re-assert Catppuccin Latte (beats a dark-OS prefers-color-scheme). */
+  body.vscode-light, body.vscode-high-contrast-light,
+  [data-vscode-theme-kind="vscode-light"], [data-vscode-theme-kind="vscode-high-contrast-light"] {
+    --bg:#eff1f5; --fg:#4c4f69; --muted:#6c6f85; --soft:#e6e9ef; --soft2:#dce0e8;
+    --border:#ccd0da; --accent:#1e66f5; --ok:#40a02b; --warn:#df8e1d; --danger:#d20f39;
+    --high:#d20f39; --medium:#fe640b; --low:#df8e1d;
+    --tk-kw:#8839ef; --tk-str:#40a02b; --tk-com:#9ca0b0; --tk-num:#fe640b; --tk-fn:#1e66f5;
+  }
+  /* Editor explicitly dark / high-contrast: Catppuccin Mocha. */
+  body.vscode-dark, body.vscode-high-contrast,
+  [data-vscode-theme-kind="vscode-dark"], [data-vscode-theme-kind="vscode-high-contrast"] {
+    --bg:#1e1e2e; --fg:#cdd6f4; --muted:#a6adc8; --soft:#313244; --soft2:#45475a;
+    --border:#45475a; --accent:#89b4fa; --ok:#a6e3a1; --warn:#f9e2af; --danger:#f38ba8;
+    --high:#f38ba8; --medium:#fab387; --low:#f9e2af;
+    --tk-kw:#cba6f7; --tk-str:#a6e3a1; --tk-com:#6c7086; --tk-num:#fab387; --tk-fn:#89b4fa;
+  }
+
+  /* Implementing state = Catppuccin mauve (purple), theme-aware (mirrors the keyword token color). */
+  :root { --impl: var(--tk-kw); }
+
+  /* Full-bleed template: neutralize default notebook card chrome. */
+  #app { padding: 0 !important; }
+  .notebook-shell { gap: 0 !important; }
+  .notebook-preview-host {
+    border: none !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important;
+  }
+
+  body {
+    margin:0; background:var(--bg); color:var(--fg);
+    font: 14px/1.58 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  .wrap { max-width: 920px; padding: 26px 34px 70px; }
+  a { color:var(--accent); }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:.93em;
+    background:transparent; padding:0; border:0; border-radius:0; color:var(--fg); }
+
+  .plan-head { margin-bottom: 18px; }
+  .title-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  h1 { margin:0; font-size:23px; line-height:1.22; letter-spacing:-.25px; }
+  .badge.type {
+    font-size:11px; font-weight:750; letter-spacing:.45px; text-transform:uppercase;
+    color:var(--accent); background:color-mix(in srgb, var(--accent) 11%, transparent);
+    border:1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    padding:2px 9px; border-radius:999px;
+  }
+  .dek { max-width:76ch; margin:12px 0 8px; font-size:15px; }
+  .detail-link { margin:0; color:var(--muted); font-size:12.7px; }
+  .detail-link a { font-weight:650; text-decoration:none; }
+  .detail-link a:hover { text-decoration:underline; }
+
+  .alt-radio { position:absolute; opacity:0; pointer-events:none; }
+  .altitude-tabs {
+    display:flex; gap:4px; margin: 18px 0 20px; border-bottom:1px solid var(--border);
+  }
+  .altitude-tabs label {
+    cursor:pointer; padding:8px 13px; font-weight:650; color:var(--muted);
+    border-bottom:2px solid transparent; margin-bottom:-1px; border-radius:6px 6px 0 0;
+  }
+  .altitude-tabs label:hover { color:var(--fg); background:var(--soft); }
+  #alt-exec:checked  ~ .altitude-tabs label[for="alt-exec"],
+  #alt-integ:checked ~ .altitude-tabs label[for="alt-integ"] { color:var(--accent); border-bottom-color:var(--accent); }
+  .view { display:none; }
+  #alt-exec:checked  ~ .view-exec,
+  #alt-integ:checked ~ .view-integ { display:block; }
+
+  h2.section {
+    margin:26px 0 9px; color:var(--muted); font-size:12px; letter-spacing:.55px;
+    text-transform:uppercase; font-weight:760;
+  }
+  .exec-title { margin:6px 0 10px; font-size:16px; font-weight:700; color:var(--fg); }
+  .prose { max-width:78ch; }
+  .prose p { margin: 0 0 10px; }
+  .prose strong { color:var(--fg); }
+  .es-sub + .es-sub { border-top:1px dotted var(--border); margin-top:16px; padding-top:16px; }
+  .es-goal { margin:2px 0 0; font-size:14.5px; color:var(--fg); max-width:80ch; line-height:1.5; }
+  .exec-sum .realm-diagram { border:none; margin:8px 0 0; padding:0; }
+
+  /* Seamless diagram: inline with prose, not a card grid. */
+  .realm-diagram {
+    margin: 14px 0 18px; padding: 14px 0 4px; border-top:1px solid var(--border); border-bottom:1px solid var(--border);
+  }
+  .realm-caption { margin:0 0 10px; color:var(--muted); font-size:12.7px; }
+  .rail {
+    display:grid; grid-template-columns: minmax(180px,1fr) 34px minmax(180px,1fr);
+    align-items:stretch; gap:10px; max-width:780px;
+  }
+  .rail-node {
+    background:linear-gradient(180deg, color-mix(in srgb, var(--soft) 82%, transparent), transparent);
+    border:1px solid var(--border); border-radius:10px; padding:11px 12px;
+  }
+  .rail-node b { display:block; margin-bottom:3px; }
+  .rail-node small { color:var(--muted); }
+  .rail-arrow { display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:20px; }
+  .rail-note {
+    grid-column:1 / -1; color:var(--muted); font-size:12.7px; padding:8px 0 0;
+  }
+  .rail-note b { color:var(--fg); }
+
+  .callout {
+    border-left:3px solid var(--accent); padding:8px 0 8px 13px; margin:14px 0 4px;
+    color:var(--muted); max-width:78ch;
+  }
+  .callout b { color:var(--fg); }
+
+  /* Architectural Overview: hand-authored C4 container diagram in themed inline SVG (no eval, CSP-safe). */
+  .arch-overview { margin-top:20px; border-top:1px dotted var(--border); padding-top:18px; }
+  .arch-note { margin:3px 0 14px; color:var(--muted); font-size:12.8px; max-width:70ch; }
+  .arch-svg { width:100%; max-width:560px; height:auto; display:block; }
+  .arch-svg .node { fill:color-mix(in srgb, var(--soft) 80%, transparent); stroke:var(--border); stroke-width:1; }
+  .arch-svg .nested { fill:color-mix(in srgb, var(--accent) 8%, transparent); stroke:color-mix(in srgb, var(--accent) 38%, var(--border)); }
+  .arch-svg .stereo { fill:var(--muted); font:italic 10.5px ui-sans-serif, system-ui, sans-serif; }
+  .arch-svg .ttl { fill:var(--fg); font:600 13px ui-sans-serif, system-ui, sans-serif; }
+  .arch-svg .sub { fill:var(--muted); font:11px ui-monospace, SFMono-Regular, monospace; }
+  .arch-svg .edge { stroke:var(--muted); stroke-width:1.35; fill:none; }
+  .arch-svg .elabel { fill:var(--muted); font:italic 11px ui-sans-serif, system-ui, sans-serif; }
+  .arch-svg .ahead { fill:var(--muted); }
+
+  /* Decision queue: the primary interactive surface. */
+  .dq { margin-top:20px; border-top:1px dotted var(--border); padding-top:18px; }
+  .dq-head {
+    display:flex; align-items:flex-end; justify-content:space-between; gap:14px; flex-wrap:wrap; margin-bottom:10px;
+  }
+  .dq-head h2 { margin:0; font-size:16px; }
+  .dq-sub { margin:3px 0 0; color:var(--muted); font-size:12.8px; max-width:62ch; }
+  .dq-progress { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; font-weight:650; }
+  .dq-bar { width:122px; height:6px; border-radius:999px; background:var(--soft2); overflow:hidden; }
+  .dq-bar > span { display:block; height:100%; width:0%; border-radius:999px; background:var(--ok); transition:width .22s ease; }
+
+  .dq-filter-radio { position:absolute; opacity:0; pointer-events:none; }
+  .dq-toolbar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:11px; }
+  .dq-filters { display:inline-flex; gap:4px; border:1px solid var(--border); border-radius:999px; padding:3px; background:var(--soft); }
+  .dq-filters label { cursor:pointer; color:var(--muted); font-size:12px; font-weight:650; padding:4px 11px; border-radius:999px; }
+  #f-all:checked      ~ .dq-toolbar .dq-filters label[for="f-all"],
+  #f-needs:checked    ~ .dq-toolbar .dq-filters label[for="f-needs"],
+  #f-resolved:checked ~ .dq-toolbar .dq-filters label[for="f-resolved"] { background:var(--accent); color:white; }
+  .dq-expand { border:none; background:none; color:var(--accent); font-size:12px; font-weight:650; cursor:pointer; padding:4px 2px; }
+
+  .dq-list { display:flex; flex-direction:column; gap:9px; }
+  .dq-empty { display:none; color:var(--muted); border:1px dashed var(--border); border-radius:10px; padding:14px; text-align:center; }
+  .dq-empty.show { display:block; }
+
+  details.dcard {
+    border:1px solid var(--border); border-radius:10px; background:var(--bg); overflow:hidden;
+  }
+  details.dcard[open] { background:var(--bg); }
+  details.dcard > summary {
+    list-style:none; cursor:pointer; user-select:none; padding:12px 13px 7px;
+    display:grid; grid-template-columns:auto 1fr auto auto; gap:8px; align-items:center;
+  }
+  details.dcard > summary::-webkit-details-marker { display:none; }
+  details.dcard > summary::before { content:"▸"; color:var(--muted); align-self:center; transition:transform .15s; }
+  details.dcard[open] > summary::before { transform:rotate(90deg); }
+  .importance {
+    font-size:10px; font-weight:760; letter-spacing:.35px; text-transform:uppercase;
+    border-radius:999px; padding:2px 7px; border:1px solid currentColor; white-space:nowrap;
+  }
+  .importance.high { color:var(--high); }
+  .importance.medium { color:var(--medium); }
+  .importance.low { color:var(--low); }
+  .sum-main { min-width:0; }
+  .sum-title { font-weight:720; }
+  .sum-title .q { color:var(--muted); font-weight:520; }
+  .sum-gist { margin:4px 0 0; color:var(--muted); font-size:12.8px; max-width:76ch; }
+  .status-pill {
+    width:18px; height:18px; border-radius:50%;
+    display:inline-flex; align-items:center; justify-content:center;
+    color:transparent; background:transparent; font-size:0; font-weight:760;
+  }
+  .dcard.resolved .status-pill { color:white; background:var(--ok); font-size:12px; }
+  .dcard-body { padding:0 14px 14px 29px; }
+  .sum-gist.in-body { margin:2px 0 11px; }
+  .detail-toggle { margin:8px 0 9px; max-width:760px; color:var(--muted); }
+  .detail-toggle > summary { cursor:pointer; font-size:12.5px; font-weight:650; color:var(--fg); }
+  .detail-toggle p { margin:7px 0 0; }
+
+  .opt-list { display:flex; flex-direction:column; gap:6px; margin-top:8px; max-width:760px; }
+  .opt {
+    display:grid; grid-template-columns:18px 1fr auto; gap:9px; align-items:center;
+    border:1px solid var(--border); background:var(--bg); border-radius:8px; padding:8px 10px;
+    cursor:pointer; font-size:13px;
+  }
+  .opt:hover, .opt:focus-visible { border-color:var(--accent); outline:none; background:var(--soft); }
+  .opt.sel { border-color:var(--ok); background:color-mix(in srgb, var(--ok) 11%, transparent); font-weight:650; }
+  .mark {
+    width:14px; height:14px; border-radius:50%; border:1.5px solid var(--border);
+    display:inline-flex; align-items:center; justify-content:center; color:white; font-size:10px;
+  }
+  .opt.sel .mark { background:var(--ok); border-color:var(--ok); }
+  .rec-tag { color:var(--ok); font-size:10px; font-weight:760; text-transform:uppercase; }
+  .other-box { display:none; margin:8px 0 2px 0; max-width:760px; }
+  .other-box.show { display:block; }
+  .other-box textarea {
+    width:100%; min-height:68px; resize:vertical; box-sizing:border-box;
+    background:var(--bg); color:var(--fg); border:1px solid var(--border); border-radius:8px; padding:8px 9px;
+    font:13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  .saved-tag { display:none !important; }
+
+  .editor-intro { margin:22px 0 7px; max-width:76ch; color:var(--muted); }
+  .cell-label { color:var(--muted); font-size:11.8px; margin:6px 0 5px; }
+  tressoir-editor-cell { display:block; }
+  .head-feedback { margin:12px 0 6px; }
+
+  table.cww { border-collapse:collapse; width:100%; font-size:13px; }
+  table.cww th, table.cww td { border:1px solid var(--border); padding:7px 9px; text-align:left; vertical-align:top; }
+  table.cww th { background:var(--soft); }
+  .st-todo { color:var(--muted); font-weight:650; }
+  footer.gen { margin-top:30px; padding-top:10px; border-top:1px solid var(--border); color:var(--muted); font-size:11.5px; }
+
+  @media (max-width:720px) {
+    .wrap { padding:20px 18px 56px; }
+    .rail { grid-template-columns:1fr; }
+    .rail-arrow { display:none; }
+    details.dcard > summary { grid-template-columns:auto 1fr auto auto; }
+    .status-pill { grid-column:auto; justify-self:auto; margin-top:0; }
+    .dcard-body { padding-left:14px; }
+  }
+
+  /* Minimal modern decision-queue controls (override earlier attempts). */
+  .dq-toolbar {
+    display:flex !important;
+    justify-content:flex-end !important;
+    align-items:center !important;
+    margin:-2px 0 12px !important;
+  }
+  .dq-controls {
+    display:inline-flex !important;
+    align-items:center !important;
+    gap:3px !important;
+    padding:2px !important;
+    border:1px solid var(--border) !important;
+    border-radius:999px !important;
+    background:var(--soft) !important;
+  }
+  .dq-control {
+    appearance:none !important;
+    -webkit-appearance:none !important;
+    border:0 !important;
+    background:transparent !important;
+    color:var(--muted) !important;
+    border-radius:999px !important;
+    padding:4px 10px !important;
+    font:inherit !important;
+    font-size:12.5px !important;
+    font-weight:650 !important;
+    line-height:1.2 !important;
+    cursor:pointer !important;
+  }
+  .dq-control:hover {
+    color:var(--fg) !important;
+    background:color-mix(in srgb, var(--bg) 72%, transparent) !important;
+  }
+  .dq-control.active,
+  .dq-control[aria-pressed="true"] {
+    color:var(--fg) !important;
+    background:var(--bg) !important;
+    box-shadow:0 1px 2px rgba(31,35,40,.10) !important;
+  }
+
+
+  /* Decision queue controls removed as bloat. */
+  .dq-toolbar, .dq-controls { display:none !important; }
+
+  /* Subtle clickable left gutter for expanding/collapsing a decision card. */
+  details.dcard { position:relative; }
+  .card-gutter {
+    appearance:none;
+    -webkit-appearance:none;
+    position:absolute;
+    left:0;
+    top:0;
+    bottom:0;
+    width:30px;
+    padding:0;
+    border:0;
+    background:transparent;
+    cursor:pointer;
+    z-index:2;
+  }
+  .card-gutter:hover,
+  .card-gutter:focus-visible,
+  details.dcard > summary:hover .card-gutter,
+  details.dcard > summary:focus-within .card-gutter {
+    outline:none;
+    background:linear-gradient(to right, color-mix(in srgb, var(--accent) 48%, transparent) 0 2px, transparent 2px);
+  }
+
+
+  /* (Syntax token colors --tk-* are defined in the theme blocks at the top of this stylesheet.) */
+  .tk-kw { color:var(--tk-kw); } .tk-str { color:var(--tk-str); }
+  .tk-com { color:var(--tk-com); font-style:italic; } .tk-num { color:var(--tk-num); }
+
+  /* Integration: milestones -> per-module tabs -> code/diff. */
+  .milestones { display:flex; flex-direction:column; gap:20px; }
+  .m-head { display:flex; align-items:flex-start; gap:10px; margin-bottom:10px; }
+  .m-id { font-weight:760; font-size:13px; color:var(--muted); border:1px solid var(--border);
+    border-radius:6px; padding:2px 8px; line-height:1.4; }
+  .m-title { font-weight:700; font-size:16px; }
+  .m-intent { color:var(--muted); font-size:14.5px; line-height:1.45; margin-top:3px; max-width:80ch; }
+  .m-status { margin-left:auto; font-size:10.5px; font-weight:760; text-transform:uppercase;
+    letter-spacing:.3px; color:var(--muted); display:inline-flex; align-items:center; gap:6px; white-space:nowrap;
+    padding:3px 9px; border-radius:999px; background:color-mix(in srgb, var(--muted) 13%, transparent); }
+  .m-status::before { content:""; width:7px; height:7px; border-radius:50%; background:currentColor; }
+  .m-status.tbd { color:var(--muted); background:color-mix(in srgb, var(--muted) 13%, transparent); }
+  .m-status.planning { color:var(--warn); background:color-mix(in srgb, var(--warn) 15%, transparent); }
+  .m-status.implementing { color:var(--impl); background:color-mix(in srgb, var(--impl) 15%, transparent); }
+  .m-status.review { color:var(--accent); background:color-mix(in srgb, var(--accent) 15%, transparent); }
+  .m-status.completed { color:var(--ok); background:color-mix(in srgb, var(--ok) 16%, transparent); }
+
+  /* Completion Report: present only when a milestone is in human REVIEW or COMPLETED.
+     Mirrors Overview + Changes, but as two subsections (what's been done + focused changes). */
+  .m-completion { display:none; }
+  .milestone[data-state="review"] .m-completion,
+  .milestone[data-state="completed"] .m-completion { display:block; order:-3; }
+  .comp-sub { margin:2px 0 14px; }
+  .comp-sub-title { font-size:12px; font-weight:760; text-transform:uppercase; letter-spacing:.3px;
+    color:var(--muted); margin:10px 0 2px; }
+
+  .mtab-radio { position:absolute; opacity:0; pointer-events:none; }
+  .mtabs { display:flex; gap:3px; flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden;
+    border-bottom:1px solid var(--border); scrollbar-width:thin; scrollbar-color:var(--soft2) transparent; }
+  .mtabs::-webkit-scrollbar { height:6px; }
+  .mtabs::-webkit-scrollbar-thumb { background:var(--soft2); border-radius:999px; }
+  .mtabs label { cursor:pointer; font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--muted);
+    white-space:nowrap; flex:0 0 auto;
+    padding:6px 11px; border:1px solid color-mix(in srgb, var(--border) 72%, var(--muted)); border-bottom:none;
+    border-radius:7px 7px 0 0; margin-bottom:-1px; }
+  .mtabs label:hover { color:var(--fg); }
+  /* importance marker: a small accent dot on core files (no bold), shown or not */
+  .mtabs label[data-weight="core"]::before { content:""; display:inline-block; width:5px; height:5px;
+    border-radius:50%; background:var(--accent); margin-right:7px; vertical-align:middle; }
+  .mpanel { display:none; }
+  /* shown tab: accent border, connects down into the panel */
+  #m1-t1:checked ~ .mtabs label[for="m1-t1"],
+  #m1-t2:checked ~ .mtabs label[for="m1-t2"],
+  #m1-t3:checked ~ .mtabs label[for="m1-t3"],
+  #m2-t1:checked ~ .mtabs label[for="m2-t1"] {
+    color:var(--fg); background:var(--bg); border-color:var(--accent); border-bottom-color:var(--bg); }
+  #m1-t1:checked ~ .mpanels .p-m1-t1,
+  #m1-t2:checked ~ .mpanels .p-m1-t2,
+  #m1-t3:checked ~ .mpanels .p-m1-t3,
+  #m2-t1:checked ~ .mpanels .p-m2-t1 { display:block; }
+
+  .file-head { display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:8px 11px; background:transparent; border:1px solid color-mix(in srgb, var(--border) 72%, var(--muted)); border-top:none; }
+  .file-head .fp { font-size:12px; color:var(--fg); background:transparent; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  .mode { font-size:10px; font-weight:760; text-transform:uppercase; letter-spacing:.3px; padding:2px 7px; border-radius:999px; white-space:nowrap; }
+  .mode.diff { color:var(--accent); border:1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); }
+  .mode.new { color:var(--ok); border:1px solid color-mix(in srgb, var(--ok) 30%, var(--border)); }
+
+  pre.code, pre.diff { margin:0; padding:12px 14px; overflow:auto; background:var(--bg);
+    border:1px solid color-mix(in srgb, var(--border) 72%, var(--muted)); border-top:none; border-radius:0 0 10px 10px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12.5px; line-height:1.5;
+    tab-size:2; -moz-tab-size:2; white-space:pre; }
+  pre.diff .dl { display:block; }
+  pre.diff .dm { display:inline-block; width:1ch; margin-right:8px; color:var(--muted); user-select:none; }
+  pre.diff .dl-add { background:color-mix(in srgb, var(--ok) 12%, transparent); }
+  pre.diff .dl-add .dm { color:var(--ok); }
+  pre.diff .dl-del { background:color-mix(in srgb, var(--danger) 13%, transparent); }
+  pre.diff .dl-del .dm { color:var(--danger); }
+  pre.diff .dl-hunk { color:var(--muted); opacity:.8; }
+
+  /* Prism token mapping to theme vars (read-only highlighting). */
+  .token.comment, .token.prolog, .token.doctype, .token.cdata { color:var(--tk-com); font-style:italic; }
+  .token.keyword, .token.boolean, .token.atrule, .token.important, .token.tag, .token.constant, .token.symbol { color:var(--tk-kw); }
+  .token.string, .token.char, .token.attr-value, .token.regex { color:var(--tk-str); }
+  .token.number { color:var(--tk-num); }
+  .token.function, .token.class-name { color:var(--tk-fn); }
+  .token.builtin, .token.attr-name, .token.property { color:var(--tk-num); }
+  .token.operator, .token.punctuation { color:var(--muted); }
+
+  /* Integration milestones: clickable header card; detail renders BELOW (not nested in the card). */
+  .m-head { cursor:pointer; user-select:none; margin-bottom:0;
+    border:1px solid var(--border); border-radius:11px; padding:13px 15px;
+    transition:border-color .15s ease, background .15s ease, box-shadow .15s ease; }
+  .m-head:hover { border-color:color-mix(in srgb, var(--accent) 35%, var(--border)); }
+  .milestone.selected .m-head { border-color:var(--accent); background:var(--soft);
+    box-shadow:0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent) inset; }
+  .m-head:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .m-detail { display:none; margin-top:13px; }
+  .milestone.selected .m-detail { display:flex; flex-direction:column; }
+  .m-detail > .m-context { order:-2; }
+  .m-detail > .m-decisions { order:-1; }
+  .m-notes { margin-top:18px; border-top:1px dashed var(--border); padding-top:16px; }
+  .changes-title { margin-top:18px; border-top:1px dotted var(--border); padding-top:18px; }
+  /* Optional per-milestone Requested Human Decisions (disclosure rows, not Executive cards). */
+  .m-decisions { margin-top:16px; border-top:1px dotted var(--border); padding-top:16px; }
+
+
+  /* Tentative change: per-file dependency caption + A/B alternative sub-toggle keyed to a decision. */
+  .dep-on { margin:0 0 8px; }
+  .alt-toggle { margin-top:2px; }
+  .alt-radio { position:absolute; opacity:0; pointer-events:none; }
+  .alts { display:flex; gap:6px; margin-bottom:8px; }
+  .alts label { font-size:12px; padding:3px 10px; border-radius:6px; cursor:pointer; white-space:nowrap;
+    color:var(--muted); border:1px solid color-mix(in srgb, var(--border) 72%, var(--muted)); }
+  #m1-t1-altA:checked ~ .alts label[for="m1-t1-altA"],
+  #m1-t1-altB:checked ~ .alts label[for="m1-t1-altB"] { color:var(--fg); border-color:var(--accent); background:var(--soft); }
+  .alt-panels .alt-a, .alt-panels .alt-b { display:none; }
+  #m1-t1-altA:checked ~ .alt-panels .alt-a,
+  #m1-t1-altB:checked ~ .alt-panels .alt-b { display:block; }
+
+  /* Context layers: milestone-level (always-shown overview + on-demand items) + per-file (deeper). */
+  .m-context { margin-top:14px; margin-bottom:4px; }
+  .milestone[data-state="review"] .m-detail > .m-context,
+  .milestone[data-state="completed"] .m-detail > .m-context { border-top:1px dotted var(--border); padding-top:16px; }
+  .ctx-title { margin:0 0 5px; font-size:16px; font-weight:700; color:var(--fg); }
+  .file-context { margin-top:7px; }
+  .ctx-list { display:block; }
+  /* Hairline disclosure rows: read the oneliners linearly; click any to reveal its depth (prose + code). */
+  .ctx-item + .ctx-item { border-top:1px solid color-mix(in srgb, var(--border) 65%, transparent); }
+  .ctx-item-head { display:block; position:relative; width:100%; background:none; border:none;
+    cursor:pointer; color:var(--fg); font:inherit; font-size:14.5px; line-height:1.5;
+    padding:11px 26px 11px 2px; text-align:left; }
+  .ctx-item-head .dot { display:none; }
+  .ctx-item-head::after { content:"\203A"; position:absolute; right:6px; top:50%; transform:translateY(-50%);
+    color:var(--muted); font-size:16px; line-height:1; transition:transform .18s ease, color .15s ease; }
+  .ctx-item-head:hover { color:var(--accent); }
+  .ctx-item-head:hover::after { color:var(--accent); }
+  .ctx-list > .ctx-item:first-child > .ctx-item-head { padding-top:4px; }
+  .ctx-item.open > .ctx-item-head { padding-bottom:5px; }
+  /* Decision title signals: leading priority dot (importance) + bare green check (resolved). */
+  .dec-lead { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--muted);
+    margin-right:7px; vertical-align:middle; }
+  .dec-lead.high { background:var(--high); }
+  .dec-lead.medium { background:var(--medium); }
+  .dec-lead.low { background:var(--low); }
+  .dec-check { display:none; color:var(--ok); font-size:12.5px; font-weight:600; margin-right:7px; vertical-align:middle; }
+  .dec-check::after { content:"\2713"; }
+  .m-decision.resolved .dec-check { display:inline; }
+  .dec-ms { font-family:ui-monospace,Menlo,monospace; font-size:10px; font-weight:700; color:var(--muted);
+    border:1px solid var(--border); border-radius:5px; padding:1px 5px; margin-right:8px; vertical-align:middle; }
+  .ctx-item.open .ctx-item-head::after { transform:translateY(-50%) rotate(90deg); color:var(--accent); }
+  .ctx-item-body { display:none; margin:0 0 7px; padding:2px 0 2px 14px;
+    border-left:2px solid color-mix(in srgb, var(--accent) 70%, transparent); }
+  .ctx-item.open .ctx-item-body { display:block; }
+  .ctx-item-body p { margin:8px 0; max-width:80ch; font-size:14px; color:var(--fg); }
+  .ctx-ref { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:11.5px;
+    color:var(--muted); margin:12px 0 4px !important; }
+  .ctx-item-body pre.code, .ctx-item-body pre.diff { border-top:1px solid var(--border); border-radius:8px; margin:4px 0 6px; }
+
+
+  /* ===================================================================== */
+  /* APPENDED (USER_ARTIFACT_MD md-projection path). Net-new rules only —   */
+  /* the locked rules above are lifted VERBATIM from the mock and unedited. */
+  /* ===================================================================== */
+
+  /* Generic diagram vars for the authored-SVG example in the skill (the mock
+     itself uses .realm-diagram/.rail, already defined above). */
+  .t-diagram { display:block; width:100%; max-width:560px; height:auto; margin:8px 0 4px;
+    border:none; }
+  .t-diagram line { stroke:var(--border); stroke-width:1; }
+  .t-diagram text { fill:var(--muted); font:10px ui-sans-serif, system-ui, sans-serif; }
+  .t-diagram .bar-a { fill:color-mix(in srgb, var(--accent) 70%, transparent); }
+  .t-diagram .bar-b { fill:color-mix(in srgb, var(--muted) 55%, transparent); }
+  .t-diagram rect[rx] { fill:color-mix(in srgb, var(--soft) 80%, transparent); stroke:var(--border); }
+
+  /* File-tab toggling driven by a JS class instead of an id-specific :checked
+     selector, so the md projection generalizes to any number of milestones/files
+     without generating per-id CSS. Visuals mirror the locked .mtabs/.mpanel rules. */
+  .mtabs label.mtab-active {
+    color:var(--fg); background:var(--bg); border-color:var(--accent); border-bottom-color:var(--bg); }
+  .mpanel.mpanel-active { display:block; }
+
+  /* ---- Free-Form Feedback CodeMirror editor (net-new; the mock had NO editor).
+     Lifted from the legacy user-artifact template: EXPLICITLY sized so it never
+     inherits the webview's large base font, and themed onto the --tk-* tokens. ---- */
+  .ff-cm-label { color:var(--muted); font-size:11px; font-weight:760; letter-spacing:.06em; text-transform:uppercase; margin:6px 0 6px; }
+  .head-feedback .CodeMirror {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.8px; line-height: 1.55;
+    height: 200px;
+    color: var(--fg); background: var(--soft);
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  .head-feedback .CodeMirror-focused { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
+  .head-feedback .CodeMirror-lines { padding: 8px 0; }
+  .head-feedback .CodeMirror pre.CodeMirror-line, .head-feedback .CodeMirror pre.CodeMirror-line-like { padding: 0 12px; }
+  .head-feedback .CodeMirror-cursor { border-left: 1.6px solid var(--fg); }
+  .head-feedback .CodeMirror-selected { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+  .head-feedback .CodeMirror-focused .CodeMirror-selected { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+  .head-feedback .CodeMirror-gutters { background: transparent; border: none; }
+  .head-feedback .CodeMirror-placeholder { color: var(--muted); }
+  /* Markdown + fenced-block syntax colors mapped onto the Prism token theme (--tk-*). */
+  .head-feedback .cm-header { color: var(--accent); font-weight: 700; }
+  .head-feedback .cm-quote { color: var(--muted); }
+  .head-feedback .cm-link, .head-feedback .cm-url { color: var(--accent); }
+  .head-feedback .cm-em { font-style: italic; }
+  .head-feedback .cm-strong { font-weight: 700; }
+  .head-feedback .cm-comment { color: var(--tk-com); font-style: italic; }
+  .head-feedback .cm-keyword, .head-feedback .cm-tag { color: var(--tk-kw); }
+  .head-feedback .cm-string, .head-feedback .cm-string-2 { color: var(--tk-str); }
+  .head-feedback .cm-number, .head-feedback .cm-atom { color: var(--tk-num); }
+  .head-feedback .cm-def, .head-feedback .cm-variable-2, .head-feedback .cm-property { color: var(--tk-fn); }
+  .head-feedback .cm-builtin, .head-feedback .cm-attribute { color: var(--tk-num); }
+  .head-feedback .cm-operator, .head-feedback .cm-punctuation, .head-feedback .cm-meta { color: var(--muted); }
+  /* Section titles (EXECUTIVE SUMMARY / INTEGRATION / ...) — make them the STRONGEST
+     heading in the document: black + bold + larger than .ctx-title (16/700), so the
+     top-level structure reads above per-block titles like "Requested Human Decisions". */
+  h2.section {
+    color: var(--fg);
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: .3px;
+    margin: 30px 0 11px;
+  }
+
+
+  /* ---- Interactive turn cards (:::turn) ---------------------------------------------------
+     A turn reuses the .milestone card markup/CSS (header toggle, .m-detail expansion via
+     `.selected`); only the two turn-specific status badges need colors milestones lack. The
+     latest (highest n) turn is rendered `.selected` so attention lands on the newest. Colors
+     mirror the legacy .tressoir.html interactive mapping: awaiting=--accent (soft blue, like the
+     `review` "awaiting human" state); answered=--ok (soft green, like `completed`). */
+  .m-status.awaiting { color:var(--accent); background:color-mix(in srgb, var(--accent) 15%, transparent); }
+  .m-status.answered { color:var(--ok); background:color-mix(in srgb, var(--ok) 16%, transparent); }
+  /* ---- Centered content column (Google-docs style) ---------------------------------------
+     The single .wrap column is centered on wide monitors (text stays left-justified); applied
+     as an EOF same-selector override so the lifted-verbatim mock <style> region stays byte-
+     identical to the locked mock. Legacy .tressoir.html uses its own inline CSS (unaffected). */
+  .wrap { margin: 0 auto; }
+
+  /* ===========================================================================================
+     v2 syntax additions (USER_ARTIFACT_SYNTAX_MIN). Appended at EOF so the lifted-verbatim mock
+     <style> region above stays byte-identical. These support the minimized authoring surface:
+     depth-styled markdown headings, a generic theme-aware `.badge`, and the `::::card` state slot.
+     =========================================================================================== */
+
+  /* Generic inline status pill — `<span class="badge ok|warn|danger|accent|muted">…</span>`.
+     Theme-aware (reuses the :root tokens; light/dark auto). The 2-class `.badge.type` above keeps
+     its own look via higher specificity. This is the v2 "coloring library" — no external dep. */
+  .badge {
+    display:inline-block; font-size:11px; font-weight:700; line-height:1.5; letter-spacing:.2px;
+    padding:2px 8px; border-radius:999px; border:1px solid transparent; vertical-align:baseline;
+  }
+  .badge.ok      { color:var(--ok);     background:color-mix(in srgb, var(--ok) 15%, transparent);     border-color:color-mix(in srgb, var(--ok) 35%, transparent); }
+  .badge.warn    { color:var(--warn);   background:color-mix(in srgb, var(--warn) 15%, transparent);   border-color:color-mix(in srgb, var(--warn) 35%, transparent); }
+  .badge.danger  { color:var(--danger); background:color-mix(in srgb, var(--danger) 15%, transparent); border-color:color-mix(in srgb, var(--danger) 35%, transparent); }
+  .badge.accent  { color:var(--accent); background:color-mix(in srgb, var(--accent) 15%, transparent); border-color:color-mix(in srgb, var(--accent) 35%, transparent); }
+  .badge.muted   { color:var(--muted);  background:color-mix(in srgb, var(--muted) 15%, transparent);  border-color:color-mix(in srgb, var(--muted) 35%, transparent); }
+
+  /* ::::card{state=...} -> right-aligned inline state slot in the card head. (Distinct from the
+     legacy `.m-status` enum pill, which adds a ::before dot + uppercase + state-coloring that
+     would fight an inline badge — `.m-state` is a neutral container for arbitrary inline HTML.) */
+  .m-state { margin-left:auto; display:inline-flex; align-items:center; flex:none; }
+
+  /* Depth-styled markdown headings (### / ####). `##` is already styled as `h2.section` by the
+     mock; these give `###`/`####` real structure so authors never hand-write <div class=comp-sub-title>. */
+  .wrap h3 { margin:18px 0 6px; font-size:16px; font-weight:700; line-height:1.3; color:var(--fg); }
+  .wrap h4 { margin:14px 0 5px; font-size:12px; font-weight:760; text-transform:uppercase; letter-spacing:.3px; color:var(--muted); }
+
+
+  /* ===========================================================================================
+     STYLING REFRESH (headers + reveal-item identity). Appended EOF so the locked-lifted region
+     above stays byte-faithful; same-selector later rules win. Two goals:
+       (1) all headings read as strong + black (var(--fg)) on one descending scale — no muted
+           color, no tiny shouty uppercase;
+       (2) a reveal item gets a clear-but-seamless identity: a leading disclosure triangle
+           (accent-tinted, rotates on open) replacing the faint right chevron on plain items,
+           plus slightly heavier text than prose. Decision rows keep their own dec-* affordances.
+     =========================================================================================== */
+
+  h2.section      { color:var(--fg); font-size:19px; font-weight:800; text-transform:none; letter-spacing:-.1px; margin:30px 0 12px; }
+  .wrap h3        { color:var(--fg); font-size:17px; font-weight:750; text-transform:none; letter-spacing:-.1px; margin:20px 0 7px; }
+  .wrap h4        { color:var(--fg); font-size:15px; font-weight:750; text-transform:none; letter-spacing:0;   margin:16px 0 6px; }
+  .comp-sub-title { color:var(--fg); font-size:14px; font-weight:750; text-transform:none; letter-spacing:0;   margin:14px 0 4px; }
+
+  .ctx-item:not(.m-decision) > .ctx-item-head { font-size:15px; font-weight:500; }
+  .ctx-item:not(.m-decision) > .ctx-item-head::after { content:none; }
+  /* Leading affordance: a clean hairline chevron (no container). Muted at rest; flows INLINE on the
+     first text line so it stays vertically centered regardless of row padding or wrapping; rotates to
+     point down + turns accent when open or hovered. Decision rows keep their own dec-* affordances. */
+  .ctx-item:not(.m-decision) > .ctx-item-head .dot {
+    display:inline-block; vertical-align:middle; margin:0 11px 2px 0; flex:none;
+    color:var(--muted); font-size:17px; line-height:1; font-weight:600;
+    transition:transform .18s ease, color .15s ease;
+  }
+  .ctx-item:not(.m-decision) > .ctx-item-head .dot::before { content:"\203A"; }
+  .ctx-item:not(.m-decision).open > .ctx-item-head .dot { transform:rotate(90deg); color:var(--accent); }
+  .ctx-item:not(.m-decision) > .ctx-item-head:hover .dot { color:var(--accent); }

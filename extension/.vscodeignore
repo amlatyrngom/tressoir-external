@@ -1,0 +1,14 @@
+src/**
+**/*.test.ts
+**/__tests__/**
+**/_remark_build/**
+esbuild.config.js
+tsconfig*.json
+vitest.config.ts
+package-lock.json
+.gitignore
+.vscodeignore
+.vscode/**
+dist/**/*.map
+dist/**/*.vsix
+node_modules/**

@@ -1,0 +1,680 @@
+#!/usr/bin/env bash
+
+# Tressoir External MVP setup for macOS/Linux and Bash 3.2+.
+# Project writes are create-only. Existing files, directories, and symlinks
+# are preserved unless they are exact already-installed adapters.
+
+set -u
+
+PAYLOAD_VERSION_EXPECTED="0.1.0"
+EXTENSION_ID="tressoir.tressoir-artifacts"
+EXTENSION_VERSION="0.1.1"
+
+CLAUDE=0
+CODEX=0
+PI=0
+DRY_RUN=0
+NO_VSCODE=0
+ROOT_INPUT=""
+VSCODE_BIN="code"
+VSIX_INPUT=""
+DEGRADED=0
+VSCODE_RESOLVED=""
+VSIX_PATH=""
+INSTALLED_EXTENSION_VERSION=""
+
+SKILLS=(
+  "tressoir-artifact-md"
+  "tressoir-artifact-html"
+  "tressoir-plan"
+  "tressoir-working-area"
+  "tressoir-memory"
+  "tressoir-structured-review"
+)
+
+usage() {
+  cat <<'EOF'
+Usage:
+  tressoir-external setup [--claude] [--codex] [--pi]
+      [--root PATH] [--vsix PATH] [--vscode-bin PATH]
+      [--no-vscode] [--dry-run]
+
+Creates a project-local IB scaffold and collision-checked harness skill links.
+Installs a supplied Tressoir Artifacts VSIX into regular VS Code by default.
+
+The command never creates or edits CLAUDE.md, AGENTS.md, .claude/rules,
+Pi prompt files, or other always-on harness instructions. The user decides
+how to reference or copy IB/TRESSOIR.md.
+
+Options:
+  --claude           Link portable skills into .claude/skills/
+  --codex            Link portable skills into .agents/skills/
+  --pi               Link portable skills into .agents/skills/
+  --root PATH        Project root; defaults exactly to the current directory
+  --vsix PATH        Tressoir Artifacts VSIX to install
+  --vscode-bin PATH  VS Code CLI name or path; defaults to code
+  --no-vscode        Do not install a VSIX
+  --dry-run          Print actions without mutating the project or VS Code
+  -h, --help         Show this help
+EOF
+}
+
+say() {
+  printf '%s\n' "$*"
+}
+
+fatal() {
+  printf 'fatal: %s\n' "$*" >&2
+  exit 1
+}
+
+degrade() {
+  DEGRADED=1
+  printf 'preserved: %s\n' "$*"
+}
+
+occupied() {
+  [ -e "$1" ] || [ -L "$1" ]
+}
+
+resolve_self_dir() {
+  local source_path script_dir
+  source_path="$0"
+  case "$source_path" in
+    */*) ;;
+    *)
+      source_path=$(command -v "$source_path" 2>/dev/null) ||
+        fatal "cannot resolve the command path"
+      ;;
+  esac
+  script_dir=$(CDPATH= cd -- "$(dirname -- "$source_path")" 2>/dev/null && pwd -P) ||
+    fatal "cannot resolve the command directory"
+  printf '%s\n' "$script_dir"
+}
+
+sha256_file() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$1" | awk '{print $NF}'
+  else
+    fatal "payload verification needs shasum, sha256sum, or openssl"
+  fi
+}
+
+validate_relative_payload_path() {
+  case "$1" in
+    ""|/*|../*|*/../*|*/..|*'
+'*)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+verify_payload() {
+  local version sums line expected relative actual listed_paths actual_paths unexpected_link
+  [ -f "$PAYLOAD/VERSION" ] || fatal "missing payload VERSION"
+  version=$(sed -n '1p' "$PAYLOAD/VERSION")
+  [ "$version" = "$PAYLOAD_VERSION_EXPECTED" ] ||
+    fatal "payload version '$version' does not match expected '$PAYLOAD_VERSION_EXPECTED'"
+
+  sums="$PAYLOAD/SHA256SUMS"
+  [ -f "$sums" ] || fatal "missing payload SHA256SUMS"
+
+  unexpected_link=$(find "$PAYLOAD" -type l -print -quit 2>/dev/null) ||
+    fatal "could not inspect the payload for symlinks"
+  [ -z "$unexpected_link" ] ||
+    fatal "payload must not contain symlinks: ${unexpected_link#"$PAYLOAD/"}"
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    expected=${line%%  *}
+    relative=${line#*  }
+    [ "$relative" != "$line" ] || fatal "invalid SHA256SUMS record"
+    case "$expected" in
+      *[!0-9a-fA-F]*|"") fatal "invalid SHA-256 digest in SHA256SUMS" ;;
+    esac
+    [ ${#expected} -eq 64 ] || fatal "invalid SHA-256 digest length in SHA256SUMS"
+    validate_relative_payload_path "$relative" ||
+      fatal "unsafe payload path in SHA256SUMS: $relative"
+    [ -f "$PAYLOAD/$relative" ] ||
+      fatal "payload file is missing: $relative"
+    actual=$(sha256_file "$PAYLOAD/$relative")
+    [ "$actual" = "$expected" ] ||
+      fatal "payload checksum mismatch: $relative"
+  done < "$sums"
+
+  # Reject unlisted files and duplicate records. This matters because complete
+  # skill directories are copied into projects, not just their SKILL.md files.
+  listed_paths=$(awk '{ print substr($0, 67) }' "$sums" | LC_ALL=C sort)
+  actual_paths=$(
+    cd "$PAYLOAD" &&
+      find . -type f ! -path './SHA256SUMS' -print |
+      sed 's|^\./||' |
+      LC_ALL=C sort
+  ) || fatal "could not enumerate payload files"
+  [ "$listed_paths" = "$actual_paths" ] ||
+    fatal "payload file set does not exactly match SHA256SUMS"
+}
+
+validate_existing_dir_chain() {
+  local rel current rest part
+  rel="$1"
+  current="$ROOT"
+  rest="$rel"
+
+  while [ -n "$rest" ]; do
+    case "$rest" in
+      */*)
+        part=${rest%%/*}
+        rest=${rest#*/}
+        ;;
+      *)
+        part=$rest
+        rest=""
+        ;;
+    esac
+    current="$current/$part"
+    if [ -L "$current" ]; then
+      return 1
+    fi
+    if [ -e "$current" ] && [ ! -d "$current" ]; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+preflight_project() {
+  local rel skill VSIX_CANDIDATE VSIX_DIR
+  [ -d "$ROOT" ] || fatal "project root is not a directory: $ROOT"
+  [ ! -L "$ROOT" ] || fatal "resolved project root must not be a symlink"
+
+  for rel in IB IB/ARTIFACTS IB/TMP IB/CANON IB/skills; do
+    validate_existing_dir_chain "$rel" ||
+      fatal "unsafe or incompatible canonical directory path: $rel"
+  done
+
+  for skill in "${SKILLS[@]}"; do
+    [ -f "$PAYLOAD/skills/$skill/SKILL.md" ] ||
+      fatal "payload skill is missing SKILL.md: $skill"
+  done
+
+  [ -f "$PAYLOAD/instructions/TRESSOIR.md" ] ||
+    fatal "payload is missing instructions/TRESSOIR.md"
+  [ -f "$PAYLOAD/seeds/IB.gitignore" ] ||
+    fatal "payload is missing seeds/IB.gitignore"
+  [ -f "$PAYLOAD/seeds/TASK.md" ] || fatal "payload is missing seeds/TASK.md"
+  [ -f "$PAYLOAD/seeds/STATE.md" ] || fatal "payload is missing seeds/STATE.md"
+  [ -f "$PAYLOAD/seeds/ROOT_CANON.md" ] ||
+    fatal "payload is missing seeds/ROOT_CANON.md"
+
+  if [ "$NO_VSCODE" -eq 0 ]; then
+    [ -n "$VSIX_INPUT" ] ||
+      fatal "VS Code installation requires --vsix PATH (or use --no-vscode)"
+    case "$VSIX_INPUT" in
+      /*) VSIX_CANDIDATE="$VSIX_INPUT" ;;
+      *) VSIX_CANDIDATE="$PWD/$VSIX_INPUT" ;;
+    esac
+    [ -f "$VSIX_CANDIDATE" ] && [ ! -L "$VSIX_CANDIDATE" ] ||
+      fatal "VSIX must be a regular, non-symlink file: $VSIX_INPUT"
+    VSIX_DIR=$(CDPATH= cd -- "$(dirname -- "$VSIX_CANDIDATE")" 2>/dev/null && pwd -P) ||
+      fatal "cannot resolve VSIX directory: $VSIX_INPUT"
+    VSIX_PATH="$VSIX_DIR/$(basename -- "$VSIX_CANDIDATE")"
+    case "$VSCODE_BIN" in
+      */*)
+        [ -x "$VSCODE_BIN" ] ||
+          fatal "VS Code CLI is not executable: $VSCODE_BIN"
+        VSCODE_RESOLVED="$VSCODE_BIN"
+        ;;
+      *)
+        VSCODE_RESOLVED=$(command -v "$VSCODE_BIN" 2>/dev/null) ||
+          fatal "VS Code CLI '$VSCODE_BIN' not found; use --vscode-bin or --no-vscode"
+        ;;
+    esac
+    inspect_installed_extension ||
+      fatal "failed to query extensions through: $VSCODE_RESOLVED"
+  fi
+}
+
+ensure_dir() {
+  local rel current rest part
+  rel="$1"
+  current="$ROOT"
+  rest="$rel"
+
+  while [ -n "$rest" ]; do
+    case "$rest" in
+      */*)
+        part=${rest%%/*}
+        rest=${rest#*/}
+        ;;
+      *)
+        part=$rest
+        rest=""
+        ;;
+    esac
+    current="$current/$part"
+
+    if [ -L "$current" ]; then
+      degrade "$rel (refusing to traverse symlink: ${current#"$ROOT/"})"
+      return 1
+    fi
+    if [ -e "$current" ]; then
+      if [ ! -d "$current" ]; then
+        degrade "$rel (expected a directory at ${current#"$ROOT/"})"
+        return 1
+      fi
+      continue
+    fi
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+      say "would create directory: ${current#"$ROOT/"}"
+    else
+      if mkdir "$current" 2>/dev/null; then
+        say "created directory: ${current#"$ROOT/"}"
+      elif [ -d "$current" ] && [ ! -L "$current" ]; then
+        :
+      else
+        fatal "failed to create directory: ${current#"$ROOT/"}"
+      fi
+    fi
+  done
+  return 0
+}
+
+copy_file_if_absent() {
+  local source relative destination label
+  source="$1"
+  relative="$2"
+  label="$3"
+  destination="$ROOT/$relative"
+
+  if occupied "$destination"; then
+    if [ -f "$destination" ] && [ ! -L "$destination" ]; then
+      say "preserved existing $label: $relative"
+    else
+      degrade "$relative (expected a regular file for $label)"
+    fi
+    return 0
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "would create $label: $relative"
+    return 0
+  fi
+
+  if (set -o noclobber; cat "$source" > "$destination") 2>/dev/null; then
+    say "created $label: $relative"
+  elif occupied "$destination"; then
+    degrade "$relative (appeared while creating $label)"
+  else
+    fatal "failed to create $label: $relative"
+  fi
+}
+
+install_skill_if_absent() {
+  local skill source relative destination
+  skill="$1"
+  source="$PAYLOAD/skills/$skill"
+  relative="IB/skills/$skill"
+  destination="$ROOT/$relative"
+
+  if occupied "$destination"; then
+    if [ -d "$destination" ] && [ ! -L "$destination" ] &&
+       [ -f "$destination/SKILL.md" ] && [ ! -L "$destination/SKILL.md" ]; then
+      if diff -qr "$source" "$destination" >/dev/null 2>&1; then
+        say "already installed canonical skill tree: $relative"
+        return 0
+      fi
+      degrade "$relative (existing canonical skill tree differs; preserving it)"
+      return 0
+    fi
+    degrade "$relative (expected a real directory containing a real SKILL.md)"
+    return 1
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "would create canonical skill tree: $relative"
+    return 0
+  fi
+
+  mkdir "$destination" || fatal "failed to create skill directory: $relative"
+  if cp -R "$source/." "$destination/"; then
+    say "created canonical skill tree: $relative"
+    return 0
+  fi
+  fatal "failed to copy canonical skill tree: $relative"
+}
+
+skill_is_usable() {
+  local skill path
+  skill="$1"
+  path="$ROOT/IB/skills/$skill"
+  if [ "$DRY_RUN" -eq 1 ] && ! occupied "$path"; then
+    return 0
+  fi
+  [ -d "$path" ] && [ ! -L "$path" ] &&
+    [ -f "$path/SKILL.md" ] && [ ! -L "$path/SKILL.md" ]
+}
+
+link_checked() {
+  local relative target destination current
+  relative="$1"
+  target="$2"
+  destination="$ROOT/$relative"
+
+  if [ -L "$destination" ]; then
+    current=$(readlink "$destination" 2>/dev/null || true)
+    if [ "$current" = "$target" ]; then
+      say "already linked: $relative -> $target"
+      return 0
+    fi
+    degrade "$relative (existing symlink target is '$current', expected '$target')"
+    return 1
+  fi
+
+  if [ -e "$destination" ]; then
+    degrade "$relative (occupied; expected symlink to '$target')"
+    return 1
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "would link: $relative -> $target"
+    return 0
+  fi
+
+  if ln -s "$target" "$destination" 2>/dev/null; then
+    say "linked: $relative -> $target"
+    return 0
+  fi
+
+  if occupied "$destination"; then
+    degrade "$relative (appeared while creating adapter)"
+    return 1
+  fi
+  fatal "failed to create adapter: $relative"
+}
+
+setup_claude_skills() {
+  local skill
+  say ""
+  say "Claude Code skills:"
+  if ! ensure_dir ".claude/skills"; then
+    say "manual action: expose IB/skills/* under .claude/skills/ without replacing existing entries"
+    return
+  fi
+  for skill in "${SKILLS[@]}"; do
+    if skill_is_usable "$skill"; then
+      link_checked ".claude/skills/$skill" "../../IB/skills/$skill" || true
+    else
+      degrade ".claude/skills/$skill (canonical skill is not safely usable)"
+    fi
+  done
+}
+
+setup_agents_skills() {
+  local skill
+  say ""
+  say "Codex/Pi shared skills:"
+  if ! ensure_dir ".agents/skills"; then
+    say "manual action: expose IB/skills/* under .agents/skills/ without replacing existing entries"
+    return
+  fi
+  for skill in "${SKILLS[@]}"; do
+    if skill_is_usable "$skill"; then
+      link_checked ".agents/skills/$skill" "../../IB/skills/$skill" || true
+    else
+      degrade ".agents/skills/$skill (canonical skill is not safely usable)"
+    fi
+  done
+}
+
+inspect_installed_extension() {
+  local output line prefix
+  INSTALLED_EXTENSION_VERSION=""
+  output=$("$VSCODE_RESOLVED" --list-extensions --show-versions 2>/dev/null) || return 1
+  prefix="${EXTENSION_ID}@"
+  while IFS= read -r line; do
+    case "$line" in
+      "$prefix"*)
+        INSTALLED_EXTENSION_VERSION=${line#"$prefix"}
+        ;;
+    esac
+  done <<EOF
+$output
+EOF
+  return 0
+}
+
+is_semver_triplet() {
+  local value major minor patch extra
+  value="$1"
+  case "$value" in
+    ""|.*|*.|*..*|*[!0-9.]*)
+      return 1
+      ;;
+  esac
+  IFS=. read -r major minor patch extra <<EOF
+$value
+EOF
+  [ -n "$major" ] && [ -n "$minor" ] && [ -n "$patch" ] && [ -z "$extra" ]
+}
+
+semver_compare() {
+  # Prints -1, 0, or 1 for $1 compared with $2. Inputs are validated triplets.
+  local left right l1 l2 l3 lextra r1 r2 r3 rextra
+  left="$1"
+  right="$2"
+  IFS=. read -r l1 l2 l3 lextra <<EOF
+$left
+EOF
+  IFS=. read -r r1 r2 r3 rextra <<EOF
+$right
+EOF
+
+  if [ "$l1" -lt "$r1" ]; then printf '%s\n' -1; return; fi
+  if [ "$l1" -gt "$r1" ]; then printf '%s\n' 1; return; fi
+  if [ "$l2" -lt "$r2" ]; then printf '%s\n' -1; return; fi
+  if [ "$l2" -gt "$r2" ]; then printf '%s\n' 1; return; fi
+  if [ "$l3" -lt "$r3" ]; then printf '%s\n' -1; return; fi
+  if [ "$l3" -gt "$r3" ]; then printf '%s\n' 1; return; fi
+  printf '%s\n' 0
+}
+
+install_vscode_extension() {
+  local comparison
+
+  say ""
+  say "VS Code extension:"
+  if [ "$NO_VSCODE" -eq 1 ]; then
+    say "skipped by request: $EXTENSION_ID@$EXTENSION_VERSION"
+    return
+  fi
+
+  if [ "$INSTALLED_EXTENSION_VERSION" = "$EXTENSION_VERSION" ]; then
+    say "already installed: $EXTENSION_ID@$EXTENSION_VERSION"
+    return
+  fi
+
+  if [ -n "$INSTALLED_EXTENSION_VERSION" ]; then
+    if ! is_semver_triplet "$INSTALLED_EXTENSION_VERSION"; then
+      degrade "$EXTENSION_ID@$INSTALLED_EXTENSION_VERSION (unrecognized installed version; not replacing)"
+      return
+    fi
+    comparison=$(semver_compare "$INSTALLED_EXTENSION_VERSION" "$EXTENSION_VERSION")
+    if [ "$comparison" -gt 0 ]; then
+      degrade "$EXTENSION_ID@$INSTALLED_EXTENSION_VERSION (newer than supplied $EXTENSION_VERSION; not downgrading)"
+      return
+    fi
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "would install: $EXTENSION_ID@$EXTENSION_VERSION via $VSCODE_RESOLVED"
+    return
+  fi
+
+  "$VSCODE_RESOLVED" --install-extension "$VSIX_PATH" --force ||
+    fatal "VS Code extension installation failed after project setup"
+
+  inspect_installed_extension ||
+    fatal "could not verify VS Code extension after installation"
+  [ "$INSTALLED_EXTENSION_VERSION" = "$EXTENSION_VERSION" ] ||
+    fatal "VS Code reported '$INSTALLED_EXTENSION_VERSION' after installing $EXTENSION_VERSION"
+  say "installed: $EXTENSION_ID@$EXTENSION_VERSION"
+}
+
+print_instruction_handoff() {
+  say ""
+  say "Always-on instructions remain user-owned:"
+  say "  canonical file: IB/TRESSOIR.md"
+  if [ "$CLAUDE" -eq 1 ]; then
+    say "  Claude Code option: add @IB/TRESSOIR.md to your chosen CLAUDE.md"
+  fi
+  if [ "$CODEX" -eq 1 ]; then
+    say "  Codex option: add 'Before work, read and follow IB/TRESSOIR.md.' to your chosen AGENTS.md"
+  fi
+  if [ "$PI" -eq 1 ]; then
+    say "  Pi option: reference it from your chosen context file, copy it there, or launch with:"
+    say "             pi --append-system-prompt ./IB/TRESSOIR.md"
+    say "  Pi project skills require project trust and Pi 0.80.6-compatible .agents/skills discovery."
+  fi
+  say "  Setup did not create or edit any harness instruction or prompt file."
+}
+
+# ---------------------------------------------------------------------------
+
+if [ "$#" -eq 0 ]; then
+  usage >&2
+  exit 1
+fi
+
+COMMAND="$1"
+shift
+case "$COMMAND" in
+  setup) ;;
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    fatal "unsupported command: $COMMAND"
+    ;;
+esac
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --claude)
+      CLAUDE=1
+      shift
+      ;;
+    --codex)
+      CODEX=1
+      shift
+      ;;
+    --pi)
+      PI=1
+      shift
+      ;;
+    --root)
+      [ "$#" -ge 2 ] || fatal "--root requires a path"
+      ROOT_INPUT="$2"
+      shift 2
+      ;;
+    --vsix)
+      [ "$#" -ge 2 ] || fatal "--vsix requires a path"
+      VSIX_INPUT="$2"
+      shift 2
+      ;;
+    --vscode-bin)
+      [ "$#" -ge 2 ] || fatal "--vscode-bin requires a path or command name"
+      VSCODE_BIN="$2"
+      shift 2
+      ;;
+    --no-vscode)
+      NO_VSCODE=1
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      fatal "unknown option: $1"
+      ;;
+  esac
+done
+
+[ "$NO_VSCODE" -eq 0 ] || [ -z "$VSIX_INPUT" ] ||
+  fatal "--vsix and --no-vscode cannot be used together"
+[ "$NO_VSCODE" -eq 0 ] || [ "$CLAUDE" -eq 1 ] ||
+  [ "$CODEX" -eq 1 ] || [ "$PI" -eq 1 ] ||
+  fatal "setup requires VS Code installation or at least one harness"
+
+if [ -z "$ROOT_INPUT" ]; then
+  ROOT_INPUT=$PWD
+fi
+[ -d "$ROOT_INPUT" ] || fatal "project root does not exist: $ROOT_INPUT"
+ROOT=$(CDPATH= cd -- "$ROOT_INPUT" 2>/dev/null && pwd -P) ||
+  fatal "cannot resolve project root: $ROOT_INPUT"
+
+SELF_DIR=$(resolve_self_dir)
+PAYLOAD=$(CDPATH= cd -- "$SELF_DIR/../share/tressoir-external" 2>/dev/null && pwd -P) ||
+  fatal "cannot locate adjacent share/tressoir-external payload"
+
+say "Tressoir External setup"
+say "  project root: $ROOT"
+say "  payload: $PAYLOAD"
+if [ "$DRY_RUN" -eq 1 ]; then
+  say "  mode: dry-run"
+fi
+
+verify_payload
+preflight_project
+
+say ""
+say "Canonical IB:"
+ensure_dir "IB/ARTIFACTS" || fatal "canonical IB/ARTIFACTS path is unsafe"
+ensure_dir "IB/TMP" || fatal "canonical IB/TMP path is unsafe"
+ensure_dir "IB/CANON" || fatal "canonical IB/CANON path is unsafe"
+ensure_dir "IB/skills" || fatal "canonical IB/skills path is unsafe"
+
+copy_file_if_absent "$PAYLOAD/seeds/TASK.md" "IB/TASK.md" "user task seed"
+copy_file_if_absent "$PAYLOAD/seeds/STATE.md" "IB/STATE.md" "project state seed"
+copy_file_if_absent "$PAYLOAD/seeds/ROOT_CANON.md" "IB/CANON/ROOT_CANON.md" "root canon seed"
+copy_file_if_absent "$PAYLOAD/instructions/TRESSOIR.md" "IB/TRESSOIR.md" "canonical instructions"
+copy_file_if_absent "$PAYLOAD/seeds/IB.gitignore" "IB/.gitignore" "IB ignore rules"
+
+for skill in "${SKILLS[@]}"; do
+  install_skill_if_absent "$skill" || true
+done
+
+if [ "$CLAUDE" -eq 1 ]; then
+  setup_claude_skills
+fi
+if [ "$CODEX" -eq 1 ] || [ "$PI" -eq 1 ]; then
+  setup_agents_skills
+fi
+
+install_vscode_extension
+print_instruction_handoff
+
+say ""
+if [ "$DEGRADED" -eq 1 ]; then
+  say "Setup completed safely with preserved collisions or manual adapter work."
+  exit 2
+fi
+if [ "$DRY_RUN" -eq 1 ]; then
+  say "Dry-run complete; no project or VS Code changes were made."
+else
+  say "Setup complete."
+fi
+exit 0

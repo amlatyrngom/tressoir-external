@@ -1,0 +1,77 @@
+{
+  "name": "tressoir-artifacts",
+  "displayName": "Tressoir Artifacts",
+  "description": "Rendered custom editors for trusted .tressoir.md and .tressoir.html artifacts.",
+  "version": "0.1.1",
+  "publisher": "tressoir",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amlatyrngom/tressoir-external.git"
+  },
+  "homepage": "https://github.com/amlatyrngom/tressoir-external#readme",
+  "bugs": {
+    "url": "https://github.com/amlatyrngom/tressoir-external/issues"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "tressoir",
+    "markdown",
+    "artifact",
+    "custom editor"
+  ],
+  "activationEvents": [
+    "onCustomEditor:tressoir.notebookHtml",
+    "onCustomEditor:tressoir.notebookMd"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "tressoir.notebookHtml",
+        "displayName": "Tressoir Artifact (HTML)",
+        "selector": [
+          {
+            "filenamePattern": "*.tressoir.html"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "tressoir.notebookMd",
+        "displayName": "Tressoir Artifact (Markdown)",
+        "selector": [
+          {
+            "filenamePattern": "*.tressoir.md"
+          }
+        ],
+        "priority": "default"
+      }
+    ]
+  },
+  "scripts": {
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && node esbuild.config.js",
+    "watch": "node esbuild.config.js --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "package:vsix": "npm run build && vsce package --no-dependencies --allow-missing-repository -o dist/tressoir-artifacts-0.1.1.vsix"
+  },
+  "dependencies": {
+    "morphdom": "2.7.8"
+  },
+  "devDependencies": {
+    "@types/node": "18.19.130",
+    "@types/vscode": "1.85.0",
+    "@vscode/vsce": "3.9.2",
+    "esbuild": "0.20.2",
+    "jsdom": "24.1.0",
+    "typescript": "5.3.3",
+    "vitest": "1.6.1"
+  }
+}
