@@ -54,7 +54,7 @@ open_prompt_tty() {
     return
   fi
   if ! exec 3<> /dev/tty; then
-    fatal "interactive choices need a controlling terminal; run this command in a terminal or export TRESSOIR_EXTERNAL_VSCODE, TRESSOIR_EXTERNAL_CLAUDE, TRESSOIR_EXTERNAL_CODEX, and TRESSOIR_EXTERNAL_PI as yes/no"
+    fatal "interactive choices need a controlling terminal; run this command in a terminal or export TRESSOIR_EXTERNAL_VSCODE, TRESSOIR_EXTERNAL_CLAUDE, TRESSOIR_EXTERNAL_CODEX, TRESSOIR_EXTERNAL_PI, and TRESSOIR_EXTERNAL_GUIDANCE as yes/no"
   fi
   PROMPT_FD_OPEN=1
 }
@@ -117,6 +117,15 @@ INSTALL_CODEX="$CHOICE_RESULT"
 choose "Register skills for the TypeScript Pi coding agent?" 0 \
   "${TRESSOIR_EXTERNAL_PI:-}"
 INSTALL_PI="$CHOICE_RESULT"
+
+INSTALL_GUIDANCE=0
+if [ "$INSTALL_CLAUDE" -eq 1 ] ||
+   [ "$INSTALL_CODEX" -eq 1 ] ||
+   [ "$INSTALL_PI" -eq 1 ]; then
+  choose "Register root guidance in system prompts?" 0 \
+    "${TRESSOIR_EXTERNAL_GUIDANCE:-}"
+  INSTALL_GUIDANCE="$CHOICE_RESULT"
+fi
 
 if [ "$INSTALL_VSCODE" -eq 0 ] &&
    [ "$INSTALL_CLAUDE" -eq 0 ] &&
@@ -203,6 +212,9 @@ if [ "$INSTALL_CODEX" -eq 1 ]; then
 fi
 if [ "$INSTALL_PI" -eq 1 ]; then
   SETUP_ARGS+=(--pi)
+fi
+if [ "$INSTALL_GUIDANCE" -eq 1 ]; then
+  SETUP_ARGS+=(--register-guidance)
 fi
 if [ "$INSTALL_VSCODE" -eq 1 ]; then
   SETUP_ARGS+=(--vsix "$VSIX_PATH" --vscode-bin "$VSCODE_BIN")

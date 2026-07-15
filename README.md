@@ -52,6 +52,18 @@ The installer asks separately whether to:
 - register skills for OpenAI Codex CLI; and
 - register skills for the TypeScript Pi coding agent.
 
+When at least one agent harness is selected, it also asks:
+
+```text
+Register root guidance in system prompts? [y/N]
+```
+
+If accepted, Claude uses root `CLAUDE.md` with `@IB/TRESSOIR.md`; Codex and
+Pi use root `AGENTS.md` with a one-line instruction to read and follow
+`IB/TRESSOIR.md`. Missing files are created. Existing regular files receive a
+`# Tressoir Guidance` section only when they do not already mention
+`TRESSOIR.md`.
+
 The current directory is the target project. The installer downloads the public
 source archive into a temporary directory, builds the VSIX there when selected,
 runs the verified setup command, and removes the downloaded source and build
@@ -67,13 +79,14 @@ TRESSOIR_EXTERNAL_VSCODE_BIN=code-insiders \
   bash -c 'curl -fsSL https://raw.githubusercontent.com/amlatyrngom/tressoir-external/main/install.sh | bash'
 ```
 
-For unattended use, set all four choices to `yes` or `no`:
+For unattended use, set all five choices to `yes` or `no`:
 
 ```bash
 TRESSOIR_EXTERNAL_VSCODE=yes \
 TRESSOIR_EXTERNAL_CLAUDE=yes \
 TRESSOIR_EXTERNAL_CODEX=yes \
 TRESSOIR_EXTERNAL_PI=yes \
+TRESSOIR_EXTERNAL_GUIDANCE=yes \
   bash -c 'curl -fsSL https://raw.githubusercontent.com/amlatyrngom/tressoir-external/main/install.sh | bash'
 ```
 
@@ -86,7 +99,7 @@ the extension:
 
 ```bash
 /path/to/tressoir-external/bin/tressoir-external setup \
-  --root "$PWD" --claude --codex --pi --no-vscode
+  --root "$PWD" --claude --codex --pi --register-guidance --no-vscode
 ```
 
 To build and install the extension from the checkout:
@@ -98,7 +111,7 @@ npm run package:vsix
 
 ../bin/tressoir-external setup \
   --root /path/to/project \
-  --claude --codex --pi \
+  --claude --codex --pi --register-guidance \
   --vsix "$PWD/dist/tressoir-artifacts-0.1.1.vsix"
 ```
 
@@ -106,6 +119,8 @@ Useful setup options:
 
 ```text
 --root PATH        Target another project; default is exactly the current directory
+--register-guidance
+                   Create/append root CLAUDE.md and/or AGENTS.md guidance
 --vsix PATH        Install the supplied Tressoir Artifacts VSIX
 --vscode-bin PATH  Use code-insiders or an absolute VS Code CLI path
 --no-vscode        Skip extension installation
@@ -139,37 +154,48 @@ IB/
 
 Claude receives per-skill relative links under `.claude/skills/`. Codex and Pi share per-skill links under `.agents/skills/`.
 
-## Always-on instructions are user-owned
+## Optional root guidance registration
 
-Setup deliberately does **not** create, append to, replace, or delete:
+Canonical guidance is installed as `IB/TRESSOIR.md`. The interactive installer
+can register it in root harness instruction files when you answer yes to:
 
-- `CLAUDE.md` or `.claude/CLAUDE.md`;
-- `AGENTS.md` or `AGENTS.override.md`;
-- `.claude/rules/*`;
-- `.pi/APPEND_SYSTEM.md` or `.pi/SYSTEM.md`;
-- global harness instructions or settings.
+```text
+Register root guidance in system prompts? [y/N]
+```
 
-Canonical guidance is installed as `IB/TRESSOIR.md`. Choose how your harness uses it.
+The equivalent direct setup option is `--register-guidance`.
 
-For Claude Code, one option is to add this import to your chosen `CLAUDE.md`:
+For selected Claude setup, the managed section in root `CLAUDE.md` is:
 
 ```md
+# Tressoir Guidance
+
 @IB/TRESSOIR.md
 ```
 
-For Codex, current official behavior does not expand Claude-style `@path` imports. Add a behavioral instruction to your chosen `AGENTS.md`, for example:
+For selected Codex or Pi setup, the managed section in root `AGENTS.md` is:
 
 ```md
+# Tressoir Guidance
+
 Before beginning substantial work, read and follow `IB/TRESSOIR.md`.
 ```
 
-For Pi, reference or copy the guidance from your chosen context file, or launch with:
+Registration is intentionally narrow:
 
-```bash
-pi --append-system-prompt ./IB/TRESSOIR.md
-```
+- If the target file already contains `TRESSOIR.md`, setup leaves it unchanged.
+- If the root target is absent, setup creates it.
+- If it is an existing regular file without a mention, setup appends one section.
+- Reruns do not duplicate the section.
+- Symlinks, directories, and other incompatible targets are preserved and
+  reported as safe degradation.
+- Setup never edits `.claude/CLAUDE.md`, `AGENTS.override.md`,
+  `.claude/rules/*`, `.pi/APPEND_SYSTEM.md`, `.pi/SYSTEM.md`, global
+  instructions, or settings.
 
-These are examples, not setup mutations. Existing instruction precedence remains entirely under user control.
+Declining the prompt preserves the earlier behavior: setup prints manual
+Claude, Codex, and Pi inclusion options and makes no instruction-file change.
+Existing instruction precedence remains under user control.
 
 ## Working-area behavior
 
@@ -288,10 +314,14 @@ The release gate:
 - requires both artifact editors and all runtime assets;
 - rejects source, tests, source maps, `node_modules`, and nested VSIX files;
 - validates all six Agent Skills;
-- checks the current plan artifact with the bundled checker;
+- checks both distributed Markdown templates with the bundled checker;
 - regenerates payload checksums; and
-- runs filesystem setup fixtures for combinations, idempotence, dry-run, collisions, path spaces, extension failure, and symlink containment;
-- runs an offline piped-bootstrap fixture that builds in temporary storage, installs all selected integrations, prints the manual instruction handoff, and cleans up; and
+- runs filesystem setup fixtures for combinations, idempotence, dry-run,
+  collisions, root-guidance creation/append/mention detection, path spaces,
+  extension failure, and symlink containment;
+- runs an offline piped-bootstrap fixture that builds in temporary storage,
+  installs all selected integrations, registers opt-in root guidance, and
+  cleans up; and
 - rejects generated VSIX files in the public source payload.
 
 `extension/dist/`, `extension/node_modules/`, and npm debug logs are ignored.

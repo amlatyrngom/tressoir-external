@@ -457,9 +457,10 @@ test "$(readlink .agents/skills/tressoir-plan)" = \
 ```
 
 Codex and Pi intentionally share `.agents/skills/`; Claude uses
-`.claude/skills/`. Setup must not create or edit harness instruction files.
-`git status --short` is also useful here: it should show only newly created
-Tressoir scaffold/adapter paths, never modifications to committed user files.
+`.claude/skills/`. Without `--register-guidance`, setup must not create or edit
+harness instruction files. `git status --short` is also useful here: it should
+show only newly created Tressoir scaffold/adapter paths, never modifications to
+committed user files.
 
 ## 3. Verify idempotence
 

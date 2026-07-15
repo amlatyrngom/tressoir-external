@@ -138,6 +138,7 @@ case_piped_source_install() (
     TRESSOIR_EXTERNAL_CLAUDE=yes \
     TRESSOIR_EXTERNAL_CODEX=yes \
     TRESSOIR_EXTERNAL_PI=yes \
+    TRESSOIR_EXTERNAL_GUIDANCE=yes \
     bash > "$output"
 
   assert_file "$project/IB/TRESSOIR.md"
@@ -148,6 +149,14 @@ case_piped_source_install() (
     assert_link "$project/.claude/skills/$skill" "../../IB/skills/$skill"
     assert_link "$project/.agents/skills/$skill" "../../IB/skills/$skill"
   done
+  assert_file "$project/CLAUDE.md"
+  assert_file "$project/AGENTS.md"
+  grep -Fx '# Tressoir Guidance' "$project/CLAUDE.md" >/dev/null
+  grep -Fx '@IB/TRESSOIR.md' "$project/CLAUDE.md" >/dev/null
+  grep -Fx '# Tressoir Guidance' "$project/AGENTS.md" >/dev/null
+  grep -Fx \
+    'Before beginning substantial work, read and follow `IB/TRESSOIR.md`.' \
+    "$project/AGENTS.md" >/dev/null
 
   grep -Fx 'tressoir.tressoir-artifacts@0.1.1' "$state" >/dev/null
   built_vsix=$(sed -n '1p' "$install_log")
@@ -166,11 +175,11 @@ case_piped_source_install() (
   assert_absent "$project/node_modules"
   assert_absent "$project/tressoir-external-main"
 
-  grep 'Claude Code option: add @IB/TRESSOIR.md' "$output" >/dev/null
-  grep "Codex option: add 'Before work, read and follow IB/TRESSOIR.md.'" \
+  grep 'Claude Code target: CLAUDE.md' "$output" >/dev/null
+  grep 'Codex/Pi target: AGENTS.md' "$output" >/dev/null
+  grep 'Existing TRESSOIR.md mentions were left unchanged.' \
     "$output" >/dev/null
-  grep 'pi --append-system-prompt ./IB/TRESSOIR.md' "$output" >/dev/null
-  grep 'Setup did not create or edit any harness instruction or prompt file.' \
+  grep 'Setup never edits nested, override, rules, global, or Pi-specific prompt files.' \
     "$output" >/dev/null
   grep 'Temporary source and build files will now be removed.' "$output" >/dev/null
 )
@@ -187,6 +196,7 @@ case_nothing_selected() (
     TRESSOIR_EXTERNAL_CLAUDE=no \
     TRESSOIR_EXTERNAL_CODEX=no \
     TRESSOIR_EXTERNAL_PI=no \
+    TRESSOIR_EXTERNAL_GUIDANCE=no \
     bash > "$output"
 
   [ -z "$(find "$project" -mindepth 1 -print -quit)" ]

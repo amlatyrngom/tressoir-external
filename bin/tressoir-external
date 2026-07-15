@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 # Tressoir External MVP setup for macOS/Linux and Bash 3.2+.
-# Project writes are create-only. Existing files, directories, and symlinks
-# are preserved unless they are exact already-installed adapters.
+# Canonical project writes are create-only. Optional root-guidance registration
+# may append one contained section to selected harness instruction files.
 
 set -u
 
@@ -13,6 +13,7 @@ EXTENSION_VERSION="0.1.1"
 CLAUDE=0
 CODEX=0
 PI=0
+REGISTER_GUIDANCE=0
 DRY_RUN=0
 NO_VSCODE=0
 ROOT_INPUT=""
@@ -36,20 +37,23 @@ usage() {
   cat <<'EOF'
 Usage:
   tressoir-external setup [--claude] [--codex] [--pi]
+      [--register-guidance]
       [--root PATH] [--vsix PATH] [--vscode-bin PATH]
       [--no-vscode] [--dry-run]
 
 Creates a project-local IB scaffold and collision-checked harness skill links.
 Installs a supplied Tressoir Artifacts VSIX into regular VS Code by default.
 
-The command never creates or edits CLAUDE.md, AGENTS.md, .claude/rules,
-Pi prompt files, or other always-on harness instructions. The user decides
-how to reference or copy IB/TRESSOIR.md.
+Root guidance registration is opt-in. With --register-guidance, setup creates
+or appends a small, idempotent Tressoir section in root CLAUDE.md and/or
+AGENTS.md for the selected harnesses. Other instruction files remain untouched.
 
 Options:
   --claude           Link portable skills into .claude/skills/
   --codex            Link portable skills into .agents/skills/
   --pi               Link portable skills into .agents/skills/
+  --register-guidance
+                     Register IB/TRESSOIR.md in selected root instruction files
   --root PATH        Project root; defaults exactly to the current directory
   --vsix PATH        Tressoir Artifacts VSIX to install
   --vscode-bin PATH  VS Code CLI name or path; defaults to code
@@ -433,6 +437,77 @@ setup_agents_skills() {
   done
 }
 
+guidance_is_registered() {
+  grep -F 'TRESSOIR.md' "$1" >/dev/null 2>&1
+}
+
+register_guidance_file() {
+  local relative body label destination
+  relative="$1"
+  body="$2"
+  label="$3"
+  destination="$ROOT/$relative"
+
+  if [ -L "$destination" ]; then
+    degrade "$relative (refusing to edit a symlink for $label)"
+    return
+  fi
+
+  if [ -e "$destination" ]; then
+    if [ ! -f "$destination" ]; then
+      degrade "$relative (expected a regular file for $label)"
+      return
+    fi
+    if guidance_is_registered "$destination"; then
+      say "already registered: $relative mentions TRESSOIR.md"
+      return
+    fi
+    if [ "$DRY_RUN" -eq 1 ]; then
+      say "would append root guidance: $relative"
+      return
+    fi
+    printf '\n\n# Tressoir Guidance\n\n%s\n' "$body" >> "$destination" ||
+      fatal "failed to append root guidance: $relative"
+    say "appended root guidance: $relative"
+    return
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "would create root guidance file: $relative"
+    return
+  fi
+
+  if (
+    set -o noclobber
+    printf '# Tressoir Guidance\n\n%s\n' "$body" > "$destination"
+  ) 2>/dev/null; then
+    say "created root guidance file: $relative"
+  elif occupied "$destination"; then
+    degrade "$relative (appeared while creating $label)"
+  else
+    fatal "failed to create root guidance file: $relative"
+  fi
+}
+
+register_root_guidance() {
+  [ "$REGISTER_GUIDANCE" -eq 1 ] || return
+
+  say ""
+  say "Root guidance:"
+  if [ "$CLAUDE" -eq 1 ]; then
+    register_guidance_file \
+      "CLAUDE.md" \
+      "@IB/TRESSOIR.md" \
+      "Claude root guidance"
+  fi
+  if [ "$CODEX" -eq 1 ] || [ "$PI" -eq 1 ]; then
+    register_guidance_file \
+      "AGENTS.md" \
+      'Before beginning substantial work, read and follow `IB/TRESSOIR.md`.' \
+      "Codex/Pi root guidance"
+  fi
+}
+
 inspect_installed_extension() {
   local output line prefix
   INSTALLED_EXTENSION_VERSION=""
@@ -529,20 +604,33 @@ install_vscode_extension() {
 
 print_instruction_handoff() {
   say ""
-  say "Always-on instructions remain user-owned:"
+  say "Root guidance:"
   say "  canonical file: IB/TRESSOIR.md"
-  if [ "$CLAUDE" -eq 1 ]; then
-    say "  Claude Code option: add @IB/TRESSOIR.md to your chosen CLAUDE.md"
-  fi
-  if [ "$CODEX" -eq 1 ]; then
-    say "  Codex option: add 'Before work, read and follow IB/TRESSOIR.md.' to your chosen AGENTS.md"
+  if [ "$REGISTER_GUIDANCE" -eq 1 ]; then
+    say "  opt-in root registration was requested"
+    if [ "$CLAUDE" -eq 1 ]; then
+      say "  Claude Code target: CLAUDE.md"
+    fi
+    if [ "$CODEX" -eq 1 ] || [ "$PI" -eq 1 ]; then
+      say "  Codex/Pi target: AGENTS.md"
+    fi
+    say "  Existing TRESSOIR.md mentions were left unchanged."
+  else
+    if [ "$CLAUDE" -eq 1 ]; then
+      say "  Claude Code option: add @IB/TRESSOIR.md to your chosen CLAUDE.md"
+    fi
+    if [ "$CODEX" -eq 1 ]; then
+      say "  Codex option: add 'Before work, read and follow IB/TRESSOIR.md.' to your chosen AGENTS.md"
+    fi
+    if [ "$PI" -eq 1 ]; then
+      say "  Pi option: reference it from your chosen context file, copy it there, or launch with:"
+      say "             pi --append-system-prompt ./IB/TRESSOIR.md"
+    fi
   fi
   if [ "$PI" -eq 1 ]; then
-    say "  Pi option: reference it from your chosen context file, copy it there, or launch with:"
-    say "             pi --append-system-prompt ./IB/TRESSOIR.md"
     say "  Pi project skills require project trust and Pi 0.80.6-compatible .agents/skills discovery."
   fi
-  say "  Setup did not create or edit any harness instruction or prompt file."
+  say "  Setup never edits nested, override, rules, global, or Pi-specific prompt files."
 }
 
 # ---------------------------------------------------------------------------
@@ -580,6 +668,10 @@ while [ "$#" -gt 0 ]; do
       PI=1
       shift
       ;;
+    --register-guidance)
+      REGISTER_GUIDANCE=1
+      shift
+      ;;
     --root)
       [ "$#" -ge 2 ] || fatal "--root requires a path"
       ROOT_INPUT="$2"
@@ -615,6 +707,9 @@ done
 
 [ "$NO_VSCODE" -eq 0 ] || [ -z "$VSIX_INPUT" ] ||
   fatal "--vsix and --no-vscode cannot be used together"
+[ "$REGISTER_GUIDANCE" -eq 0 ] || [ "$CLAUDE" -eq 1 ] ||
+  [ "$CODEX" -eq 1 ] || [ "$PI" -eq 1 ] ||
+  fatal "--register-guidance requires at least one selected harness"
 [ "$NO_VSCODE" -eq 0 ] || [ "$CLAUDE" -eq 1 ] ||
   [ "$CODEX" -eq 1 ] || [ "$PI" -eq 1 ] ||
   fatal "setup requires VS Code installation or at least one harness"
@@ -664,6 +759,7 @@ if [ "$CODEX" -eq 1 ] || [ "$PI" -eq 1 ]; then
   setup_agents_skills
 fi
 
+register_root_guidance
 install_vscode_extension
 print_instruction_handoff
 

@@ -114,12 +114,15 @@ Prefer an atomic complete Markdown file replacement over leaving a half-edited c
 ## Example
 
 ```md
-## Invariant — Existing harness instructions are user-owned
+## Invariant — Root guidance registration is explicit and narrow
 
-Setup may create skill adapters at unoccupied paths, but it never creates,
-rewrites, appends to, or deletes CLAUDE.md, AGENTS.md, or Pi prompt files.
+Setup may create skill adapters at unoccupied paths. Only when the user opts
+in, it may create or append an idempotent `# Tressoir Guidance` section in root
+`CLAUDE.md` and/or `AGENTS.md`, and only if that file does not already mention
+`TRESSOIR.md`. It preserves unsafe targets and never edits nested, override,
+rules, global, or Pi-specific prompt files.
 
-Evidence: accepted Tressoir External MVP decision.
+Evidence: accepted Tressoir External MVP root-guidance decision.
 ```
 
 Avoid vague entries such as “be careful with setup.” Canon is curated guidance, not an event log.

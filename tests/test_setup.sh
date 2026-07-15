@@ -161,7 +161,7 @@ case_fresh_all_with_extension() (
   grep -Fx 'TMP/' "$project/IB/.gitignore" >/dev/null
   grep -Fx 'vendor/' "$project/IB/.gitignore" >/dev/null
 
-  # Always-on harness instruction integration is deliberately user-owned.
+  # Root guidance registration remains opt-in.
   assert_absent "$project/CLAUDE.md"
   assert_absent "$project/AGENTS.md"
   assert_absent "$project/.claude/rules"
@@ -216,6 +216,124 @@ case_dry_run() (
   grep 'Dry-run complete' "$TMP_ROOT/dry-run.log" >/dev/null
 )
 
+case_opt_in_root_guidance() (
+  set -e
+
+  fresh="$TMP_ROOT/guidance fresh"
+  mkdir -p "$fresh"
+  "$SETUP" setup --root "$fresh" --claude --codex --pi \
+    --register-guidance --no-vscode > "$TMP_ROOT/guidance-fresh.log"
+
+  assert_file "$fresh/CLAUDE.md"
+  assert_file "$fresh/AGENTS.md"
+  grep -Fx '# Tressoir Guidance' "$fresh/CLAUDE.md" >/dev/null
+  grep -Fx '@IB/TRESSOIR.md' "$fresh/CLAUDE.md" >/dev/null
+  grep -Fx '# Tressoir Guidance' "$fresh/AGENTS.md" >/dev/null
+  grep -Fx \
+    'Before beginning substantial work, read and follow `IB/TRESSOIR.md`.' \
+    "$fresh/AGENTS.md" >/dev/null
+  assert_absent "$fresh/.claude/CLAUDE.md"
+  assert_absent "$fresh/AGENTS.override.md"
+  assert_absent "$fresh/.pi"
+
+  digest_tree "$fresh" > "$TMP_ROOT/guidance-fresh-before.txt"
+  "$SETUP" setup --root "$fresh" --claude --codex --pi \
+    --register-guidance --no-vscode > "$TMP_ROOT/guidance-fresh-rerun.log"
+  digest_tree "$fresh" > "$TMP_ROOT/guidance-fresh-after.txt"
+  diff -u \
+    "$TMP_ROOT/guidance-fresh-before.txt" \
+    "$TMP_ROOT/guidance-fresh-after.txt"
+  grep 'already registered: CLAUDE.md mentions TRESSOIR.md' \
+    "$TMP_ROOT/guidance-fresh-rerun.log" >/dev/null
+  grep 'already registered: AGENTS.md mentions TRESSOIR.md' \
+    "$TMP_ROOT/guidance-fresh-rerun.log" >/dev/null
+  [ "$(grep -c '^# Tressoir Guidance$' "$fresh/CLAUDE.md")" -eq 1 ]
+  [ "$(grep -c '^# Tressoir Guidance$' "$fresh/AGENTS.md")" -eq 1 ]
+
+  existing="$TMP_ROOT/guidance-existing"
+  mkdir -p "$existing"
+  printf '# Existing Claude\n\nKeep this text.\n' > "$existing/CLAUDE.md"
+  printf '# Existing Agents\n\nAlready read OTHER/TRESSOIR.md.\n' \
+    > "$existing/AGENTS.md"
+  cp "$existing/CLAUDE.md" "$TMP_ROOT/guidance-existing-claude-before"
+  cp "$existing/AGENTS.md" "$TMP_ROOT/guidance-existing-agents-before"
+
+  "$SETUP" setup --root "$existing" --claude --codex \
+    --register-guidance --no-vscode > "$TMP_ROOT/guidance-existing.log"
+
+  sed -n '1,3p' "$existing/CLAUDE.md" |
+    diff -u "$TMP_ROOT/guidance-existing-claude-before" -
+  grep -Fx '# Tressoir Guidance' "$existing/CLAUDE.md" >/dev/null
+  grep -Fx '@IB/TRESSOIR.md' "$existing/CLAUDE.md" >/dev/null
+  cmp "$TMP_ROOT/guidance-existing-agents-before" "$existing/AGENTS.md"
+  grep 'already registered: AGENTS.md mentions TRESSOIR.md' \
+    "$TMP_ROOT/guidance-existing.log" >/dev/null
+
+  claude_only="$TMP_ROOT/guidance-claude-only"
+  codex_only="$TMP_ROOT/guidance-codex-only"
+  pi_only="$TMP_ROOT/guidance-pi-only"
+  mkdir -p "$claude_only" "$codex_only" "$pi_only"
+  "$SETUP" setup --root "$claude_only" --claude \
+    --register-guidance --no-vscode >/dev/null
+  assert_file "$claude_only/CLAUDE.md"
+  assert_absent "$claude_only/AGENTS.md"
+  "$SETUP" setup --root "$codex_only" --codex \
+    --register-guidance --no-vscode >/dev/null
+  assert_file "$codex_only/AGENTS.md"
+  assert_absent "$codex_only/CLAUDE.md"
+  "$SETUP" setup --root "$pi_only" --pi \
+    --register-guidance --no-vscode >/dev/null
+  assert_file "$pi_only/AGENTS.md"
+  assert_absent "$pi_only/CLAUDE.md"
+
+  dry="$TMP_ROOT/guidance-dry"
+  mkdir -p "$dry"
+  "$SETUP" setup --root "$dry" --claude --codex \
+    --register-guidance --no-vscode --dry-run \
+    > "$TMP_ROOT/guidance-dry.log"
+  assert_absent "$dry/IB"
+  assert_absent "$dry/CLAUDE.md"
+  assert_absent "$dry/AGENTS.md"
+  grep 'would create root guidance file: CLAUDE.md' \
+    "$TMP_ROOT/guidance-dry.log" >/dev/null
+  grep 'would create root guidance file: AGENTS.md' \
+    "$TMP_ROOT/guidance-dry.log" >/dev/null
+
+  unsafe="$TMP_ROOT/guidance-unsafe"
+  outside="$TMP_ROOT/guidance-outside"
+  mkdir -p "$unsafe" "$outside" "$unsafe/AGENTS.md"
+  printf 'OUTSIDE\n' > "$outside/CLAUDE.md"
+  ln -s "$outside/CLAUDE.md" "$unsafe/CLAUDE.md"
+  set +e
+  "$SETUP" setup --root "$unsafe" --claude --codex \
+    --register-guidance --no-vscode > "$TMP_ROOT/guidance-unsafe.log" 2>&1
+  status=$?
+  set -e
+  [ "$status" -eq 2 ]
+  grep -Fx 'OUTSIDE' "$outside/CLAUDE.md" >/dev/null
+  [ -z "$(find "$unsafe/AGENTS.md" -mindepth 1 -print -quit)" ]
+  grep 'refusing to edit a symlink' "$TMP_ROOT/guidance-unsafe.log" >/dev/null
+  grep 'expected a regular file' "$TMP_ROOT/guidance-unsafe.log" >/dev/null
+
+  extension_only="$TMP_ROOT/guidance-extension-only"
+  mock="$TMP_ROOT/guidance-extension-only-code"
+  state="$TMP_ROOT/guidance-extension-only.state"
+  vsix="$TMP_ROOT/guidance-extension-only.vsix"
+  mkdir -p "$extension_only"
+  make_mock_code "$mock"
+  make_mock_vsix "$vsix"
+  set +e
+  MOCK_CODE_STATE="$state" "$SETUP" setup --root "$extension_only" \
+    --register-guidance --vsix "$vsix" --vscode-bin "$mock" \
+    > "$TMP_ROOT/guidance-extension-only.log" 2>&1
+  status=$?
+  set -e
+  [ "$status" -eq 1 ]
+  assert_absent "$extension_only/IB"
+  grep '\-\-register-guidance requires at least one selected harness' \
+    "$TMP_ROOT/guidance-extension-only.log" >/dev/null
+)
+
 case_preserve_user_files_and_collisions() (
   set -e
   project="$TMP_ROOT/collisions"
@@ -247,6 +365,8 @@ case_preserve_user_files_and_collisions() (
   ln -s /tmp/foreign-target "$project/.agents/skills/tressoir-plan"
   printf 'USER AGENTS EXTRA SKILL\n' > "$project/.agents/skills/user-skill"
 
+  # Guidance registration is omitted in this case, so all prompt files remain
+  # byte-identical even though root CLAUDE.md and AGENTS.md lack TRESSOIR.md.
   for file in \
     "$project/IB/TASK.md" "$project/IB/STATE.md" "$project/IB/TRESSOIR.md" \
     "$project/IB/CANON/ROOT_CANON.md" \
@@ -291,7 +411,7 @@ case_preserve_user_files_and_collisions() (
 
   assert_file "$project/.claude/rules/existing.md"
   grep 'preserved:' "$TMP_ROOT/collision.log" >/dev/null
-  grep 'Setup did not create or edit any harness instruction' \
+  grep 'Setup never edits nested, override, rules, global, or Pi-specific prompt files' \
     "$TMP_ROOT/collision.log" >/dev/null
 )
 
@@ -377,6 +497,8 @@ run_case "fresh all-harness setup, extension install, and idempotent rerun" \
   case_fresh_all_with_extension
 run_case "each harness installs only its skill adapter tree" case_each_harness
 run_case "dry-run performs no mutation" case_dry_run
+run_case "opt-in root guidance is contained, idempotent, and harness-specific" \
+  case_opt_in_root_guidance
 run_case "user files and occupied adapter paths are preserved" \
   case_preserve_user_files_and_collisions
 run_case "extension failure reports committed project setup honestly" \
