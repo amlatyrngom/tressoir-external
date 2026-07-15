@@ -273,6 +273,9 @@ case_opt_in_root_guidance() (
   codex_only="$TMP_ROOT/guidance-codex-only"
   pi_only="$TMP_ROOT/guidance-pi-only"
   mkdir -p "$claude_only" "$codex_only" "$pi_only"
+  printf '# Existing Pi context\n\nKeep this exact text.\n' \
+    > "$pi_only/CLAUDE.md"
+  cp "$pi_only/CLAUDE.md" "$TMP_ROOT/guidance-pi-claude-before"
   "$SETUP" setup --root "$claude_only" --claude \
     --register-guidance --no-vscode >/dev/null
   assert_file "$claude_only/CLAUDE.md"
@@ -283,8 +286,14 @@ case_opt_in_root_guidance() (
   assert_absent "$codex_only/CLAUDE.md"
   "$SETUP" setup --root "$pi_only" --pi \
     --register-guidance --no-vscode >/dev/null
-  assert_file "$pi_only/AGENTS.md"
-  assert_absent "$pi_only/CLAUDE.md"
+  assert_file "$pi_only/.pi/APPEND_SYSTEM.md"
+  grep -Fx '# Tressoir Guidance' \
+    "$pi_only/.pi/APPEND_SYSTEM.md" >/dev/null
+  grep -Fx \
+    'Before beginning substantial work, read and follow `IB/TRESSOIR.md`.' \
+    "$pi_only/.pi/APPEND_SYSTEM.md" >/dev/null
+  assert_absent "$pi_only/AGENTS.md"
+  cmp "$TMP_ROOT/guidance-pi-claude-before" "$pi_only/CLAUDE.md"
 
   dry="$TMP_ROOT/guidance-dry"
   mkdir -p "$dry"
@@ -411,7 +420,7 @@ case_preserve_user_files_and_collisions() (
 
   assert_file "$project/.claude/rules/existing.md"
   grep 'preserved:' "$TMP_ROOT/collision.log" >/dev/null
-  grep 'Setup never edits nested, override, rules, global, or Pi-specific prompt files' \
+  grep 'Setup never edits nested Claude, override, rules, global, or Pi SYSTEM.md files' \
     "$TMP_ROOT/collision.log" >/dev/null
 )
 

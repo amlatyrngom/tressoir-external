@@ -58,11 +58,11 @@ When at least one agent harness is selected, it also asks:
 Register root guidance in system prompts? [y/N]
 ```
 
-If accepted, Claude uses root `CLAUDE.md` with `@IB/TRESSOIR.md`; Codex and
-Pi use root `AGENTS.md` with a one-line instruction to read and follow
-`IB/TRESSOIR.md`. Missing files are created. Existing regular files receive a
-`# Tressoir Guidance` section only when they do not already mention
-`TRESSOIR.md`.
+If accepted, Claude uses root `CLAUDE.md` with `@IB/TRESSOIR.md`; Codex uses
+root `AGENTS.md`; Pi-only setup uses `.pi/APPEND_SYSTEM.md`. Codex and Pi
+selected together share `AGENTS.md`, avoiding duplicate guidance. Missing files
+are created. Existing regular files receive a `# Tressoir Guidance` section
+only when they do not already mention `TRESSOIR.md`.
 
 The current directory is the target project. The installer downloads the public
 source archive into a temporary directory, builds the VSIX there when selected,
@@ -120,7 +120,7 @@ Useful setup options:
 ```text
 --root PATH        Target another project; default is exactly the current directory
 --register-guidance
-                   Create/append root CLAUDE.md and/or AGENTS.md guidance
+                   Create/append selected harness prompt guidance
 --vsix PATH        Install the supplied Tressoir Artifacts VSIX
 --vscode-bin PATH  Use code-insiders or an absolute VS Code CLI path
 --no-vscode        Skip extension installation
@@ -173,13 +173,17 @@ For selected Claude setup, the managed section in root `CLAUDE.md` is:
 @IB/TRESSOIR.md
 ```
 
-For selected Codex or Pi setup, the managed section in root `AGENTS.md` is:
+For selected Codex setup, the managed section in root `AGENTS.md` is:
 
 ```md
 # Tressoir Guidance
 
 Before beginning substantial work, read and follow `IB/TRESSOIR.md`.
 ```
+
+For Pi-only setup, that same prose section is written to
+`.pi/APPEND_SYSTEM.md`. When Codex and Pi are both selected, root `AGENTS.md`
+serves both and `.pi/APPEND_SYSTEM.md` is not created.
 
 Registration is intentionally narrow:
 
@@ -190,8 +194,7 @@ Registration is intentionally narrow:
 - Symlinks, directories, and other incompatible targets are preserved and
   reported as safe degradation.
 - Setup never edits `.claude/CLAUDE.md`, `AGENTS.override.md`,
-  `.claude/rules/*`, `.pi/APPEND_SYSTEM.md`, `.pi/SYSTEM.md`, global
-  instructions, or settings.
+  `.claude/rules/*`, `.pi/SYSTEM.md`, global instructions, or settings.
 
 Declining the prompt preserves the earlier behavior: setup prints manual
 Claude, Codex, and Pi inclusion options and makes no instruction-file change.

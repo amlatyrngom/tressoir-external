@@ -45,15 +45,15 @@ Creates a project-local IB scaffold and collision-checked harness skill links.
 Installs a supplied Tressoir Artifacts VSIX into regular VS Code by default.
 
 Root guidance registration is opt-in. With --register-guidance, setup creates
-or appends a small, idempotent Tressoir section in root CLAUDE.md and/or
-AGENTS.md for the selected harnesses. Other instruction files remain untouched.
+or appends a small, idempotent Tressoir section in root CLAUDE.md, root
+AGENTS.md, and/or .pi/APPEND_SYSTEM.md for selected harnesses.
 
 Options:
   --claude           Link portable skills into .claude/skills/
   --codex            Link portable skills into .agents/skills/
   --pi               Link portable skills into .agents/skills/
   --register-guidance
-                     Register IB/TRESSOIR.md in selected root instruction files
+                     Register IB/TRESSOIR.md in selected harness prompt files
   --root PATH        Project root; defaults exactly to the current directory
   --vsix PATH        Tressoir Artifacts VSIX to install
   --vscode-bin PATH  VS Code CLI name or path; defaults to code
@@ -500,11 +500,21 @@ register_root_guidance() {
       "@IB/TRESSOIR.md" \
       "Claude root guidance"
   fi
-  if [ "$CODEX" -eq 1 ] || [ "$PI" -eq 1 ]; then
+  if [ "$CODEX" -eq 1 ]; then
     register_guidance_file \
       "AGENTS.md" \
       'Before beginning substantial work, read and follow `IB/TRESSOIR.md`.' \
-      "Codex/Pi root guidance"
+      "Codex root guidance"
+  fi
+  if [ "$PI" -eq 1 ] && [ "$CODEX" -eq 0 ]; then
+    if ensure_dir ".pi"; then
+      register_guidance_file \
+        ".pi/APPEND_SYSTEM.md" \
+        'Before beginning substantial work, read and follow `IB/TRESSOIR.md`.' \
+        "Pi project guidance"
+    else
+      say "manual action: reference IB/TRESSOIR.md from your Pi project prompt"
+    fi
   fi
 }
 
@@ -611,8 +621,13 @@ print_instruction_handoff() {
     if [ "$CLAUDE" -eq 1 ]; then
       say "  Claude Code target: CLAUDE.md"
     fi
-    if [ "$CODEX" -eq 1 ] || [ "$PI" -eq 1 ]; then
-      say "  Codex/Pi target: AGENTS.md"
+    if [ "$CODEX" -eq 1 ]; then
+      say "  Codex target: AGENTS.md"
+    fi
+    if [ "$PI" -eq 1 ] && [ "$CODEX" -eq 1 ]; then
+      say "  Pi target: AGENTS.md (shared with Codex)"
+    elif [ "$PI" -eq 1 ]; then
+      say "  Pi target: .pi/APPEND_SYSTEM.md"
     fi
     say "  Existing TRESSOIR.md mentions were left unchanged."
   else
@@ -630,7 +645,7 @@ print_instruction_handoff() {
   if [ "$PI" -eq 1 ]; then
     say "  Pi project skills require project trust and Pi 0.80.6-compatible .agents/skills discovery."
   fi
-  say "  Setup never edits nested, override, rules, global, or Pi-specific prompt files."
+  say "  Setup never edits nested Claude, override, rules, global, or Pi SYSTEM.md files."
 }
 
 # ---------------------------------------------------------------------------

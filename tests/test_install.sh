@@ -157,6 +157,7 @@ case_piped_source_install() (
   grep -Fx \
     'Before beginning substantial work, read and follow `IB/TRESSOIR.md`.' \
     "$project/AGENTS.md" >/dev/null
+  assert_absent "$project/.pi"
 
   grep -Fx 'tressoir.tressoir-artifacts@0.1.1' "$state" >/dev/null
   built_vsix=$(sed -n '1p' "$install_log")
@@ -176,10 +177,11 @@ case_piped_source_install() (
   assert_absent "$project/tressoir-external-main"
 
   grep 'Claude Code target: CLAUDE.md' "$output" >/dev/null
-  grep 'Codex/Pi target: AGENTS.md' "$output" >/dev/null
+  grep 'Codex target: AGENTS.md' "$output" >/dev/null
+  grep 'Pi target: AGENTS.md (shared with Codex)' "$output" >/dev/null
   grep 'Existing TRESSOIR.md mentions were left unchanged.' \
     "$output" >/dev/null
-  grep 'Setup never edits nested, override, rules, global, or Pi-specific prompt files.' \
+  grep 'Setup never edits nested Claude, override, rules, global, or Pi SYSTEM.md files.' \
     "$output" >/dev/null
   grep 'Temporary source and build files will now be removed.' "$output" >/dev/null
 )

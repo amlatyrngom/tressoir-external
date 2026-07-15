@@ -1,6 +1,6 @@
 # Tressoir Working Agreement
 
-`IB/` means **Interpretable Blueprint**: the project-local, human-inspectable workspace shared by agents, harnesses, and sessions. This file is the canonical always-on guide. Setup may register it in root `CLAUDE.md` and/or `AGENTS.md` only when the user explicitly accepts the root-guidance prompt; otherwise the user decides whether and how to reference it.
+`IB/` means **Interpretable Blueprint**: the project-local, human-inspectable workspace shared by agents, harnesses, and sessions. This file is the canonical always-on guide. Setup may register it in root `CLAUDE.md`, root `AGENTS.md`, and/or Pi’s `.pi/APPEND_SYSTEM.md` only when the user explicitly accepts the root-guidance prompt; otherwise the user decides whether and how to reference it.
 
 ## Start and maintain work
 
@@ -8,7 +8,7 @@
 2. `IB/TASK.md` is not an automatic startup file. Read or edit it only when the user explicitly asks, and only at the relevant point in the work. The same rule applies to a plan-local `TASK.md`.
 3. Keep `IB/STATE.md` current at decision and milestone boundaries. When it grows to roughly 16,000 characters, proactively condense it toward 8,000: preserve current decisions, constraints, validation, and next steps; replace completed chronology with grouped summaries.
 4. Put durable, reusable outputs in `IB/ARTIFACTS/` and disposable logs, screenshots, dumps, downloads, and experiments in `IB/TMP/`.
-5. Preserve existing project files, harness instructions, skills, and user-authored IB content. The only setup exception is an explicitly requested, idempotent `# Tressoir Guidance` section in root `CLAUDE.md` and/or `AGENTS.md`; report unsafe targets rather than replacing them.
+5. Preserve existing project files, harness instructions, skills, and user-authored IB content. The only setup exception is an explicitly requested, idempotent `# Tressoir Guidance` section in the selected harness target: root `CLAUDE.md`, root `AGENTS.md`, or Pi-only `.pi/APPEND_SYSTEM.md`. Report unsafe targets rather than replacing them.
 
 Treat each upper-case directory under `IB/ARTIFACTS/` as a reusable workspace for one broad task. Keep its initial plan, later `<STEP>_PLAN.md` + `<STEP>_PLAN.tressoir.md` pairs, explainers, research, and artifacts such as `NEXT_INTERACTIVE.tressoir.md` together. Create another folder only for a genuinely separate workstream or when the user requests one.
 
