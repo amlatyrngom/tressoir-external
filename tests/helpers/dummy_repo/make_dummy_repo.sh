@@ -428,7 +428,7 @@ To test the VS Code phase too, build the extension in the distribution checkout
 and replace `--no-vscode` with:
 
 ```bash
---vsix "$TRESSOIR_EXTERNAL/extension/dist/tressoir-artifacts-0.1.1.vsix"
+--vsix "$TRESSOIR_EXTERNAL/extension/dist/tressoir-artifacts-0.1.2.vsix"
 ```
 
 ## 2. Verify non-clobbering and multi-harness links

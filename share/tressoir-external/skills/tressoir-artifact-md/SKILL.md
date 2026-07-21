@@ -116,6 +116,10 @@ The always-present free-form feedback box writes under:
 
 For `PLAN.tressoir.md`, the key is `PLAN-free_form_feedback`.
 
+The plain `free_form_feedback` key and keys ending in `-free_form_feedback` are reserved for
+runtime compatibility and the automatic feedback box. Never use them as an explicit
+`:::input{key=...}` key.
+
 Read `interactions.json` directly on the next turn, integrate answers into the agent-facing source, and re-project. Do not rely on a push notification.
 
 ## Template folder and checker

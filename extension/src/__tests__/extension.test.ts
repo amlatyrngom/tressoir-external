@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import * as vscode from 'vscode'
 
 function context() {
   return {
@@ -10,6 +11,7 @@ function context() {
 describe('artifact-only extension activation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(vscode.extensions.getExtension).mockReturnValue(undefined)
   })
 
   it('registers both artifact custom editors and no commands', async () => {
@@ -32,5 +34,18 @@ describe('artifact-only extension activation', () => {
     }
     expect(vscode.commands.registerCommand).not.toHaveBeenCalled()
     expect(vscode.window.registerWebviewViewProvider).not.toHaveBeenCalled()
+  })
+
+  it('reports the legacy bridge conflict instead of registering duplicate view types', async () => {
+    const vscode = await import('vscode')
+    const { activate } = await import('../extension')
+    vi.mocked(vscode.extensions.getExtension).mockReturnValue({ id: 'tressoir.bridge' } as any)
+
+    activate(context())
+
+    expect(vscode.window.registerCustomEditorProvider).not.toHaveBeenCalled()
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Disable or uninstall tressoir.bridge'),
+    )
   })
 })

@@ -93,7 +93,7 @@ case "${1:-}" in
       exit 1
     fi
     [ -f "${2:-}" ] || exit 3
-    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.1' > "$MOCK_CODE_STATE"
+    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.2' > "$MOCK_CODE_STATE"
     printf '%s\n' 'mock installation succeeded'
     ;;
   *)
@@ -166,7 +166,7 @@ case_fresh_all_with_extension() (
   assert_absent "$project/AGENTS.md"
   assert_absent "$project/.claude/rules"
   assert_absent "$project/.pi"
-  grep -Fx 'tressoir.tressoir-artifacts@0.1.1' "$state" >/dev/null
+  grep -Fx 'tressoir.tressoir-artifacts@0.1.2' "$state" >/dev/null
 
   digest_tree "$project" > "$TMP_ROOT/fresh-before.txt"
   MOCK_CODE_STATE="$state" "$SETUP" setup \
@@ -176,8 +176,57 @@ case_fresh_all_with_extension() (
   digest_tree "$project" > "$TMP_ROOT/fresh-after.txt"
   diff -u "$TMP_ROOT/fresh-before.txt" "$TMP_ROOT/fresh-after.txt"
   grep 'already linked' "$TMP_ROOT/fresh-rerun.log" >/dev/null
-  grep 'already installed: tressoir.tressoir-artifacts@0.1.1' \
+  grep 'already installed: tressoir.tressoir-artifacts@0.1.2' \
     "$TMP_ROOT/fresh-rerun.log" >/dev/null
+)
+
+case_legacy_bridge_conflict() (
+  set -e
+  project="$TMP_ROOT/legacy-bridge-conflict"
+  mkdir -p "$project"
+  mock="$TMP_ROOT/mock-code-legacy-bridge"
+  state="$TMP_ROOT/mock-code-legacy-bridge.state"
+  vsix="$TMP_ROOT/mock-legacy-bridge.vsix"
+  make_mock_code "$mock"
+  make_mock_vsix "$vsix"
+  printf '%s\n' 'tressoir.bridge@0.1.0' > "$state"
+
+  set +e
+  MOCK_CODE_STATE="$state" "$SETUP" setup \
+    --root "$project" --vsix "$vsix" --vscode-bin "$mock" \
+    > "$TMP_ROOT/legacy-bridge.log" 2>&1
+  status=$?
+  set -e
+
+  [ "$status" -eq 2 ]
+  [ "$(cat "$state")" = 'tressoir.bridge@0.1.0' ]
+  grep 'is installed and may conflict with tressoir.tressoir-artifacts when enabled' \
+    "$TMP_ROOT/legacy-bridge.log" >/dev/null
+  grep 'cannot determine enabled state' "$TMP_ROOT/legacy-bridge.log" >/dev/null
+  grep 'uninstall tressoir.bridge' "$TMP_ROOT/legacy-bridge.log" >/dev/null
+  grep 'skipped: tressoir.tressoir-artifacts@' "$TMP_ROOT/legacy-bridge.log" >/dev/null
+)
+
+case_extension_upgrade() (
+  set -e
+  project="$TMP_ROOT/extension-upgrade"
+  mkdir -p "$project"
+  mock="$TMP_ROOT/mock-code-upgrade"
+  state="$TMP_ROOT/mock-code-upgrade.state"
+  vsix="$TMP_ROOT/mock-upgrade.vsix"
+  make_mock_code "$mock"
+  make_mock_vsix "$vsix"
+  printf '%s\n' 'tressoir.tressoir-artifacts@0.1.1' > "$state"
+
+  MOCK_CODE_STATE="$state" "$SETUP" setup \
+    --root "$project" --vsix "$vsix" --vscode-bin "$mock" \
+    > "$TMP_ROOT/extension-upgrade.log"
+
+  [ "$(cat "$state")" = 'tressoir.tressoir-artifacts@0.1.2' ]
+  grep 'installed: tressoir.tressoir-artifacts@0.1.2' \
+    "$TMP_ROOT/extension-upgrade.log" >/dev/null
+  grep 'reload the VS Code window or close and reopen affected artifact tabs' \
+    "$TMP_ROOT/extension-upgrade.log" >/dev/null
 )
 
 case_each_harness() (
@@ -504,6 +553,10 @@ case_reject_unverified_payload_content() (
 
 run_case "fresh all-harness setup, extension install, and idempotent rerun" \
   case_fresh_all_with_extension
+run_case "legacy bridge conflict skips the unusable standalone extension" \
+  case_legacy_bridge_conflict
+run_case "older standalone extension is upgraded to the corrected version" \
+  case_extension_upgrade
 run_case "each harness installs only its skill adapter tree" case_each_harness
 run_case "dry-run performs no mutation" case_dry_run
 run_case "opt-in root guidance is contained, idempotent, and harness-specific" \

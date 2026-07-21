@@ -112,7 +112,7 @@ npm run package:vsix
 ../bin/tressoir-external setup \
   --root /path/to/project \
   --claude --codex --pi --register-guidance \
-  --vsix "$PWD/dist/tressoir-artifacts-0.1.1.vsix"
+  --vsix "$PWD/dist/tressoir-artifacts-0.1.2.vsix"
 ```
 
 Useful setup options:
@@ -130,6 +130,15 @@ Useful setup options:
 Setup verifies the source payload checksums before writing. It creates only
 absent canonical files and collision-checked relative skill links. A second
 identical run is a no-op.
+
+The older `tressoir.bridge` extension owns the same artifact editor view types
+and cannot be enabled alongside this standalone extension. The VS Code CLI
+reports installation inventory, not enabled state, so if setup finds the
+legacy bridge installed it conservatively skips the standalone extension and
+asks you to uninstall the bridge, reload VS Code, and retry. After
+upgrading Tressoir Artifacts, setup also asks you to reload the VS Code window
+(or close and reopen affected artifact tabs) so already-open retained webviews
+do not keep old runtime JavaScript.
 
 ## Created project layout
 
@@ -311,7 +320,7 @@ for non-clobbering, all-harness setup, and an idempotent rerun.
 
 The release gate:
 
-- runs 62 focused extension tests;
+- runs 71 focused extension tests;
 - builds from a clean `dist/`;
 - inspects the packaged manifest and archive;
 - requires both artifact editors and all runtime assets;
@@ -321,7 +330,8 @@ The release gate:
 - regenerates payload checksums; and
 - runs filesystem setup fixtures for combinations, idempotence, dry-run,
   collisions, root-guidance creation/append/mention detection, path spaces,
-  extension failure, and symlink containment;
+  extension failure, extension upgrade, legacy-bridge conflict, and symlink
+  containment;
 - runs an offline piped-bootstrap fixture that builds in temporary storage,
   installs all selected integrations, registers opt-in root guidance, and
   cleans up; and
@@ -333,7 +343,7 @@ Release checks build transient output locally; no npm package is published.
 For a final desktop smoke, install the built VSIX into isolated VS Code directories and confirm:
 
 ```text
-tressoir.tressoir-artifacts@0.1.1
+tressoir.tressoir-artifacts@0.1.2
 ```
 
 ## Licensing

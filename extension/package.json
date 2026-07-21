@@ -2,7 +2,7 @@
   "name": "tressoir-artifacts",
   "displayName": "Tressoir Artifacts",
   "description": "Rendered custom editors for trusted .tressoir.md and .tressoir.html artifacts.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "tressoir",
   "license": "MIT",
   "repository": {
@@ -60,12 +60,13 @@
     "watch": "node esbuild.config.js --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "package:vsix": "npm run build && vsce package --no-dependencies --allow-missing-repository -o dist/tressoir-artifacts-0.1.1.vsix"
+    "package:vsix": "npm run build && vsce package --no-dependencies --allow-missing-repository -o dist/tressoir-artifacts-0.1.2.vsix"
   },
   "dependencies": {
     "morphdom": "2.7.8"
   },
   "devDependencies": {
+    "@types/jsdom": "21.1.7",
     "@types/node": "18.19.130",
     "@types/vscode": "1.85.0",
     "@vscode/vsce": "3.9.2",

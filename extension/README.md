@@ -13,6 +13,13 @@ First-party extension code is licensed under the MIT License. Bundled third-part
 
 The installed VSIX needs only a compatible regular desktop VS Code (`^1.85.0`). Node and npm are build/release dependencies, not separate end-user runtime requirements. Core Markdown projection assets ship inside the VSIX.
 
+The standalone extension cannot be enabled at the same time as the older
+`tressoir.bridge` extension because both own the same artifact editor view
+types. Disable or uninstall the legacy bridge and reload VS Code before using
+this extension. After any Tressoir Artifacts upgrade, reload the window (or
+close and reopen affected artifact tabs) so retained webviews do not keep old
+runtime JavaScript.
+
 ## Security: artifacts are executable, trusted content
 
 Opening either artifact format is **not** equivalent to opening an inert Markdown preview.
@@ -45,7 +52,7 @@ npm test
 npm run package:vsix
 ```
 
-The versioned package is written to `dist/tressoir-artifacts-0.1.1.vsix`. Always inspect the newly produced archive and packaged manifest before release; do not reuse an older bridge VSIX.
+The versioned package is written to `dist/tressoir-artifacts-0.1.2.vsix`. Always inspect the newly produced archive and packaged manifest before release; do not reuse an older bridge VSIX.
 
 ## Source provenance
 

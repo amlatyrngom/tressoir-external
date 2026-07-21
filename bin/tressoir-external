@@ -8,7 +8,8 @@ set -u
 
 PAYLOAD_VERSION_EXPECTED="0.1.0"
 EXTENSION_ID="tressoir.tressoir-artifacts"
-EXTENSION_VERSION="0.1.1"
+EXTENSION_VERSION="0.1.2"
+LEGACY_EXTENSION_ID="tressoir.bridge"
 
 CLAUDE=0
 CODEX=0
@@ -23,6 +24,7 @@ DEGRADED=0
 VSCODE_RESOLVED=""
 VSIX_PATH=""
 INSTALLED_EXTENSION_VERSION=""
+INSTALLED_LEGACY_EXTENSION_VERSION=""
 
 SKILLS=(
   "tressoir-artifact-md"
@@ -519,14 +521,19 @@ register_root_guidance() {
 }
 
 inspect_installed_extension() {
-  local output line prefix
+  local output line prefix legacy_prefix
   INSTALLED_EXTENSION_VERSION=""
+  INSTALLED_LEGACY_EXTENSION_VERSION=""
   output=$("$VSCODE_RESOLVED" --list-extensions --show-versions 2>/dev/null) || return 1
   prefix="${EXTENSION_ID}@"
+  legacy_prefix="${LEGACY_EXTENSION_ID}@"
   while IFS= read -r line; do
     case "$line" in
       "$prefix"*)
         INSTALLED_EXTENSION_VERSION=${line#"$prefix"}
+        ;;
+      "$legacy_prefix"*)
+        INSTALLED_LEGACY_EXTENSION_VERSION=${line#"$legacy_prefix"}
         ;;
     esac
   done <<EOF
@@ -571,12 +578,20 @@ EOF
 }
 
 install_vscode_extension() {
-  local comparison
+  local comparison previous_version
 
   say ""
   say "VS Code extension:"
   if [ "$NO_VSCODE" -eq 1 ]; then
     say "skipped by request: $EXTENSION_ID@$EXTENSION_VERSION"
+    return
+  fi
+
+  if [ -n "$INSTALLED_LEGACY_EXTENSION_VERSION" ]; then
+    degrade "$LEGACY_EXTENSION_ID@$INSTALLED_LEGACY_EXTENSION_VERSION is installed and may conflict with $EXTENSION_ID when enabled (both own the Tressoir artifact editor view types)"
+    say "setup cannot determine enabled state; skipping the standalone extension conservatively"
+    say "manual action: uninstall $LEGACY_EXTENSION_ID, reload VS Code, then rerun setup"
+    say "skipped: $EXTENSION_ID@$EXTENSION_VERSION"
     return
   fi
 
@@ -602,6 +617,7 @@ install_vscode_extension() {
     return
   fi
 
+  previous_version="$INSTALLED_EXTENSION_VERSION"
   "$VSCODE_RESOLVED" --install-extension "$VSIX_PATH" --force ||
     fatal "VS Code extension installation failed after project setup"
 
@@ -610,6 +626,9 @@ install_vscode_extension() {
   [ "$INSTALLED_EXTENSION_VERSION" = "$EXTENSION_VERSION" ] ||
     fatal "VS Code reported '$INSTALLED_EXTENSION_VERSION' after installing $EXTENSION_VERSION"
   say "installed: $EXTENSION_ID@$EXTENSION_VERSION"
+  if [ -n "$previous_version" ]; then
+    say "manual action: reload the VS Code window or close and reopen affected artifact tabs"
+  fi
 }
 
 print_instruction_handoff() {

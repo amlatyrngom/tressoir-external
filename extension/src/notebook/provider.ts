@@ -70,7 +70,12 @@ type NotebookInboundMessage =
 // forbids path separators and `..`, so a matching name is always a basename inside the folder.
 const INTERACTIONS_FILE_RE = /^interactions(\.[A-Za-z0-9_-]+)?\.json$/
 const MAX_INTERACTION_KEY_LEN = 256
+// A supported macOS/Linux filename component can contain up to 255 bytes, so 512 accommodates
+// every exact source stem plus the automatic suffix. Arbitrary authored keys retain the tighter
+// generic cap above.
+const MAX_AUTOMATIC_INTERACTION_KEY_LEN = 512
 const MAX_INTERACTIONS_BYTES = 512 * 1024
+const LEGACY_FREE_FORM_FEEDBACK_KEY = 'free_form_feedback'
 
 export const NOTEBOOK_VIEW_TYPE = 'tressoir.notebookHtml'
 // USER_ARTIFACT_MD: a SECOND custom editor for `*.tressoir.md`. Same provider class, but the
@@ -128,6 +133,11 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
     webviewPanel: vscode.WebviewPanel,
   ): Promise<void> {
     let currentDocument = document
+    // A custom-editor instance is bound to this source document. Keep its interaction namespace
+    // in the provider as well as the webview dataset so even an older/stale webview runtime that
+    // still asks for plain `free_form_feedback` cannot read or write a sibling artifact's value.
+    const sourceNamespace = sourceNamespaceFromPath(currentDocument.fileName)
+    const feedbackKey = freeFormFeedbackKey(sourceNamespace)
 
     // Widen localResourceRoots to the artifact's own folder so authored relative includes
     // (e.g. an author's own ./vendor/d3.js or ./data.json) are served as webview resources. Scope
@@ -169,7 +179,8 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
         webviewPanel.webview,
         artifactFolder,
         userLinks,
-        sourceNameFromPath(currentDocument.fileName),
+        sourceNamespace,
+        feedbackKey,
       )
     }
     renderWebviewHtml()
@@ -193,7 +204,10 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
     }
 
     const postState = async (): Promise<void> => {
-      const interactions = await this.readInteractions(artifactFolder)
+      const interactions = this.scopeLegacyFreeFormFeedback(
+        await this.readInteractions(artifactFolder),
+        feedbackKey,
+      )
       postMessage(
         {
           type: 'state',
@@ -207,7 +221,10 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
     }
 
     const postUpdate = async (): Promise<void> => {
-      const interactions = await this.readInteractions(artifactFolder)
+      const interactions = this.scopeLegacyFreeFormFeedback(
+        await this.readInteractions(artifactFolder),
+        feedbackKey,
+      )
       postMessage(
         {
           type: 'update',
@@ -277,7 +294,7 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
             return
           }
           case 'storeInteraction':
-            await this.handleStoreInteraction(artifactFolder, message)
+            await this.handleStoreInteraction(artifactFolder, message, feedbackKey)
             return
           case 'openRawText':
             return
@@ -315,6 +332,7 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
   private async handleStoreInteraction(
     artifactFolder: vscode.Uri,
     message: { key: string; value: unknown; filename?: string },
+    feedbackKey: string,
   ): Promise<void> {
     const filename =
       typeof message.filename === 'string' && message.filename.length > 0
@@ -324,18 +342,32 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
       console.warn(`[tressoir-notebook] Rejected storeInteraction for invalid filename: ${filename}`)
       return
     }
-    if (
-      typeof message.key !== 'string' ||
-      message.key.length === 0 ||
-      message.key.length > MAX_INTERACTION_KEY_LEN
-    ) {
+    if (typeof message.key !== 'string' || message.key.length === 0) {
+      return
+    }
+    // Compatibility containment: pre-namespacing Markdown runtimes use the shared plain key.
+    // Scope that reserved automatic-widget key at the provider boundary. HTML keys are left
+    // alone. Markdown authors must not use this reserved key for an explicit :::input; the
+    // projector lint and skill both enforce that contract because a stale runtime cannot attach
+    // enough provenance for the provider to distinguish those two uses.
+    const key =
+      this.sourceKind === 'md' &&
+      message.key === LEGACY_FREE_FORM_FEEDBACK_KEY &&
+      feedbackKey.length > 0
+        ? feedbackKey
+        : message.key
+    const maxKeyLength =
+      this.sourceKind === 'md' && key === feedbackKey
+        ? MAX_AUTOMATIC_INTERACTION_KEY_LEN
+        : MAX_INTERACTION_KEY_LEN
+    if (key.length > maxKeyLength) {
       return
     }
     const target = vscode.Uri.joinPath(artifactFolder, filename)
     const chainKey = target.fsPath
     const previous = this.interactionWriteChains.get(chainKey) ?? Promise.resolve()
     const next = previous.then(() =>
-      this.mergeAndWriteInteraction(target, message.key, message.value),
+      this.mergeAndWriteInteraction(target, key, message.value),
     )
     // Swallow rejection on the stored chain so a single failed write doesn't poison the queue;
     // the awaited `next` below still surfaces nothing (writes are best-effort/logged).
@@ -404,6 +436,32 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
       }
     }
     return snapshot
+  }
+
+  // Present the reserved plain key as a document-local compatibility alias to stale Markdown
+  // webviews. The ambiguous old shared value is deliberately hidden: if this document has no
+  // scoped value yet, an old runtime must start empty rather than inheriting a sibling's text.
+  // The snapshot is copied only for the webview; interactions.json on disk is not migrated or
+  // destructively edited.
+  private scopeLegacyFreeFormFeedback(
+    snapshot: InteractionsSnapshot,
+    feedbackKey: string,
+  ): InteractionsSnapshot {
+    if (this.sourceKind !== 'md') {
+      return snapshot
+    }
+    const bucket = snapshot['interactions.json']
+    if (!bucket) {
+      return snapshot
+    }
+    const scopedBucket = { ...bucket }
+    const scopedValue = bucket[feedbackKey]
+    if (scopedValue === undefined) {
+      delete scopedBucket[LEGACY_FREE_FORM_FEEDBACK_KEY]
+    } else {
+      scopedBucket[LEGACY_FREE_FORM_FEEDBACK_KEY] = scopedValue
+    }
+    return { ...snapshot, 'interactions.json': scopedBucket }
   }
 
   private currentTheme(): NotebookThemeState {
@@ -606,7 +664,8 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
     webview: vscode.Webview,
     artifactFolder: vscode.Uri,
     userLinks: { styleTags: string[]; scriptTags: string[] } = { styleTags: [], scriptTags: [] },
-    sourceName = '',
+    sourceNamespace = '',
+    feedbackKey = freeFormFeedbackKey(sourceNamespace),
   ): string {
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'notebook-webview.js'),
@@ -652,7 +711,8 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
   <body
     data-artifact-base-uri="${artifactBaseUri}"
     data-csp-nonce="${nonce}"
-    data-source-name="${sourceName.replace(/"/g, '&quot;')}"
+    data-source-name="${escapeHtmlAttribute(sourceNamespace)}"
+    data-feedback-key="${escapeHtmlAttribute(feedbackKey)}"
   >
     <div id="app"></div>
     ${mdAssets.scripts}
@@ -662,13 +722,39 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
   }
 }
 
-// Derive a stable per-source key namespace from the document path: the basename with the
-// `.tressoir.md` / `.tressoir.html` suffix stripped (e.g. `PLAN.tressoir.md` -> `PLAN`). Used so
-// projected interaction keys (e.g. the free-form feedback box) don't collide across sibling
-// artifacts that share one folder's interactions.json.
-function sourceNameFromPath(p: string): string {
-  const base = (p.split(/[\\/]/).pop() ?? '').trim()
-  return base.replace(/\.tressoir\.(md|html)$/i, '')
+// Derive one injective, bounded browser/storage namespace from the exact supported POSIX
+// basename. Do not trim or treat backslash as a POSIX separator: both would collapse valid
+// sibling names. The complete key is HTML-escaped only for transport, so the browser recovers
+// this same exact stem, including whitespace, entities, quotes, and Unicode. Exact lowercase
+// artifact suffixes are the supported selectors; an unexpected suffix is retained rather than
+// normalized into another basename.
+function sourceNamespaceFromPath(p: string): string {
+  const slash = p.lastIndexOf('/')
+  const base = slash >= 0 ? p.slice(slash + 1) : p
+  let stem = base
+  for (const suffix of ['.tressoir.md', '.tressoir.html']) {
+    if (base.endsWith(suffix)) {
+      stem = base.slice(0, -suffix.length)
+      break
+    }
+  }
+  return stem
+}
+
+function freeFormFeedbackKey(sourceName: string): string {
+  return `${sourceName}-free_form_feedback`
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    // HTML input preprocessing normalizes literal CR and CRLF to LF before attribute parsing.
+    // Numeric references are decoded afterwards, preserving distinct POSIX basenames exactly.
+    .replace(/\r/g, '&#13;')
+    .replace(/\n/g, '&#10;')
 }
 
 function getNonce(): string {

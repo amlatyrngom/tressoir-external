@@ -327,8 +327,11 @@
     // Namespace the feedback key by source basename (provider.ts emits data-source-name, e.g.
     // `PLAN`) so sibling artifacts sharing one folder's interactions.json don't collide. The SHIM
     // / preview harness sets no such attr -> falls back to the plain legacy key.
-    var srcName = (document.body && document.body.dataset && document.body.dataset.sourceName) || '';
-    var FF_KEY = (srcName ? srcName + '-' : '') + 'free_form_feedback';
+    var bodyData = (document.body && document.body.dataset) || {};
+    var srcName = bodyData.sourceName || '';
+    // New providers supply the complete, injective, bounded key. `sourceName` keeps the previous
+    // namespaced runtime compatible; a plain fallback remains only for the standalone SHIM.
+    var FF_KEY = bodyData.feedbackKey || ((srcName ? srcName + '-' : '') + 'free_form_feedback');
     var prior = readInteraction(FF_KEY);
     if (typeof prior === 'string') ta.value = prior;
     else if (prior && typeof prior.value === 'string') ta.value = prior.value;
@@ -497,6 +500,11 @@
       var line = lineOf(node), a = node.attributes || {};
       if (a.key == null || String(a.key) === '') {
         add('error', line, ':::input has no `key=` — the human answer cannot be read back from interactions.json');
+      } else {
+        var inputKey = String(a.key);
+        if (inputKey === 'free_form_feedback' || /-free_form_feedback$/.test(inputKey)) {
+          add('error', line, ':::input uses a reserved free-form feedback key — choose a different unique `key=`');
+        }
       }
       var hasQ = (a.oneliner != null && a.oneliner !== '') || (a.question != null && a.question !== '');
       if (!hasQ) {

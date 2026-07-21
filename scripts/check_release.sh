@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 EXTENSION="$ROOT/extension"
 PAYLOAD="$ROOT/share/tressoir-external"
-VERSION="0.1.1"
+VERSION="0.1.2"
 VSIX="$EXTENSION/dist/tressoir-artifacts-$VERSION.vsix"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/tressoir-release-check.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
@@ -19,8 +19,15 @@ npm run package:vsix
 unzip -Z1 "$VSIX" > "$TMP/archive.txt"
 unzip -p "$VSIX" extension/package.json > "$TMP/package.json"
 unzip -p "$VSIX" extension/LICENSE.md > "$TMP/LICENSE.md"
+unzip -p "$VSIX" extension/dist/extension.js > "$TMP/extension.js"
+unzip -p "$VSIX" extension/dist/assets/tressoir-md.js > "$TMP/tressoir-md.js"
 
 cmp "$ROOT/LICENSE" "$EXTENSION/LICENSE.md"
+cmp "$EXTENSION/src/notebook/assets/tressoir-md.js" \
+  "$PAYLOAD/skills/tressoir-artifact-md/references/runtime/tressoir-md.js"
+cmp "$EXTENSION/src/notebook/assets/tressoir-md.js" "$TMP/tressoir-md.js"
+grep -F 'free_form_feedback' "$TMP/extension.js" >/dev/null
+grep -F 'tressoir.bridge' "$TMP/extension.js" >/dev/null
 grep -Fx 'MIT License' "$ROOT/LICENSE" >/dev/null
 grep -Fx 'MIT License' "$TMP/LICENSE.md" >/dev/null
 
@@ -28,7 +35,7 @@ node - "$TMP/package.json" <<'NODE'
 const fs = require('fs')
 const manifest = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
 const identity = `${manifest.publisher}.${manifest.name}@${manifest.version}`
-if (identity !== 'tressoir.tressoir-artifacts@0.1.1') {
+if (identity !== 'tressoir.tressoir-artifacts@0.1.2') {
   throw new Error(`unexpected packaged identity: ${identity}`)
 }
 if (manifest.license !== 'MIT') {

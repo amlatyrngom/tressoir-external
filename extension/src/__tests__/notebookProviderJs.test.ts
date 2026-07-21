@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as vscode from 'vscode'
+import { JSDOM } from 'jsdom'
 import { ColorThemeKind } from './mocks/vscode'
 import { TressoirNotebookEditorProvider, fetchRemote } from '../notebook/provider'
 import { clearNotebookState } from '../notebook/state'
@@ -41,11 +42,14 @@ describe('notebook provider JS support (CSP / base / resource roots)', () => {
     ;(vscode.window as any).activeColorTheme = { kind: ColorThemeKind.Dark }
   })
 
-  async function buildHtml() {
+  async function buildHtml(fileName = '/tmp/notebook.tressoir.html') {
     const provider = new TressoirNotebookEditorProvider({
       extensionUri: { fsPath: '/tmp/ext', path: '/tmp/ext' },
     } as unknown as vscode.ExtensionContext)
-    const document = createDocument('<tressoir-editor-cell data-tressoir-cell="a">hi</tressoir-editor-cell>')
+    const document = {
+      ...createDocument('<tressoir-editor-cell data-tressoir-cell="a">hi</tressoir-editor-cell>'),
+      fileName,
+    }
     const panel = createPanel()
     await provider.resolveCustomTextEditor(
       document as unknown as vscode.TextDocument,
@@ -95,6 +99,31 @@ describe('notebook provider JS support (CSP / base / resource roots)', () => {
     const html = panel.webview.html
     // Document is /tmp/notebook.tressoir.html -> stem `notebook`.
     expect(html).toContain('data-source-name="notebook"')
+    expect(html).toContain('data-feedback-key="notebook-free_form_feedback"')
+  })
+
+  it('encodes adversarial source names injectively before browser transport', async () => {
+    const expected = new Map([
+      ['/tmp/A&B.tressoir.md', 'A&B'],
+      ['/tmp/A&amp;B.tressoir.md', 'A&amp;B'],
+      ['/tmp/ PLAN.tressoir.md', ' PLAN'],
+      ['/tmp/A\\B.tressoir.md', 'A\\B'],
+      ['/tmp/.tressoir.md', ''],
+      ['/tmp/A\rB.tressoir.md', 'A\rB'],
+      ['/tmp/A\nB.tressoir.md', 'A\nB'],
+      ['/tmp/A\r\nB.tressoir.md', 'A\r\nB'],
+    ])
+    for (const [fileName, namespace] of expected) {
+      const panel = await buildHtml(fileName)
+      // Parse the actual provider-generated document: substring checks alone miss HTML's
+      // CR/CRLF input normalization at the provider-to-browser boundary.
+      const dom = new JSDOM(panel.webview.html)
+      expect(dom.window.document.body.dataset.sourceName).toBe(namespace)
+      expect(dom.window.document.body.dataset.feedbackKey).toBe(
+        `${namespace}-free_form_feedback`,
+      )
+      dom.window.close()
+    }
   })
 
   it('widens localResourceRoots to the artifact folder (and keeps the extension dist root)', async () => {

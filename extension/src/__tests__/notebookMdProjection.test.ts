@@ -323,6 +323,19 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD lint() (real tressoir-md.js, no 
     expect(errs.some((f) => /no `key=`/.test(f.msg))).toBe(true)
   })
 
+  it('errors when :::input uses a key reserved for the automatic feedback box', () => {
+    for (const key of ['free_form_feedback', 'PLAN-free_form_feedback']) {
+      const md = [
+        '---', 'title: Decisions', '---', '',
+        `:::input{key=${key}}`,
+        'A conflicting question.',
+        ':::',
+      ].join('\n')
+      const errs = levels(lint(md), 'error')
+      expect(errs.some((f) => /reserved free-form feedback key/.test(f.msg))).toBe(true)
+    }
+  })
+
   it('warns on a :::input with no question (no leading paragraph and no oneliner)', () => {
     const md = [
       '---', 'title: Decisions', '---', '',

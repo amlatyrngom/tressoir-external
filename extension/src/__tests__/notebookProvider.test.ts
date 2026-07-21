@@ -21,14 +21,14 @@ function folderFile(name: string): string {
   return `${FOLDER_FS}/${name}`
 }
 
-function createDocument(text: string, version = 1) {
+function createDocument(text: string, version = 1, fileName = DOC_FS) {
   return {
     uri: {
       fsPath: DOC_FS,
       path: DOC_FS,
       toString: () => `file://${DOC_FS}`,
     },
-    fileName: DOC_FS,
+    fileName,
     version,
     getText: () => text,
     positionAt: (offset: number) => {
@@ -51,7 +51,7 @@ function createPanel() {
       options: {} as Record<string, unknown>,
       cspSource: 'https://test.csp',
       asWebviewUri: vi.fn((uri: unknown) => uri),
-      postMessage: vi.fn(async () => true),
+      postMessage: vi.fn(async (_message: unknown) => true),
       onDidReceiveMessage: vi.fn((handler: (message: unknown) => void | Promise<void>) => {
         messageHandler = handler
         return { dispose: vi.fn() }
@@ -79,10 +79,10 @@ function createPanel() {
   return panel
 }
 
-function makeProvider() {
+function makeProvider(sourceKind: 'html' | 'md' = 'html') {
   return new TressoirNotebookEditorProvider({
     extensionUri: { fsPath: '/tmp/ext', path: '/tmp/ext' },
-  } as unknown as vscode.ExtensionContext)
+  } as unknown as vscode.ExtensionContext, sourceKind)
 }
 
 async function resolve(provider: ReturnType<typeof makeProvider>, document: ReturnType<typeof createDocument>) {
@@ -134,6 +134,92 @@ describe('notebook provider (editor-agnostic)', () => {
         },
       }),
     )
+  })
+
+  it('gives stale Markdown runtimes only the current source feedback through the legacy key', async () => {
+    __seedFile(
+      folderFile('interactions.json'),
+      JSON.stringify({
+        free_form_feedback: 'ambiguous old shared text',
+        'PLAN-free_form_feedback': 'plan only',
+        'RESEARCH-free_form_feedback': 'research only',
+        explicit_input: 'kept',
+      }),
+    )
+
+    const plan = await resolve(
+      makeProvider('md'),
+      createDocument('# Plan', 1, '/tmp/PLAN.tressoir.md'),
+    )
+    const research = await resolve(
+      makeProvider('md'),
+      createDocument('# Research', 1, '/tmp/RESEARCH.tressoir.md'),
+    )
+    const newArtifact = await resolve(
+      makeProvider('md'),
+      createDocument('# New', 1, '/tmp/NEW.tressoir.md'),
+    )
+
+    const planState = vi.mocked(plan.webview.postMessage).mock.calls.at(-1)?.[0] as any
+    const researchState = vi.mocked(research.webview.postMessage).mock.calls.at(-1)?.[0] as any
+    const newState = vi.mocked(newArtifact.webview.postMessage).mock.calls.at(-1)?.[0] as any
+
+    expect(planState.interactions['interactions.json']).toEqual({
+      free_form_feedback: 'plan only',
+      'PLAN-free_form_feedback': 'plan only',
+      'RESEARCH-free_form_feedback': 'research only',
+      explicit_input: 'kept',
+    })
+    expect(researchState.interactions['interactions.json']).toEqual({
+      free_form_feedback: 'research only',
+      'PLAN-free_form_feedback': 'plan only',
+      'RESEARCH-free_form_feedback': 'research only',
+      explicit_input: 'kept',
+    })
+    // An artifact without a scoped value must start empty in an old runtime rather than
+    // inheriting the irrecoverably ambiguous shared value.
+    expect(newState.interactions['interactions.json']).toEqual({
+      'PLAN-free_form_feedback': 'plan only',
+      'RESEARCH-free_form_feedback': 'research only',
+      explicit_input: 'kept',
+    })
+  })
+
+  it('keeps adversarial sibling basenames in distinct feedback namespaces', async () => {
+    __seedFile(
+      folderFile('interactions.json'),
+      JSON.stringify({
+        'A&B-free_form_feedback': 'literal ampersand',
+        'A&amp;B-free_form_feedback': 'entity spelling',
+        ' PLAN-free_form_feedback': 'leading space',
+        'PLAN-free_form_feedback': 'plain plan',
+        'A\\B-free_form_feedback': 'backslash',
+        'B-free_form_feedback': 'plain b',
+        '-free_form_feedback': 'empty stem',
+        'A\rB-free_form_feedback': 'carriage return',
+        'A\nB-free_form_feedback': 'line feed',
+        'A\r\nB-free_form_feedback': 'carriage return and line feed',
+        free_form_feedback: 'ambiguous legacy text',
+      }),
+    )
+
+    const cases = [
+      ['/tmp/A&B.tressoir.md', 'literal ampersand'],
+      ['/tmp/A&amp;B.tressoir.md', 'entity spelling'],
+      ['/tmp/ PLAN.tressoir.md', 'leading space'],
+      ['/tmp/PLAN.tressoir.md', 'plain plan'],
+      ['/tmp/A\\B.tressoir.md', 'backslash'],
+      ['/tmp/B.tressoir.md', 'plain b'],
+      ['/tmp/.tressoir.md', 'empty stem'],
+      ['/tmp/A\rB.tressoir.md', 'carriage return'],
+      ['/tmp/A\nB.tressoir.md', 'line feed'],
+      ['/tmp/A\r\nB.tressoir.md', 'carriage return and line feed'],
+    ] as const
+    for (const [fileName, expected] of cases) {
+      const panel = await resolve(makeProvider('md'), createDocument('# Artifact', 1, fileName))
+      const state = vi.mocked(panel.webview.postMessage).mock.calls.at(-1)?.[0] as any
+      expect(state.interactions['interactions.json'].free_form_feedback).toBe(expected)
+    }
   })
 
   it('reacts to theme changes by posting a theme message', async () => {
@@ -252,6 +338,48 @@ describe('notebook provider storeInteraction (contained disk-write boundary)', (
 
     const written = JSON.parse(__readFile(folderFile('interactions.json'))!)
     expect(written).toEqual({ existing: 1, feedback: 'hello' })
+  })
+
+  it('rewrites a stale Markdown runtime plain feedback write to the source-scoped key', async () => {
+    __seedFile(
+      folderFile('interactions.json'),
+      JSON.stringify({ free_form_feedback: 'ambiguous old shared text', explicit_input: 'kept' }),
+    )
+    const panel = await resolve(
+      makeProvider('md'),
+      createDocument('# Plan', 1, '/tmp/PLAN.tressoir.md'),
+    )
+
+    await panel.__emitMessage({
+      type: 'storeInteraction',
+      key: 'free_form_feedback',
+      value: 'plan only',
+    })
+
+    const written = JSON.parse(__readFile(folderFile('interactions.json'))!)
+    expect(written).toEqual({
+      free_form_feedback: 'ambiguous old shared text',
+      'PLAN-free_form_feedback': 'plan only',
+      explicit_input: 'kept',
+    })
+  })
+
+  it('persists the generated feedback key for an empty or near-limit source stem', async () => {
+    for (const [fileName, expectedKey] of [
+      ['/tmp/.tressoir.md', '-free_form_feedback'],
+      [`/tmp/${'x'.repeat(238)}.tressoir.md`, `${'x'.repeat(238)}-free_form_feedback`],
+    ]) {
+      __resetFs()
+      const panel = await resolve(makeProvider('md'), createDocument('# Long', 1, fileName))
+      await panel.__emitMessage({
+        type: 'storeInteraction',
+        key: expectedKey,
+        value: 'saved',
+      })
+      expect(JSON.parse(__readFile(folderFile('interactions.json'))!)).toEqual({
+        [expectedKey]: 'saved',
+      })
+    }
   })
 
   it('serializes concurrent writes to the same file without dropping updates', async () => {
