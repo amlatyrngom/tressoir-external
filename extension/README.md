@@ -7,6 +7,12 @@ This extension renders two trusted, text-backed artifact formats in regular desk
 
 It is the artifact-editor portion of Tressoir, extracted into a self-contained extension. It does not connect to the Tressoir daemon and does not include editor automation, the plugin host, code-server management, a Python runtime, or an SDK backend.
 
+## Notable in this release (0.1.3)
+
+- Markdown decision inputs keep a stable identity across live edits: an answer stays bound to its `:::input{key=...}` even when surrounding cards are reordered, inserted, removed, or renamed, so typed values no longer shift to the wrong row during re-projection.
+- The Markdown projection view emits advisory authoring warnings (over-long titles/questions, duplicate input keys, lifecycle sections missing their Planned Changes / Completion Report, and stray fenced code) without blocking rendering.
+- After any upgrade, reload the window (or reopen affected artifact tabs) so retained webviews pick up the new runtime JavaScript.
+
 First-party extension code is licensed under the MIT License. Bundled third-party components retain their own licenses; see `THIRD_PARTY_NOTICES.md`.
 
 ## Runtime requirements
@@ -52,7 +58,7 @@ npm test
 npm run package:vsix
 ```
 
-The versioned package is written to `dist/tressoir-artifacts-0.1.2.vsix`. Always inspect the newly produced archive and packaged manifest before release; do not reuse an older bridge VSIX.
+The versioned package is written to `dist/tressoir-artifacts-0.1.3.vsix`. Always inspect the newly produced archive and packaged manifest before release; do not reuse an older bridge VSIX.
 
 ## Source provenance
 

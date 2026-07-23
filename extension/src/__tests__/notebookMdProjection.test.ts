@@ -143,8 +143,8 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
       ':::',
     ].join('\n')
     const html = project(md)
-    // Decision row carries the locked classes + the read-back key.
-    expect(html).toContain('<div class="ctx-item m-decision m-input" data-key="approach.scope" data-morph-keep-class="open">')
+    // Decision row carries the locked classes + the read-back key + a stable morph key.
+    expect(html).toContain('<div class="ctx-item m-decision m-input" data-key="approach.scope" data-morph-key="tressoir-input:approach.scope" data-morph-keep-class="open">')
     // Head = the first paragraph (the question); a check turns green when resolved.
     expect(html).toContain('<span class="dec-check" aria-hidden="true"></span>')
     expect(html).toContain('<span class="dec-name">Which approach should we take?</span>')
@@ -380,5 +380,149 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD lint() (real tressoir-md.js, no 
     const warnIdx = sameLine.findIndex((f) => f.level === 'warn')
     expect(errIdx).toBeGreaterThanOrEqual(0)
     expect(warnIdx).toBeGreaterThan(errIdx)
+  })
+
+  // ---- v2.1 advisory authoring warnings (all warn-only; never change exit status) ----
+
+  const longText = (n: number) => 'x'.repeat(n)
+
+  it('warns when a card title or item oneliner exceeds 200 characters (boundary check)', () => {
+    const md = [
+      '---', 'title: X', '---', '',
+      `::::card{title="${longText(201)}" oneliner="ok"}`,
+      `:::item{oneliner="${longText(201)}"}`,
+      'body',
+      ':::',
+      '::::',
+    ].join('\n')
+    const warns = levels(lint(md), 'warn')
+    expect(warns.some((f) => /::::card title exceeds 200 characters/.test(f.msg))).toBe(true)
+    expect(warns.some((f) => /:::item oneliner exceeds 200 characters/.test(f.msg))).toBe(true)
+  })
+
+  it('does not warn on a card title or item oneliner exactly at 200 characters', () => {
+    const md = [
+      '---', 'title: X', '---', '',
+      `::::card{title="${longText(200)}" oneliner="ok"}`,
+      `:::item{oneliner="${longText(200)}"}`,
+      'body',
+      ':::',
+      '::::',
+    ].join('\n')
+    const warns = levels(lint(md), 'warn')
+    expect(warns.some((f) => /exceeds 200 characters/.test(f.msg))).toBe(false)
+  })
+
+  it("warns when an input question's first paragraph exceeds 200 characters", () => {
+    const md = [
+      '---', 'title: X', '---', '',
+      ':::input{key=long.q}',
+      longText(201),
+      '',
+      '- Option A',
+      ':::',
+    ].join('\n')
+    const warns = levels(lint(md), 'warn')
+    expect(warns.some((f) => /:::input question first paragraph exceeds 200 characters/.test(f.msg))).toBe(true)
+  })
+
+  it('warns (not errors) when two explicit inputs reuse the same key', () => {
+    const md = [
+      '---', 'title: X', '---', '',
+      ':::input{key=dup.key}',
+      'First question?',
+      ':::',
+      ':::input{key=dup.key}',
+      'Second question?',
+      ':::',
+    ].join('\n')
+    const findings = lint(md)
+    expect(levels(findings, 'error')).toHaveLength(0)
+    expect(levels(findings, 'warn').some((f) => /used by more than one input/.test(f.msg))).toBe(true)
+  })
+
+  it('warns when a Planning/Implementing card lacks #### Planned Changes', () => {
+    for (const state of ['Planning', 'Implementing']) {
+      const md = [
+        '---', 'title: X', '---', '',
+        `::::card{title="M1" oneliner="c" state="<span class='badge warn'>${state}</span>"}`,
+        '#### Planning Overview',
+        ':::item{oneliner="x"}',
+        'y',
+        ':::',
+        '::::',
+      ].join('\n')
+      const warns = levels(lint(md), 'warn')
+      expect(warns.some((f) => /has no `#### Planned Changes`/.test(f.msg))).toBe(true)
+    }
+  })
+
+  it('does not warn when a Planning card includes #### Planned Changes', () => {
+    const md = [
+      '---', 'title: X', '---', '',
+      "::::card{title=\"M1\" oneliner=\"c\" state=\"<span class='badge warn'>Planning</span>\"}",
+      '#### Planned Changes',
+      ':::item{oneliner="edit"}',
+      '```diff',
+      '- a',
+      '+ b',
+      '```',
+      ':::',
+      '::::',
+    ].join('\n')
+    const warns = levels(lint(md), 'warn')
+    expect(warns.some((f) => /Planned Changes/.test(f.msg))).toBe(false)
+  })
+
+  it('warns when a Review/Completed card lacks a Completion Report or Planned Changes', () => {
+    const md = [
+      '---', 'title: X', '---', '',
+      "::::card{title=\"M1\" oneliner=\"c\" state=\"<span class='badge ok'>Review</span>\"}",
+      '#### Notes',
+      ':::item{oneliner="x"}',
+      'y',
+      ':::',
+      '::::',
+    ].join('\n')
+    const warns = levels(lint(md), 'warn')
+    expect(warns.some((f) => /`review`.*no `#### Completion Report`/.test(f.msg))).toBe(true)
+  })
+
+  it('warns when a TBD card already carries Planned Changes', () => {
+    const md = [
+      '---', 'title: X', '---', '',
+      "::::card{title=\"M1\" oneliner=\"c\" state=\"<span class='badge muted'>TBD</span>\"}",
+      '#### Planned Changes',
+      ':::item{oneliner="edit"}',
+      '```diff',
+      '- a',
+      '+ b',
+      '```',
+      ':::',
+      '::::',
+    ].join('\n')
+    const warns = levels(lint(md), 'warn')
+    expect(warns.some((f) => /`TBD` but already has `#### Planned Changes`/.test(f.msg))).toBe(true)
+  })
+
+  it('warns on an orphan fenced snippet outside an :::item, but not inside one', () => {
+    const orphan = [
+      '---', 'title: X', '---', '',
+      '```diff',
+      '- a',
+      '+ b',
+      '```',
+    ].join('\n')
+    expect(levels(lint(orphan), 'warn').some((f) => /orphan snippet/.test(f.msg))).toBe(true)
+    const inside = [
+      '---', 'title: X', '---', '',
+      ':::item{oneliner="edit"}',
+      '```diff',
+      '- a',
+      '+ b',
+      '```',
+      ':::',
+    ].join('\n')
+    expect(levels(lint(inside), 'warn').some((f) => /orphan snippet/.test(f.msg))).toBe(false)
   })
 })

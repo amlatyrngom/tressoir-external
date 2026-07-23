@@ -13,6 +13,8 @@ A `.tressoir.md` file is trusted Markdown projected by the Tressoir Artifacts VS
 
 Use `.tressoir.md` for structured plans, research, reviews, and decision surfaces. Use plain Markdown for lightweight notes. Use `.tressoir.html` only when arbitrary HTML/CSS/JavaScript is genuinely needed.
 
+Keep plans and decision surfaces in Markdown, including inline raw HTML or SVG tables and diagrams; a single table or diagram never requires moving a plan to another format. Use `.tressoir.html` for a report or explainer only when its custom presentation or behavior genuinely benefits from arbitrary HTML/CSS/JavaScript. `NEXT_INTERACTIVE.tressoir.md` is not a standard companion file; create a named interactive sibling only for a genuinely separate interactive follow-up.
+
 ## Source of truth and projection
 
 For non-interactive work, keep a pair in one sticky, upper-case broad-task folder under `IB/ARTIFACTS/`:
@@ -25,7 +27,7 @@ FEATURE/
 └── interactions.json       # written by the extension
 ```
 
-The same pairing applies to research, reviews, explainers, or later subplans. Re-project after every material source change and before handoff.
+The same pairing applies to research, reviews, explainers, or later subplans. The human is never expected to open the agent-facing source (`PLAN.md`, `interactions.json`, a plan-local `TASK.md`, or any other IB working file); the projected `.tressoir.md`/`.tressoir.html` is the only human-facing surface. Put every material decision, change, caveat, and validation result into the projection, re-project it in the same edit as its source, and verify the intended change landed before handoff.
 
 Interactive artifacts may be authored directly as a single `INTERACTIVE.tressoir.md` and extended over time.
 
@@ -103,6 +105,8 @@ Always close directives with the matching colon fence alone on its own line. Car
 - Prefer a named unified diff to prose describing a proposed code change.
 - Use inline SVG/HTML only when it genuinely clarifies structure.
 - Keep formulas readable; use a local renderer when math is central.
+- Keep one concern per card, item, and input.
+- Keep card titles, item oneliners, and an input question's first paragraph at or below 200 characters; put depth inside the reveal.
 
 ## Reading human input
 
@@ -119,6 +123,8 @@ For `PLAN.tressoir.md`, the key is `PLAN-free_form_feedback`.
 The plain `free_form_feedback` key and keys ending in `-free_form_feedback` are reserved for
 runtime compatibility and the automatic feedback box. Never use them as an explicit
 `:::input{key=...}` key.
+
+Keep an explicit input key stable while it is published, and never repurpose it for a different question. After integrating a resolved answer, remove the input and prune its value from `interactions.json`.
 
 Read `interactions.json` directly on the next turn, integrate answers into the agent-facing source, and re-project. Do not rely on a push notification.
 

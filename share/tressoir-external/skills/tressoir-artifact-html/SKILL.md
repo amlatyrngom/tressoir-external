@@ -9,7 +9,7 @@ Use `.tressoir.html` when you know the exact interface you need and the structur
 
 The Tressoir Artifacts VS Code extension renders the file directly in a webview. Your HTML, CSS, and JavaScript are the page. There is no required template or enforced information architecture.
 
-Prefer `.tressoir.md` for plans, research, standard decisions, reveal rows, and focused review surfaces.
+Prefer `.tressoir.md` for plans, research, standard decisions, reveal rows, and focused review surfaces. Custom reports and explainers are common HTML uses. Keep plans and decision surfaces in `.tressoir.md`; Markdown accepts inline raw HTML and SVG, so a single table or diagram never requires moving a plan to another format.
 
 ## Folder placement
 

@@ -123,7 +123,7 @@
     if (!question) question = 'Decision';
     var body = renderBlocks(children);
     var ph = 'Type a pick, a tweak, or a question for the next pass...';
-    return '<div class="ctx-item m-decision m-input" data-key="' + escAttr(key) + '" data-morph-keep-class="open">' +
+    return '<div class="ctx-item m-decision m-input" data-key="' + escAttr(key) + '" data-morph-key="tressoir-input:' + escAttr(key) + '" data-morph-keep-class="open">' +
       '<button class="ctx-item-head" type="button" aria-expanded="false">' +
       '<span class="dec-check" aria-hidden="true"></span>' +
       '<span class="dec-name">' + esc(question) + '</span></button>' +
@@ -457,6 +457,54 @@
     function add(level, line, msg) { findings.push({ level: level, line: line || 0, msg: msg }); }
     function lineOf(n) { return (n && n.position && n.position.start && n.position.start.line) || 0; }
 
+    // Flat text of an AST subtree (text + inline code), for length/heading checks.
+    function plainText(n) {
+      if (!n || typeof n !== 'object') return '';
+      if (n.type === 'text' || n.type === 'inlineCode') return n.value || '';
+      if (n.children) return n.children.map(plainText).join('');
+      return '';
+    }
+    // The visible lifecycle label inside a card `state=` badge (HTML tags stripped).
+    function stateLabel(a) {
+      var s = (a && a.state != null) ? String(a.state) : '';
+      return s.replace(/<[^>]*>/g, '').trim().toLowerCase();
+    }
+    // Lower-cased set of heading texts anywhere inside a card subtree.
+    function headingTextsIn(node) {
+      var found = {};
+      (function rec(n) {
+        if (!n || typeof n !== 'object') return;
+        if (n.type === 'heading') found[plainText(n).trim().toLowerCase()] = true;
+        if (n.children) n.children.forEach(rec);
+      })(node);
+      return found;
+    }
+    // Track explicit :::input keys to flag duplicates (warning, per accepted D2).
+    var seenInputKeys = {};
+
+    // Card lifecycle vs required sections (all warnings; exit status unchanged).
+    function lintCard(node) {
+      var line = lineOf(node), a = node.attributes || {};
+      if (a.title != null && String(a.title).length > 200) {
+        add('warn', line, '::::card title exceeds 200 characters — keep the visible title skimmable and put depth in the body');
+      }
+      if (a.title == null || String(a.title) === '') {
+        add('warn', line, '::::card has no `title=` (the card head will be blank)');
+      }
+      var label = stateLabel(a);
+      if (label === '') return;
+      var headings = headingTextsIn(node);
+      var hasPlanned = !!headings['planned changes'];
+      var hasReport = !!headings['completion report'];
+      if (label === 'planning' || label === 'implementing') {
+        if (!hasPlanned) add('warn', line, '::::card is `' + label + '` but has no `#### Planned Changes` — show every planned edit as a named diff before handoff');
+      } else if (label === 'review' || label === 'completed') {
+        if (!hasReport && !hasPlanned) add('warn', line, '::::card is `' + label + '` but has no `#### Completion Report` or `#### Planned Changes`');
+      } else if (label === 'tbd') {
+        if (hasPlanned) add('warn', line, '::::card is `TBD` but already has `#### Planned Changes` — a TBD milestone should carry only a one-line overview');
+      }
+    }
+
     var R = getRemark();
     var tree;
     try {
@@ -504,13 +552,24 @@
         var inputKey = String(a.key);
         if (inputKey === 'free_form_feedback' || /-free_form_feedback$/.test(inputKey)) {
           add('error', line, ':::input uses a reserved free-form feedback key — choose a different unique `key=`');
+        } else if (seenInputKeys[inputKey]) {
+          add('warn', line, ':::input key `' + inputKey + '` is used by more than one input — reuse binds both boxes to the same value; give each decision a unique `key=`');
+        } else {
+          seenInputKeys[inputKey] = true;
         }
       }
       var hasQ = (a.oneliner != null && a.oneliner !== '') || (a.question != null && a.question !== '');
+      var qText = '';
+      if (a.oneliner != null && a.oneliner !== '') qText = String(a.oneliner);
+      else if (a.question != null && a.question !== '') qText = String(a.question);
       if (!hasQ) {
         var kids = node.children || [];
         var leadPara = kids.length && kids[0].type === 'paragraph';
         if (!leadPara) add('warn', line, ':::input has no question — add a leading paragraph or an `oneliner=` attribute (otherwise the head reads "Decision")');
+        else qText = plainText(kids[0]);
+      }
+      if (qText.length > 200) {
+        add('warn', line, ':::input question first paragraph exceeds 200 characters — keep the visible question short and put depth in the options/body');
       }
     }
 
@@ -525,29 +584,36 @@
       if (first.split(/\s+/).length < 4) return false;
       return /[.?:]\s|[.?:]$/.test(first) || /\.\s/.test(t);
     }
-    function walk(node) {
+    function walk(node, inItem) {
       if (!node || typeof node !== 'object') return;
       if (node.type === 'code') {
         if (String(node.lang || '') === '' && looksLikeProse(node.value)) {
           add('warn', lineOf(node), 'looks like prose inside a plain ``` code fence — renders as a set-apart gray monospace box, not a paragraph (drop the fence, or move it to `description:`/lead text)');
         }
+        if (!inItem) {
+          add('warn', lineOf(node), 'fenced code/diff outside an :::item — tie every snippet to an item that names its file and symbol (orphan snippet)');
+        }
       }
+      var childInItem = inItem;
       if (node.type === 'containerDirective' || node.type === 'leafDirective' || node.type === 'textDirective') {
         var name = node.name || '';
         if (!KNOWN[name]) {
           add('warn', lineOf(node), 'unknown directive `:' + name + '` (known: card, item, input)');
         } else if (name === 'input') {
           lintInput(node);
-        } else if (name === 'card') {
-          var a = node.attributes || {};
-          if (a.title == null || String(a.title) === '') {
-            add('warn', lineOf(node), '::::card has no `title=` (the card head will be blank)');
+        } else if (name === 'item') {
+          var ia = node.attributes || {};
+          if (ia.oneliner != null && String(ia.oneliner).length > 200) {
+            add('warn', lineOf(node), ':::item oneliner exceeds 200 characters — keep the skimmable claim short and put depth inside the reveal body');
           }
+          childInItem = true;
+        } else if (name === 'card') {
+          lintCard(node);
         }
       }
-      if (node.children) node.children.forEach(walk);
+      if (node.children) node.children.forEach(function (c) { walk(c, childInItem); });
     }
-    tree.children.forEach(walk);
+    tree.children.forEach(function (n) { walk(n, false); });
 
     // ---- a directive marker that survived as PLAIN TEXT did not parse; the usual cause is
     // colon-nesting (a card that wraps items must use MORE colons than the items it wraps).

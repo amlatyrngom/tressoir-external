@@ -93,7 +93,7 @@ case "${1:-}" in
       exit 1
     fi
     [ -f "${2:-}" ] || exit 3
-    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.2' > "$MOCK_CODE_STATE"
+    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.3' > "$MOCK_CODE_STATE"
     printf '%s\n' 'mock installation succeeded'
     ;;
   *)
@@ -112,10 +112,12 @@ make_mock_vsix() {
 }
 
 run_case() {
-  local name function_name
+  local name function_name status
   name="$1"
   function_name="$2"
-  if "$function_name"; then
+  "$function_name"
+  status=$?
+  if [ "$status" -eq 0 ]; then
     pass "$name"
   else
     fail "$name"
@@ -141,16 +143,20 @@ case_fresh_all_with_extension() (
   assert_file "$project/IB/TASK.md"
   assert_file "$project/IB/STATE.md"
   assert_file "$project/IB/CANON/ROOT_CANON.md"
+  assert_file "$project/IB/CANON/CANON_ARTIFACTS/README.md"
   assert_dir "$project/IB/ARTIFACTS"
   assert_dir "$project/IB/TMP"
 
   for skill in \
     tressoir-artifact-md tressoir-artifact-html tressoir-plan \
-    tressoir-working-area tressoir-memory tressoir-structured-review; do
+    tressoir-working-area tressoir-canon tressoir-structured-review; do
     assert_file "$project/IB/skills/$skill/SKILL.md"
     assert_link "$project/.claude/skills/$skill" "../../IB/skills/$skill"
     assert_link "$project/.agents/skills/$skill" "../../IB/skills/$skill"
   done
+  assert_absent "$project/IB/skills/tressoir-memory"
+  assert_absent "$project/.claude/skills/tressoir-memory"
+  assert_absent "$project/.agents/skills/tressoir-memory"
 
   assert_file "$project/IB/skills/tressoir-artifact-md/scripts/check_md.js"
   assert_file "$project/IB/skills/tressoir-artifact-md/user_artifact_md_template/PLAN.tressoir.md"
@@ -160,13 +166,15 @@ case_fresh_all_with_extension() (
   assert_absent "$project/IB/skills/tressoir-artifact-md/scripts/start_artifact.sh"
   grep -Fx 'TMP/' "$project/IB/.gitignore" >/dev/null
   grep -Fx 'vendor/' "$project/IB/.gitignore" >/dev/null
+  grep -F 'should be version-controlled' \
+    "$project/IB/CANON/CANON_ARTIFACTS/README.md" >/dev/null
 
   # Root guidance registration remains opt-in.
   assert_absent "$project/CLAUDE.md"
   assert_absent "$project/AGENTS.md"
   assert_absent "$project/.claude/rules"
   assert_absent "$project/.pi"
-  grep -Fx 'tressoir.tressoir-artifacts@0.1.2' "$state" >/dev/null
+  grep -Fx 'tressoir.tressoir-artifacts@0.1.3' "$state" >/dev/null
 
   digest_tree "$project" > "$TMP_ROOT/fresh-before.txt"
   MOCK_CODE_STATE="$state" "$SETUP" setup \
@@ -176,7 +184,7 @@ case_fresh_all_with_extension() (
   digest_tree "$project" > "$TMP_ROOT/fresh-after.txt"
   diff -u "$TMP_ROOT/fresh-before.txt" "$TMP_ROOT/fresh-after.txt"
   grep 'already linked' "$TMP_ROOT/fresh-rerun.log" >/dev/null
-  grep 'already installed: tressoir.tressoir-artifacts@0.1.2' \
+  grep 'already installed: tressoir.tressoir-artifacts@0.1.3' \
     "$TMP_ROOT/fresh-rerun.log" >/dev/null
 )
 
@@ -222,8 +230,8 @@ case_extension_upgrade() (
     --root "$project" --vsix "$vsix" --vscode-bin "$mock" \
     > "$TMP_ROOT/extension-upgrade.log"
 
-  [ "$(cat "$state")" = 'tressoir.tressoir-artifacts@0.1.2' ]
-  grep 'installed: tressoir.tressoir-artifacts@0.1.2' \
+  [ "$(cat "$state")" = 'tressoir.tressoir-artifacts@0.1.3' ]
+  grep 'installed: tressoir.tressoir-artifacts@0.1.3' \
     "$TMP_ROOT/extension-upgrade.log" >/dev/null
   grep 'reload the VS Code window or close and reopen affected artifact tabs' \
     "$TMP_ROOT/extension-upgrade.log" >/dev/null
@@ -277,10 +285,23 @@ case_opt_in_root_guidance() (
   assert_file "$fresh/AGENTS.md"
   grep -Fx '# Tressoir Guidance' "$fresh/CLAUDE.md" >/dev/null
   grep -Fx '@IB/TRESSOIR.md' "$fresh/CLAUDE.md" >/dev/null
+  grep -Fx '@IB/STATE.md' "$fresh/CLAUDE.md" >/dev/null
+  grep -Fx '@IB/CANON/ROOT_CANON.md' "$fresh/CLAUDE.md" >/dev/null
   grep -Fx '# Tressoir Guidance' "$fresh/AGENTS.md" >/dev/null
   grep -Fx \
-    'Before beginning substantial work, read and follow `IB/TRESSOIR.md`.' \
+    'Before substantial work, read and follow `IB/TRESSOIR.md`.' \
     "$fresh/AGENTS.md" >/dev/null
+  grep -Fx 'Read current status and open decisions in `IB/STATE.md`.' \
+    "$fresh/AGENTS.md" >/dev/null
+  grep -Fx 'Read durable project decisions in `IB/CANON/ROOT_CANON.md`.' \
+    "$fresh/AGENTS.md" >/dev/null
+  assert_file "$fresh/.claude/settings.json"
+  grep -F '"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "400000"' \
+    "$fresh/.claude/settings.json" >/dev/null
+  grep -F '"autoMemoryEnabled": false' \
+    "$fresh/.claude/settings.json" >/dev/null
+  grep 'created Claude settings: .claude/settings.json' \
+    "$TMP_ROOT/guidance-fresh.log" >/dev/null
   assert_absent "$fresh/.claude/CLAUDE.md"
   assert_absent "$fresh/AGENTS.override.md"
   assert_absent "$fresh/.pi"
@@ -292,9 +313,11 @@ case_opt_in_root_guidance() (
   diff -u \
     "$TMP_ROOT/guidance-fresh-before.txt" \
     "$TMP_ROOT/guidance-fresh-after.txt"
-  grep 'already registered: CLAUDE.md mentions TRESSOIR.md' \
+  grep 'already registered (current Tressoir guidance): CLAUDE.md' \
     "$TMP_ROOT/guidance-fresh-rerun.log" >/dev/null
-  grep 'already registered: AGENTS.md mentions TRESSOIR.md' \
+  grep 'already registered (current Tressoir guidance): AGENTS.md' \
+    "$TMP_ROOT/guidance-fresh-rerun.log" >/dev/null
+  grep 'already current (Claude settings): .claude/settings.json' \
     "$TMP_ROOT/guidance-fresh-rerun.log" >/dev/null
   [ "$(grep -c '^# Tressoir Guidance$' "$fresh/CLAUDE.md")" -eq 1 ]
   [ "$(grep -c '^# Tressoir Guidance$' "$fresh/AGENTS.md")" -eq 1 ]
@@ -302,20 +325,17 @@ case_opt_in_root_guidance() (
   existing="$TMP_ROOT/guidance-existing"
   mkdir -p "$existing"
   printf '# Existing Claude\n\nKeep this text.\n' > "$existing/CLAUDE.md"
-  printf '# Existing Agents\n\nAlready read OTHER/TRESSOIR.md.\n' \
-    > "$existing/AGENTS.md"
   cp "$existing/CLAUDE.md" "$TMP_ROOT/guidance-existing-claude-before"
-  cp "$existing/AGENTS.md" "$TMP_ROOT/guidance-existing-agents-before"
 
-  "$SETUP" setup --root "$existing" --claude --codex \
+  "$SETUP" setup --root "$existing" --claude \
     --register-guidance --no-vscode > "$TMP_ROOT/guidance-existing.log"
 
   sed -n '1,3p' "$existing/CLAUDE.md" |
     diff -u "$TMP_ROOT/guidance-existing-claude-before" -
   grep -Fx '# Tressoir Guidance' "$existing/CLAUDE.md" >/dev/null
   grep -Fx '@IB/TRESSOIR.md' "$existing/CLAUDE.md" >/dev/null
-  cmp "$TMP_ROOT/guidance-existing-agents-before" "$existing/AGENTS.md"
-  grep 'already registered: AGENTS.md mentions TRESSOIR.md' \
+  grep -Fx '@IB/STATE.md' "$existing/CLAUDE.md" >/dev/null
+  grep 'appended root guidance: CLAUDE.md' \
     "$TMP_ROOT/guidance-existing.log" >/dev/null
 
   claude_only="$TMP_ROOT/guidance-claude-only"
@@ -333,13 +353,16 @@ case_opt_in_root_guidance() (
     --register-guidance --no-vscode >/dev/null
   assert_file "$codex_only/AGENTS.md"
   assert_absent "$codex_only/CLAUDE.md"
+  assert_absent "$codex_only/.claude/settings.json"
   "$SETUP" setup --root "$pi_only" --pi \
     --register-guidance --no-vscode >/dev/null
   assert_file "$pi_only/.pi/APPEND_SYSTEM.md"
   grep -Fx '# Tressoir Guidance' \
     "$pi_only/.pi/APPEND_SYSTEM.md" >/dev/null
   grep -Fx \
-    'Before beginning substantial work, read and follow `IB/TRESSOIR.md`.' \
+    'Before substantial work, read and follow `IB/TRESSOIR.md`.' \
+    "$pi_only/.pi/APPEND_SYSTEM.md" >/dev/null
+  grep -Fx 'Read current status and open decisions in `IB/STATE.md`.' \
     "$pi_only/.pi/APPEND_SYSTEM.md" >/dev/null
   assert_absent "$pi_only/AGENTS.md"
   cmp "$TMP_ROOT/guidance-pi-claude-before" "$pi_only/CLAUDE.md"
@@ -355,6 +378,9 @@ case_opt_in_root_guidance() (
   grep 'would create root guidance file: CLAUDE.md' \
     "$TMP_ROOT/guidance-dry.log" >/dev/null
   grep 'would create root guidance file: AGENTS.md' \
+    "$TMP_ROOT/guidance-dry.log" >/dev/null
+  assert_absent "$dry/.claude/settings.json"
+  grep 'would create Claude settings: .claude/settings.json' \
     "$TMP_ROOT/guidance-dry.log" >/dev/null
 
   unsafe="$TMP_ROOT/guidance-unsafe"
@@ -397,6 +423,7 @@ case_preserve_user_files_and_collisions() (
   project="$TMP_ROOT/collisions"
   mkdir -p \
     "$project/IB/CANON" \
+    "$project/IB/CANON/CANON_ARTIFACTS" \
     "$project/IB/skills/tressoir-plan" \
     "$project/IB/skills/user-skill" \
     "$project/.claude/skills" \
@@ -407,6 +434,8 @@ case_preserve_user_files_and_collisions() (
   printf 'USER STATE\n' > "$project/IB/STATE.md"
   printf 'USER GUIDE\n' > "$project/IB/TRESSOIR.md"
   printf 'USER ROOT CANON\n' > "$project/IB/CANON/ROOT_CANON.md"
+  printf 'USER CANON ARTIFACTS GUIDE\n' \
+    > "$project/IB/CANON/CANON_ARTIFACTS/README.md"
   printf 'USER IGNORE RULES\n' > "$project/IB/.gitignore"
   printf '%s\n' '---' 'name: tressoir-plan' 'description: User plan skill.' '---' \
     > "$project/IB/skills/tressoir-plan/SKILL.md"
@@ -428,6 +457,7 @@ case_preserve_user_files_and_collisions() (
   for file in \
     "$project/IB/TASK.md" "$project/IB/STATE.md" "$project/IB/TRESSOIR.md" \
     "$project/IB/CANON/ROOT_CANON.md" \
+    "$project/IB/CANON/CANON_ARTIFACTS/README.md" \
     "$project/IB/.gitignore" \
     "$project/IB/skills/tressoir-plan/SKILL.md" \
     "$project/IB/skills/user-skill/SKILL.md" \
@@ -452,6 +482,7 @@ case_preserve_user_files_and_collisions() (
   for file in \
     "$project/IB/TASK.md" "$project/IB/STATE.md" "$project/IB/TRESSOIR.md" \
     "$project/IB/CANON/ROOT_CANON.md" \
+    "$project/IB/CANON/CANON_ARTIFACTS/README.md" \
     "$project/IB/.gitignore" \
     "$project/IB/skills/tressoir-plan/SKILL.md" \
     "$project/IB/skills/user-skill/SKILL.md" \
@@ -513,6 +544,39 @@ case_reject_symlinked_managed_ancestor() (
     "$TMP_ROOT/symlink-ancestor.log" >/dev/null
 )
 
+case_reject_unsafe_canon_artifacts_path() (
+  set -e
+
+  occupied_project="$TMP_ROOT/canon-artifacts-occupied"
+  mkdir -p "$occupied_project/IB/CANON"
+  printf 'USER FILE\n' > "$occupied_project/IB/CANON/CANON_ARTIFACTS"
+  set +e
+  "$SETUP" setup --root "$occupied_project" --claude --no-vscode \
+    > "$TMP_ROOT/canon-artifacts-occupied.log" 2>&1
+  status=$?
+  set -e
+  [ "$status" -eq 1 ]
+  grep -Fx 'USER FILE' "$occupied_project/IB/CANON/CANON_ARTIFACTS" >/dev/null
+  assert_absent "$occupied_project/IB/TRESSOIR.md"
+  grep 'unsafe or incompatible canonical directory path: IB/CANON/CANON_ARTIFACTS' \
+    "$TMP_ROOT/canon-artifacts-occupied.log" >/dev/null
+
+  symlink_project="$TMP_ROOT/canon-artifacts-symlink"
+  outside="$TMP_ROOT/canon-artifacts-outside"
+  mkdir -p "$symlink_project/IB/CANON" "$outside"
+  ln -s "$outside" "$symlink_project/IB/CANON/CANON_ARTIFACTS"
+  set +e
+  "$SETUP" setup --root "$symlink_project" --claude --no-vscode \
+    > "$TMP_ROOT/canon-artifacts-symlink.log" 2>&1
+  status=$?
+  set -e
+  [ "$status" -eq 1 ]
+  [ -z "$(find "$outside" -mindepth 1 -print -quit)" ]
+  assert_absent "$symlink_project/IB/TRESSOIR.md"
+  grep 'unsafe or incompatible canonical directory path: IB/CANON/CANON_ARTIFACTS' \
+    "$TMP_ROOT/canon-artifacts-symlink.log" >/dev/null
+)
+
 case_reject_unverified_payload_content() (
   set -e
   distribution="$TMP_ROOT/tampered-distribution"
@@ -551,6 +615,191 @@ case_reject_unverified_payload_content() (
   grep 'payload must not contain symlinks' "$TMP_ROOT/payload-link.log" >/dev/null
 )
 
+case_guidance_legacy_upgrade() (
+  set -e
+  legacy="$TMP_ROOT/guidance-legacy"
+  mkdir -p "$legacy"
+  # Claude: the exact prior generated section (created form) upgrades in place.
+  printf '# Tressoir Guidance\n\n@IB/TRESSOIR.md\n' > "$legacy/CLAUDE.md"
+  # AGENTS: the exact prior generated section appended after user content upgrades,
+  # preserving the user's pre-content.
+  printf 'My notes.\n\nMore.\n\n# Tressoir Guidance\n\nBefore beginning substantial work, read and follow `IB/TRESSOIR.md`.\n' \
+    > "$legacy/AGENTS.md"
+
+  "$SETUP" setup --root "$legacy" --claude --codex \
+    --register-guidance --no-vscode > "$TMP_ROOT/guidance-legacy.log"
+
+  grep 'upgraded root guidance: CLAUDE.md' "$TMP_ROOT/guidance-legacy.log" >/dev/null
+  grep 'upgraded root guidance: AGENTS.md' "$TMP_ROOT/guidance-legacy.log" >/dev/null
+  grep -Fx '@IB/STATE.md' "$legacy/CLAUDE.md" >/dev/null
+  grep -Fx '@IB/CANON/ROOT_CANON.md' "$legacy/CLAUDE.md" >/dev/null
+  [ "$(grep -c '^# Tressoir Guidance$' "$legacy/CLAUDE.md")" -eq 1 ]
+  grep -Fx 'My notes.' "$legacy/AGENTS.md" >/dev/null
+  grep -Fx 'Read durable project decisions in `IB/CANON/ROOT_CANON.md`.' \
+    "$legacy/AGENTS.md" >/dev/null
+  [ "$(grep -c '^# Tressoir Guidance$' "$legacy/AGENTS.md")" -eq 1 ]
+
+  digest_tree "$legacy" > "$TMP_ROOT/guidance-legacy-before.txt"
+  "$SETUP" setup --root "$legacy" --claude --codex \
+    --register-guidance --no-vscode > "$TMP_ROOT/guidance-legacy-rerun.log"
+  digest_tree "$legacy" > "$TMP_ROOT/guidance-legacy-after.txt"
+  diff -u "$TMP_ROOT/guidance-legacy-before.txt" "$TMP_ROOT/guidance-legacy-after.txt"
+  grep 'already registered (current Tressoir guidance): CLAUDE.md' \
+    "$TMP_ROOT/guidance-legacy-rerun.log" >/dev/null
+)
+
+case_guidance_ambiguous_preserved() (
+  set -e
+  # An unrelated TRESSOIR.md mention is preserved untouched with a manual-action notice.
+  unrelated="$TMP_ROOT/guidance-unrelated"
+  mkdir -p "$unrelated"
+  printf '# My Agents\n\nAlready read OTHER/TRESSOIR.md somewhere.\n' > "$unrelated/AGENTS.md"
+  cp "$unrelated/AGENTS.md" "$TMP_ROOT/guidance-unrelated-before"
+  set +e
+  "$SETUP" setup --root "$unrelated" --codex \
+    --register-guidance --no-vscode > "$TMP_ROOT/guidance-unrelated.log" 2>&1
+  status=$?
+  set -e
+  [ "$status" -eq 2 ]
+  cmp "$TMP_ROOT/guidance-unrelated-before" "$unrelated/AGENTS.md"
+  grep 'preserved: AGENTS.md' "$TMP_ROOT/guidance-unrelated.log" >/dev/null
+  grep 'manual action for AGENTS.md' "$TMP_ROOT/guidance-unrelated.log" >/dev/null
+
+  # A duplicated managed section is preserved untouched.
+  dup="$TMP_ROOT/guidance-duplicate"
+  mkdir -p "$dup"
+  printf '# Tressoir Guidance\n\n@IB/TRESSOIR.md\n\n# Tressoir Guidance\n\n@IB/TRESSOIR.md\n' \
+    > "$dup/CLAUDE.md"
+  cp "$dup/CLAUDE.md" "$TMP_ROOT/guidance-duplicate-before"
+  set +e
+  "$SETUP" setup --root "$dup" --claude \
+    --register-guidance --no-vscode > "$TMP_ROOT/guidance-duplicate.log" 2>&1
+  status=$?
+  set -e
+  [ "$status" -eq 2 ]
+  cmp "$TMP_ROOT/guidance-duplicate-before" "$dup/CLAUDE.md"
+  grep 'preserved: CLAUDE.md' "$TMP_ROOT/guidance-duplicate.log" >/dev/null
+)
+
+case_misplaced_agent_adapter() (
+  set -e
+  # A KNOWN Tressoir adapter misplaced under the singular .agent/skills path warns and survives.
+  known="$TMP_ROOT/agent-adapter-known"
+  mkdir -p "$known/.agent/skills/tressoir-plan"
+  printf 'stale adapter\n' > "$known/.agent/skills/tressoir-plan/SKILL.md"
+  cp "$known/.agent/skills/tressoir-plan/SKILL.md" "$TMP_ROOT/agent-adapter-known-before"
+  set +e
+  "$SETUP" setup --root "$known" --codex --no-vscode \
+    > "$TMP_ROOT/agent-adapter-known.log" 2>&1
+  status=$?
+  set -e
+  [ "$status" -eq 2 ]
+  grep -F '.agent/skills/tressoir-plan is a non-canonical Tressoir adapter' \
+    "$TMP_ROOT/agent-adapter-known.log" >/dev/null
+  cmp "$TMP_ROOT/agent-adapter-known-before" "$known/.agent/skills/tressoir-plan/SKILL.md"
+
+  # UNRELATED content under .agent/skills produces no warning and survives.
+  unrelated="$TMP_ROOT/agent-adapter-unrelated"
+  mkdir -p "$unrelated/.agent/skills/some-other-tool"
+  printf 'unrelated\n' > "$unrelated/.agent/skills/some-other-tool/SKILL.md"
+  "$SETUP" setup --root "$unrelated" --codex --no-vscode \
+    > "$TMP_ROOT/agent-adapter-unrelated.log" 2>&1
+  ! grep -F 'non-canonical Tressoir adapter' "$TMP_ROOT/agent-adapter-unrelated.log" >/dev/null
+  assert_file "$unrelated/.agent/skills/some-other-tool/SKILL.md"
+)
+
+case_claude_settings_merge() (
+  set -e
+  # An existing .claude/settings.json is merged in place: Tressoir defaults are
+  # enforced while unrelated keys, env entries, and restrictive mode are preserved.
+  proj="$TMP_ROOT/claude-settings-merge"
+  mkdir -p "$proj/.claude"
+  printf '{\n  "theme": "dark",\n  "autoMemoryEnabled": true,\n  "env": {"FOO": "bar"}\n}\n' \
+    > "$proj/.claude/settings.json"
+  chmod 600 "$proj/.claude/settings.json"
+  printf 'USER TEMP SENTINEL\n' > "$proj/.claude/settings.json.tressoir.tmp"
+
+  "$SETUP" setup --root "$proj" --claude \
+    --register-guidance --no-vscode > "$TMP_ROOT/claude-settings-merge.log"
+
+  grep 'updated Claude settings: .claude/settings.json' \
+    "$TMP_ROOT/claude-settings-merge.log" >/dev/null
+  grep -F '"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "400000"' \
+    "$proj/.claude/settings.json" >/dev/null
+  grep -F '"autoMemoryEnabled": false' "$proj/.claude/settings.json" >/dev/null
+  grep -F '"FOO": "bar"' "$proj/.claude/settings.json" >/dev/null
+  grep -F '"theme": "dark"' "$proj/.claude/settings.json" >/dev/null
+  ! grep -F '"autoMemoryEnabled": true' "$proj/.claude/settings.json" >/dev/null
+  if stat -f '%Lp' "$proj/.claude/settings.json" >/dev/null 2>&1; then
+    mode=$(stat -f '%Lp' "$proj/.claude/settings.json")
+  else
+    mode=$(stat -c '%a' "$proj/.claude/settings.json")
+  fi
+  [ "$mode" = 600 ]
+  grep -Fx 'USER TEMP SENTINEL' \
+    "$proj/.claude/settings.json.tressoir.tmp" >/dev/null
+
+  # Rerun is byte-idempotent and reported as already current.
+  cp "$proj/.claude/settings.json" "$TMP_ROOT/claude-settings-merge-before"
+  "$SETUP" setup --root "$proj" --claude \
+    --register-guidance --no-vscode > "$TMP_ROOT/claude-settings-merge-rerun.log"
+  cmp "$TMP_ROOT/claude-settings-merge-before" "$proj/.claude/settings.json"
+  grep 'already current (Claude settings): .claude/settings.json' \
+    "$TMP_ROOT/claude-settings-merge-rerun.log" >/dev/null
+
+  # A symlinked settings.json is refused and preserved.
+  sym="$TMP_ROOT/claude-settings-symlink"
+  outside="$TMP_ROOT/claude-settings-outside"
+  mkdir -p "$sym/.claude" "$outside"
+  printf '{"keep": true}\n' > "$outside/settings.json"
+  ln -s "$outside/settings.json" "$sym/.claude/settings.json"
+  set +e
+  "$SETUP" setup --root "$sym" --claude \
+    --register-guidance --no-vscode > "$TMP_ROOT/claude-settings-symlink.log" 2>&1
+  status=$?
+  set -e
+  [ "$status" -eq 2 ]
+  grep 'refusing to edit a symlink for Claude settings' \
+    "$TMP_ROOT/claude-settings-symlink.log" >/dev/null
+  grep -Fx '{"keep": true}' "$outside/settings.json" >/dev/null
+
+  # A termination immediately after copying existing settings removes the
+  # private duplicate while leaving the original settings byte-identical.
+  interrupted="$TMP_ROOT/claude-settings-interrupted"
+  tools="$TMP_ROOT/claude-settings-interrupt-tools"
+  mkdir -p "$interrupted/.claude" "$tools"
+  printf '{"env":{"SECRET_SENTINEL":"keep-private"},"keep":true}\n' \
+    > "$interrupted/.claude/settings.json"
+  chmod 600 "$interrupted/.claude/settings.json"
+  cp "$interrupted/.claude/settings.json" \
+    "$TMP_ROOT/claude-settings-interrupted-before"
+  real_cp=$(command -v cp)
+  cat > "$tools/cp" <<'EOF'
+#!/usr/bin/env bash
+set -u
+"$TRESSOIR_TEST_REAL_CP" "$@" || exit $?
+case "${1:-}:${3:-}" in
+  -p:*/.claude/.tressoir-settings.*)
+    kill -TERM "$PPID"
+    sleep 1
+    ;;
+esac
+EOF
+  chmod +x "$tools/cp"
+  set +e
+  PATH="$tools:$PATH" TRESSOIR_TEST_REAL_CP="$real_cp" \
+    "$SETUP" setup --root "$interrupted" --claude \
+    --register-guidance --no-vscode \
+    > "$TMP_ROOT/claude-settings-interrupted.log" 2>&1
+  status=$?
+  set -e
+  [ "$status" -eq 143 ]
+  cmp "$TMP_ROOT/claude-settings-interrupted-before" \
+    "$interrupted/.claude/settings.json"
+  [ -z "$(find "$interrupted/.claude" -maxdepth 1 \
+    -name '.tressoir-settings.*' -print -quit)" ]
+)
+
 run_case "fresh all-harness setup, extension install, and idempotent rerun" \
   case_fresh_all_with_extension
 run_case "legacy bridge conflict skips the unusable standalone extension" \
@@ -561,12 +810,22 @@ run_case "each harness installs only its skill adapter tree" case_each_harness
 run_case "dry-run performs no mutation" case_dry_run
 run_case "opt-in root guidance is contained, idempotent, and harness-specific" \
   case_opt_in_root_guidance
+run_case "legacy generated guidance upgrades in place, preserving pre-content" \
+  case_guidance_legacy_upgrade
+run_case "edited, duplicated, or unrelated guidance is preserved" \
+  case_guidance_ambiguous_preserved
+run_case "Claude settings merge preserves metadata and cleans interrupted private temps" \
+  case_claude_settings_merge
+run_case "known misplaced .agent adapter warns and survives; unrelated content is silent" \
+  case_misplaced_agent_adapter
 run_case "user files and occupied adapter paths are preserved" \
   case_preserve_user_files_and_collisions
 run_case "extension failure reports committed project setup honestly" \
   case_extension_failure_is_honest
 run_case "symlinked managed ancestor is rejected" \
   case_reject_symlinked_managed_ancestor
+run_case "unsafe canon-artifacts paths are rejected before writes" \
+  case_reject_unsafe_canon_artifacts_path
 run_case "unverified payload files and symlinks are rejected" \
   case_reject_unverified_payload_content
 

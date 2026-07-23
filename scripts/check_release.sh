@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 EXTENSION="$ROOT/extension"
 PAYLOAD="$ROOT/share/tressoir-external"
-VERSION="0.1.2"
+VERSION="0.1.3"
 VSIX="$EXTENSION/dist/tressoir-artifacts-$VERSION.vsix"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/tressoir-release-check.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
@@ -28,6 +28,14 @@ cmp "$EXTENSION/src/notebook/assets/tressoir-md.js" \
 cmp "$EXTENSION/src/notebook/assets/tressoir-md.js" "$TMP/tressoir-md.js"
 grep -F 'free_form_feedback' "$TMP/extension.js" >/dev/null
 grep -F 'tressoir.bridge' "$TMP/extension.js" >/dev/null
+
+# Stable explicit-input identity must ship in both the projector and the webview morph:
+# the projector emits a per-input data-morph-key, and the webview configures morphdom
+# getNodeKey so answers follow their key instead of DOM position.
+unzip -p "$VSIX" extension/dist/notebook-webview.js > "$TMP/notebook-webview.js"
+grep -F 'data-morph-key' "$TMP/tressoir-md.js" >/dev/null
+grep -F 'data-morph-key' "$TMP/notebook-webview.js" >/dev/null
+grep -F 'getNodeKey' "$TMP/notebook-webview.js" >/dev/null
 grep -Fx 'MIT License' "$ROOT/LICENSE" >/dev/null
 grep -Fx 'MIT License' "$TMP/LICENSE.md" >/dev/null
 
@@ -35,7 +43,7 @@ node - "$TMP/package.json" <<'NODE'
 const fs = require('fs')
 const manifest = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
 const identity = `${manifest.publisher}.${manifest.name}@${manifest.version}`
-if (identity !== 'tressoir.tressoir-artifacts@0.1.2') {
+if (identity !== 'tressoir.tressoir-artifacts@0.1.3') {
   throw new Error(`unexpected packaged identity: ${identity}`)
 }
 if (manifest.license !== 'MIT') {
@@ -104,6 +112,7 @@ node --check "$PAYLOAD/skills/tressoir-artifact-md/scripts/check_md.js"
 node "$PAYLOAD/skills/tressoir-artifact-md/scripts/check_md.js" \
   "$PAYLOAD/skills/tressoir-artifact-md/user_artifact_md_template/PLAN.tressoir.md" \
   "$PAYLOAD/skills/tressoir-artifact-md/user_artifact_md_template/INTERACTIVE.tressoir.md"
+tests/test_artifact_md_checker.sh
 tests/test_setup.sh
 tests/test_install.sh
 

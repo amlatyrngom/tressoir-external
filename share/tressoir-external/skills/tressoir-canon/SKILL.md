@@ -1,9 +1,9 @@
 ---
-name: tressoir-memory
-description: Maintain, promote, split, realign, and merge-reconcile lightweight durable project memory in ROOT_CANON.md and focused subsystem canon files.
+name: tressoir-canon
+description: Maintain, promote, split, realign, and merge-reconcile lightweight durable project canon and its known-good reusable CANON_ARTIFACTS.
 ---
 
-# Tressoir Markdown Memory
+# Tressoir Canon
 
 Within the **IB (Interpretable Blueprint)**, use plain Markdown canon for knowledge that should influence future work beyond the current task. This is a small, human-readable analogue of a canon learner: it has no TOML schema, database, background service, or automatic log ingestion, but it preserves the useful curation behaviors.
 
@@ -14,12 +14,23 @@ IB/CANON/
 ├── ROOT_CANON.md
 ├── EDITOR_CANON.md
 ├── RELEASE_CANON.md
-└── <SUBSYSTEM>_CANON.md
+├── <SUBSYSTEM>_CANON.md
+└── CANON_ARTIFACTS/
+    ├── README.md
+    └── <known-good reusable examples>
 ```
 
 `ROOT_CANON.md` stays small and frequently readable. It contains only cross-cutting durable guidance plus an index with one-line descriptions of subsystem files. Read only the subsystem canon relevant to current work.
 
 Prefer a few coherent domain files over many tiny files. Do not put all knowledge in the root, and do not create a subsystem file for one debugging note.
+
+## Canon artifacts
+
+Use `IB/CANON/CANON_ARTIFACTS/` for reviewed, known-good examples that are more useful in their native file format than rewritten as prose. Suitable contents include reusable configuration files, scripts, templates, fixtures, and small reference implementations.
+
+Canon artifacts are part of canon and **should be version-controlled**. Promote a file there only after its behavior and reuse value are understood and validated. Give it a descriptive path, remove secrets and machine-specific assumptions, and document its purpose, usage, prerequisites, validation, and important limits in `CANON_ARTIFACTS/README.md` or a nearby Markdown file.
+
+Do not use `CANON_ARTIFACTS/` for generated output, dependencies, binaries, raw downloads, active task work, unreviewed experiments, or one-off debugging. Keep candidates in `ARTIFACTS/` or `TMP/` until they are proven. When prose canon relies on an example, link to its stable relative path instead of duplicating its full contents.
 
 ## Canon entity types
 
@@ -54,7 +65,7 @@ Promotion means:
 5. Record a stable source or code anchor when useful.
 6. Update the root index only when a subsystem file is added or its scope changes.
 7. After promotion, condense duplicated detail from `STATE.md`.
-8. Do not make temporary `ARTIFACTS/` or `TMP/` files the permanent authority. Move the durable rule into canon, a skill, or documentation.
+8. Do not make temporary `ARTIFACTS/` or `TMP/` files the permanent authority. Move a durable rule into prose canon, a reusable known-good example into `CANON_ARTIFACTS/`, or a workflow into a skill or documentation.
 
 Do not promote transient progress, failed experiments without a reusable lesson, raw logs, or “we just did X” announcements.
 
@@ -90,8 +101,9 @@ Run a focused realignment when canon becomes duplicated, stale, contradictory, c
 6. Convert completed phases, migrations, and “for now” narration into timeless present-tense guidance. Keep recent context only when it still explains a constraint.
 7. Decompose incoming mixed lessons across the correct domains.
 8. Promote only very stable cross-cutting items to the root.
-9. Reconcile related skills and docs when they now contradict canon; do not leave several active sources saying different things.
-10. Validate links, headings, index descriptions, contradictions, and changed-file scope. Summarize what moved, merged, split, or became superseded.
+9. Revalidate affected `CANON_ARTIFACTS/` examples and update, replace, or remove examples that no longer match current canon or source behavior.
+10. Reconcile related skills and docs when they now contradict canon; do not leave several active sources saying different things.
+11. Validate links, headings, index descriptions, canon-artifact references, contradictions, and changed-file scope. Summarize what moved, merged, split, or became superseded.
 
 Realignment is curation, not an append-only merge and not an excuse to scan or rewrite unrelated project files.
 
@@ -100,11 +112,11 @@ Realignment is curation, not an append-only merge and not an excuse to scan or r
 A source merge and a canon merge are different problems.
 
 1. Inspect `git status`, diffs, conflicts, staged files, and both branches' relevant IB changes.
-2. Separate source conflicts from `STATE.md`, skills/docs, and canon conflicts.
+2. Separate source conflicts from `STATE.md`, skills/docs, prose-canon, and canon-artifact conflicts.
 3. Resolve source according to accepted product intent first when possible.
 4. Reconcile canon against the resulting system; do not choose a side solely because its lines won a textual merge.
 5. Preserve complementary durable lessons from both branches, deduplicate equivalent entries, and mark useful superseded history.
-6. Reconcile skills and docs when merged behavior changed a durable workflow.
+6. Reconcile skills, docs, and `CANON_ARTIFACTS/` examples when merged behavior changed a durable workflow.
 7. Never synthesize, read, or rewrite `TASK.md` during merge work unless the user explicitly requests it.
 8. Ask the user when branches encode genuinely incompatible product, safety, or knowledge-retention intent.
 9. Validate source tests plus canon links and consistency after reconciliation.
@@ -117,11 +129,14 @@ Prefer an atomic complete Markdown file replacement over leaving a half-edited c
 ## Invariant — Root guidance registration is explicit and narrow
 
 Setup may create skill adapters at unoccupied paths. Only when the user opts
-in, it may create or append an idempotent `# Tressoir Guidance` section in the
-selected harness target: root `CLAUDE.md`, root `AGENTS.md`, or Pi-only
-`.pi/APPEND_SYSTEM.md`. It does so only if that file does not already mention
-`TRESSOIR.md`. It preserves unsafe targets and never edits nested Claude,
-override, rules, global, or Pi `SYSTEM.md` files.
+in, it may create or append an idempotent `# Tressoir Guidance` section, or
+upgrade the exact section generated by an earlier release, in root `CLAUDE.md`,
+root `AGENTS.md`, or Pi-only `.pi/APPEND_SYSTEM.md`. It preserves edited,
+duplicated, unrelated, and unsafe guidance targets. For selected Claude setup,
+the same opt-in may merge the two documented Tressoir defaults into a regular,
+non-symlink `.claude/settings.json` while preserving other keys and restrictive
+permissions. Setup never edits nested Claude instructions, overrides, rules,
+global instructions, or Pi `SYSTEM.md` files.
 
 Evidence: accepted Tressoir External MVP root-guidance decision.
 ```

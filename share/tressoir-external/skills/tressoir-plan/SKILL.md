@@ -14,6 +14,8 @@ A plan is a pair in one sticky upper-case folder under `IB/ARTIFACTS/`:
 - `TASK.md` — optional human-only scratchpad; do not read or edit automatically, only on explicit user request at the relevant point.
 - `interactions.json` — human answers written by the artifact editor.
 
+The human is never expected to open `PLAN.md` or any other agent-facing source; every decision, change, caveat, and result they need must appear in `PLAN.tressoir.md`.
+
 Read the `tressoir-artifact-md` skill before authoring the projection.
 
 The folder belongs to the broad task, not only this plan. Reuse it for explainers, research, interactive artifacts, and later user-requested subplans. Name a later pair for its step, such as `MIGRATION_PLAN.md` + `MIGRATION_PLAN.tressoir.md`, rather than creating a new artifact folder. A surface such as `NEXT_INTERACTIVE.tressoir.md` can be another sibling. Create a new folder only for a genuinely separate workstream or when the user requests it.
@@ -78,6 +80,8 @@ Lifecycle labels:
 - `Completed` — accepted and validated.
 
 A milestone at `Planning` or later must include `#### Planned Changes`. Every proposed code/config edit must appear as a fenced diff or language snippet under an item naming its file and symbol. Do not narrate a code change only in prose, and do not leave orphan snippets.
+
+When a planned edit introduces or changes a public interface or object lifecycle, also show its parameter and return types, who creates it, who owns it for how long, who consumes it, and the end-to-end request/data flow. Do not add this ceremony to an internal edit with no interface consequence.
 
 ## Progressive resolution
 

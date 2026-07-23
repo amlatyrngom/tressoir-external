@@ -1,6 +1,6 @@
 ---
 name: tressoir-working-area
-description: Use and maintain the project-local IB (Interpretable Blueprint), including explicit-request TASK.md access, proactively consolidated STATE.md, durable ARTIFACTS, and disposable TMP.
+description: Use and maintain the project-local IB (Interpretable Blueprint), including explicit-request TASK.md access, proactively consolidated STATE.md, task ARTIFACTS, version-controlled CANON_ARTIFACTS, and disposable TMP.
 ---
 
 # Tressoir Working Area
@@ -16,7 +16,9 @@ IB/
 ├── ARTIFACTS/
 ├── TMP/
 ├── CANON/
-│   └── ROOT_CANON.md
+│   ├── ROOT_CANON.md
+│   └── CANON_ARTIFACTS/
+│       └── README.md
 └── skills/
 ```
 
@@ -79,6 +81,12 @@ When an artifact is completed or superseded, keep it only while it remains a use
 
 Durable canon and skills should not treat a temporary plan or report as their permanent authority. Promote the timeless lesson into canon, a skill, documentation, or a referenced helper, then point future work to that authoritative source.
 
+## `CANON/CANON_ARTIFACTS/`
+
+Use `IB/CANON/CANON_ARTIFACTS/` for reviewed, validated files that are known-good reusable examples: configuration files, scripts, templates, fixtures, and small reference implementations. These are canonical project knowledge in executable or native form, not task-working artifacts.
+
+Canon artifacts should be version-controlled. Use descriptive stable paths, exclude secrets and machine-specific state, and document purpose, usage, prerequisites, validation, and limits in the directory `README.md` or a nearby Markdown file. Keep candidates in `ARTIFACTS/` or `TMP/` until their correctness and reuse value are established. Revalidate affected examples when source behavior or prose canon changes.
+
 ## `TMP/`
 
 Use `IB/TMP/` for disposable internal material:
@@ -90,9 +98,9 @@ Use `IB/TMP/` for disposable internal material:
 - temporary downloads;
 - intermediate research notes.
 
-Do not present a low-value debugging dump as a durable artifact. Promote material into `ARTIFACTS/` or `CANON/` only after it becomes reusable.
+Do not present a low-value debugging dump as a durable artifact. Promote material into `ARTIFACTS/` or `CANON/` only after it becomes reusable; promote native-file examples into `CANON/CANON_ARTIFACTS/` only after validation.
 
-Setup may create a narrow default `IB/.gitignore` when none exists. It ignores `TMP/`, `vendor/` cache directories, `.env`, and `.DS_Store`; it deliberately keeps state, canon, skills, durable artifacts, and interaction records visible to version control. Projects decide their final version-control policy. Do not silently edit an existing `.gitignore`.
+Setup may create a narrow default `IB/.gitignore` when none exists. It ignores `TMP/`, `vendor/` cache directories, `.env`, and `.DS_Store`; it deliberately keeps state, prose canon, canon artifacts, skills, durable task artifacts, and interaction records visible to version control. Projects decide their final version-control policy. Do not silently edit an existing `.gitignore`.
 
 ## Normal operation
 

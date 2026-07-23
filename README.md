@@ -5,7 +5,7 @@ Tressoir External is a small, portable approximation of the Tressoir workflow fo
 - a self-contained regular VS Code extension for trusted `.tressoir.md` and `.tressoir.html` artifacts;
 - a project-local **IB (Interpretable Blueprint)** working area;
 - six portable Agent Skills;
-- lightweight Markdown canon/memory;
+- lightweight Markdown canon, including version-controlled reusable canon artifacts;
 - non-overwriting skill adapters for Claude Code, OpenAI Codex CLI, and the TypeScript Pi coding agent; and
 - a macOS/Linux Bash setup command.
 
@@ -58,11 +58,14 @@ When at least one agent harness is selected, it also asks:
 Register root guidance in system prompts? [y/N]
 ```
 
-If accepted, Claude uses root `CLAUDE.md` with `@IB/TRESSOIR.md`; Codex uses
-root `AGENTS.md`; Pi-only setup uses `.pi/APPEND_SYSTEM.md`. Codex and Pi
-selected together share `AGENTS.md`, avoiding duplicate guidance. Missing files
-are created. Existing regular files receive a `# Tressoir Guidance` section
-only when they do not already mention `TRESSOIR.md`.
+If accepted, the managed `# Tressoir Guidance` section directly names
+`IB/TRESSOIR.md`, `IB/STATE.md`, and `IB/CANON/ROOT_CANON.md`. Claude uses root
+`CLAUDE.md` with `@`-includes; Codex uses root `AGENTS.md`; Pi-only setup uses
+`.pi/APPEND_SYSTEM.md`. Codex and Pi selected together share `AGENTS.md`,
+avoiding duplicate guidance. Missing files are created. Setup upgrades only the
+exact section it generated in earlier releases and preserves edited, duplicated,
+or unrelated content. For Claude, setup also applies two Tressoir defaults to
+`.claude/settings.json` (a smaller auto-compact window and auto-memory off).
 
 The current directory is the target project. The installer downloads the public
 source archive into a temporary directory, builds the VSIX there when selected,
@@ -112,7 +115,7 @@ npm run package:vsix
 ../bin/tressoir-external setup \
   --root /path/to/project \
   --claude --codex --pi --register-guidance \
-  --vsix "$PWD/dist/tressoir-artifacts-0.1.2.vsix"
+  --vsix "$PWD/dist/tressoir-artifacts-0.1.3.vsix"
 ```
 
 Useful setup options:
@@ -120,7 +123,8 @@ Useful setup options:
 ```text
 --root PATH        Target another project; default is exactly the current directory
 --register-guidance
-                   Create/append selected harness prompt guidance
+                   Create, append, or upgrade selected harness prompt guidance
+                   naming IB/TRESSOIR.md, IB/STATE.md, and IB/CANON/ROOT_CANON.md
 --vsix PATH        Install the supplied Tressoir Artifacts VSIX
 --vscode-bin PATH  Use code-insiders or an absolute VS Code CLI path
 --no-vscode        Skip extension installation
@@ -151,13 +155,15 @@ IB/
 ├── ARTIFACTS/
 ├── TMP/
 ├── CANON/
-│   └── ROOT_CANON.md
+│   ├── ROOT_CANON.md
+│   └── CANON_ARTIFACTS/
+│       └── README.md
 └── skills/
     ├── tressoir-artifact-md/
     ├── tressoir-artifact-html/
     ├── tressoir-plan/
     ├── tressoir-working-area/
-    ├── tressoir-memory/
+    ├── tressoir-canon/
     └── tressoir-structured-review/
 ```
 
@@ -180,6 +186,8 @@ For selected Claude setup, the managed section in root `CLAUDE.md` is:
 # Tressoir Guidance
 
 @IB/TRESSOIR.md
+@IB/STATE.md
+@IB/CANON/ROOT_CANON.md
 ```
 
 For selected Codex setup, the managed section in root `AGENTS.md` is:
@@ -187,23 +195,47 @@ For selected Codex setup, the managed section in root `AGENTS.md` is:
 ```md
 # Tressoir Guidance
 
-Before beginning substantial work, read and follow `IB/TRESSOIR.md`.
+Before substantial work, read and follow `IB/TRESSOIR.md`.
+Read current status and open decisions in `IB/STATE.md`.
+Read durable project decisions in `IB/CANON/ROOT_CANON.md`.
 ```
 
 For Pi-only setup, that same prose section is written to
 `.pi/APPEND_SYSTEM.md`. When Codex and Pi are both selected, root `AGENTS.md`
 serves both and `.pi/APPEND_SYSTEM.md` is not created.
 
+When Claude is selected and guidance is registered, setup also applies Tressoir
+defaults to root `.claude/settings.json`:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "400000"
+  },
+  "autoMemoryEnabled": false
+}
+```
+
+Claude Code's 1M-token context default is costly and unnecessary here, and the
+Interpretable Blueprint owns project memory, so auto-memory stays off. An
+existing `settings.json` is updated atomically with `jq` or `python3`: only
+these two keys are set, and all other settings, environment entries, and
+restrictive file permissions are preserved.
+A symlinked or non-regular `settings.json` is left untouched and reported. This
+is Claude-only; Codex has sensible defaults and is not modified.
+
 Registration is intentionally narrow:
 
-- If the target file already contains `TRESSOIR.md`, setup leaves it unchanged.
 - If the root target is absent, setup creates it.
-- If it is an existing regular file without a mention, setup appends one section.
+- If it is a regular file without any Tressoir guidance, setup appends one section.
+- If it still contains the exact section from an earlier release, setup upgrades that block in place.
+- If the managed section was edited or duplicated, or the file mentions `TRESSOIR.md` unrelatedly, setup preserves the file untouched and prints the section to add manually.
 - Reruns do not duplicate the section.
 - Symlinks, directories, and other incompatible targets are preserved and
   reported as safe degradation.
 - Setup never edits `.claude/CLAUDE.md`, `AGENTS.override.md`,
-  `.claude/rules/*`, `.pi/SYSTEM.md`, global instructions, or settings.
+  `.claude/rules/*`, `.pi/SYSTEM.md`, or global instructions. The only managed
+  settings are the two Claude keys above in `.claude/settings.json`.
 
 Declining the prompt preserves the earlier behavior: setup prints manual
 Claude, Codex, and Pi inclusion options and makes no instruction-file change.
@@ -218,10 +250,11 @@ Existing instruction precedence remains under user control.
 - `ARTIFACTS/` stores durable plans, research, explainers, reviews, and reusable helpers. Reuse one upper-case folder for the full lifetime of a broad task.
 - `TMP/` stores disposable logs, dumps, downloads, screenshots, and experiments.
 - `CANON/ROOT_CANON.md` indexes small, focused subsystem canon files.
+- `CANON/CANON_ARTIFACTS/` stores reviewed, validated configs, scripts, templates, fixtures, and small reference implementations that are known-good reusable examples. These files should be version-controlled, with their usage and limits documented in the directory.
 
-The installed `TRESSOIR.md` points to the exact skill to use for planning, artifacts, memory/upkeep, and structured review.
+The installed `TRESSOIR.md` points to the exact skill to use for planning, artifacts, canon/upkeep, and structured review.
 
-Setup also seeds `IB/.gitignore` on a create-only basis. Its narrow defaults ignore disposable `TMP/` contents, artifact-local `vendor/` caches, `.env`, and `.DS_Store`; it does not hide `TASK.md`, `STATE.md`, canon, skills, artifacts, or interaction records. An existing `IB/.gitignore` is always preserved.
+Setup also seeds `IB/.gitignore` on a create-only basis. Its narrow defaults ignore disposable `TMP/` contents, artifact-local `vendor/` caches, `.env`, and `.DS_Store`; it does not hide `TASK.md`, `STATE.md`, prose canon, `CANON_ARTIFACTS/`, skills, task artifacts, or interaction records. An existing `IB/.gitignore` is always preserved.
 
 ## Artifact template folder and checker
 
@@ -320,7 +353,7 @@ for non-clobbering, all-harness setup, and an idempotent rerun.
 
 The release gate:
 
-- runs 71 focused extension tests;
+- runs 85 focused extension tests;
 - builds from a clean `dist/`;
 - inspects the packaged manifest and archive;
 - requires both artifact editors and all runtime assets;
@@ -329,9 +362,10 @@ The release gate:
 - checks both distributed Markdown templates with the bundled checker;
 - regenerates payload checksums; and
 - runs filesystem setup fixtures for combinations, idempotence, dry-run,
-  collisions, root-guidance creation/append/mention detection, path spaces,
-  extension failure, extension upgrade, legacy-bridge conflict, and symlink
-  containment;
+  collisions, root-guidance creation/append/upgrade/preservation, Claude
+  settings-defaults merge, misplaced
+  `.agent` adapter detection, path spaces, extension failure, extension upgrade,
+  legacy-bridge conflict, and symlink containment;
 - runs an offline piped-bootstrap fixture that builds in temporary storage,
   installs all selected integrations, registers opt-in root guidance, and
   cleans up; and
@@ -343,7 +377,7 @@ Release checks build transient output locally; no npm package is published.
 For a final desktop smoke, install the built VSIX into isolated VS Code directories and confirm:
 
 ```text
-tressoir.tressoir-artifacts@0.1.2
+tressoir.tressoir-artifacts@0.1.3
 ```
 
 ## Licensing

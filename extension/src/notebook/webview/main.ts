@@ -331,6 +331,12 @@ async function morphPreview(message: NotebookUpdateMessage): Promise<void> {
   target.className = 'tressoir-preview'
   target.innerHTML = projectSource(message.sourceHtml)
   morphdom(previewEl, target, {
+    // Match nodes by stable identity so reordering/renaming an explicit `:::input`
+    // moves the correct row (and its skipped textarea) instead of binding by position.
+    getNodeKey(node) {
+      const el = node.nodeType === 1 ? (node as Element) : null
+      return el?.getAttribute('data-morph-key') || el?.id || undefined
+    },
     onBeforeElUpdated(fromEl, toEl) {
       // Never re-morph (or re-run) an already-executing authored script.
       if (fromEl.tagName === 'SCRIPT') {
@@ -345,9 +351,17 @@ async function morphPreview(message: NotebookUpdateMessage): Promise<void> {
       return true
     },
     onBeforeNodeDiscarded(node) {
-      // Keep author-protected subtrees even if they are absent from the new source position.
-      if (node.nodeType === 1 && (node as Element).hasAttribute('data-morph-skip')) {
-        return false
+      // Keep author-protected raw-HTML subtrees even if absent from the new source position,
+      // but let a removed/replaced keyed Markdown input discard its own skipped textarea so a
+      // retired decision cannot leave a stale answer box behind.
+      if (node.nodeType === 1) {
+        const element = node as Element
+        if (
+          element.hasAttribute('data-morph-skip') &&
+          !element.closest('.m-input[data-morph-key]')
+        ) {
+          return false
+        }
       }
       return true
     },

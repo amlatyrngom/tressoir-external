@@ -78,7 +78,7 @@ case "$*" in
     ;;
   "run package:vsix")
     mkdir -p dist
-    printf '%s\n' 'mock VSIX' > dist/tressoir-artifacts-0.1.2.vsix
+    printf '%s\n' 'mock VSIX' > dist/tressoir-artifacts-0.1.3.vsix
     printf '%s\n' 'mock package complete'
     ;;
   *)
@@ -102,7 +102,7 @@ case "${1:-}" in
   --install-extension)
     [ -f "${2:-}" ] || exit 3
     printf '%s\n' "$2" > "$MOCK_CODE_INSTALL_LOG"
-    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.2' > "$MOCK_CODE_STATE"
+    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.3' > "$MOCK_CODE_STATE"
     printf '%s\n' 'mock installation succeeded'
     ;;
   *)
@@ -143,26 +143,34 @@ case_piped_source_install() (
 
   assert_file "$project/IB/TRESSOIR.md"
   assert_file "$project/IB/skills/tressoir-artifact-md/SKILL.md"
+  assert_file "$project/IB/CANON/CANON_ARTIFACTS/README.md"
   for skill in \
     tressoir-artifact-md tressoir-artifact-html tressoir-plan \
-    tressoir-working-area tressoir-memory tressoir-structured-review; do
+    tressoir-working-area tressoir-canon tressoir-structured-review; do
     assert_link "$project/.claude/skills/$skill" "../../IB/skills/$skill"
     assert_link "$project/.agents/skills/$skill" "../../IB/skills/$skill"
   done
+  assert_absent "$project/IB/skills/tressoir-memory"
+  assert_absent "$project/.claude/skills/tressoir-memory"
+  assert_absent "$project/.agents/skills/tressoir-memory"
   assert_file "$project/CLAUDE.md"
   assert_file "$project/AGENTS.md"
   grep -Fx '# Tressoir Guidance' "$project/CLAUDE.md" >/dev/null
   grep -Fx '@IB/TRESSOIR.md' "$project/CLAUDE.md" >/dev/null
+  assert_file "$project/.claude/settings.json"
+  grep -F '"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "400000"' \
+    "$project/.claude/settings.json" >/dev/null
+  grep -F '"autoMemoryEnabled": false' "$project/.claude/settings.json" >/dev/null
   grep -Fx '# Tressoir Guidance' "$project/AGENTS.md" >/dev/null
   grep -Fx \
-    'Before beginning substantial work, read and follow `IB/TRESSOIR.md`.' \
+    'Before substantial work, read and follow `IB/TRESSOIR.md`.' \
     "$project/AGENTS.md" >/dev/null
   assert_absent "$project/.pi"
 
-  grep -Fx 'tressoir.tressoir-artifacts@0.1.2' "$state" >/dev/null
+  grep -Fx 'tressoir.tressoir-artifacts@0.1.3' "$state" >/dev/null
   built_vsix=$(sed -n '1p' "$install_log")
   case "$built_vsix" in
-    "$ephemeral"/*/source/tressoir-external-main/extension/dist/tressoir-artifacts-0.1.2.vsix)
+    "$ephemeral"/*/source/tressoir-external-main/extension/dist/tressoir-artifacts-0.1.3.vsix)
       ;;
     *)
       printf 'VSIX was not installed from temporary storage: %s\n' "$built_vsix" >&2
@@ -179,7 +187,7 @@ case_piped_source_install() (
   grep 'Claude Code target: CLAUDE.md' "$output" >/dev/null
   grep 'Codex target: AGENTS.md' "$output" >/dev/null
   grep 'Pi target: AGENTS.md (shared with Codex)' "$output" >/dev/null
-  grep 'Existing TRESSOIR.md mentions were left unchanged.' \
+  grep 'Edited, duplicated, or unrelated guidance was preserved unchanged.' \
     "$output" >/dev/null
   grep 'Setup never edits nested Claude, override, rules, global, or Pi SYSTEM.md files.' \
     "$output" >/dev/null
@@ -205,13 +213,17 @@ case_nothing_selected() (
   grep 'Nothing selected; no files were changed.' "$output" >/dev/null
 )
 
-if case_piped_source_install; then
+case_piped_source_install
+status=$?
+if [ "$status" -eq 0 ]; then
   pass "piped bootstrap builds in temporary storage and installs all selections"
 else
   fail "piped bootstrap builds in temporary storage and installs all selections"
 fi
 
-if case_nothing_selected; then
+case_nothing_selected
+status=$?
+if [ "$status" -eq 0 ]; then
   pass "noninteractive no-selection path makes no changes"
 else
   fail "noninteractive no-selection path makes no changes"

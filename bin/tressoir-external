@@ -8,7 +8,7 @@ set -u
 
 PAYLOAD_VERSION_EXPECTED="0.1.0"
 EXTENSION_ID="tressoir.tressoir-artifacts"
-EXTENSION_VERSION="0.1.2"
+EXTENSION_VERSION="0.1.3"
 LEGACY_EXTENSION_ID="tressoir.bridge"
 
 CLAUDE=0
@@ -25,15 +25,30 @@ VSCODE_RESOLVED=""
 VSIX_PATH=""
 INSTALLED_EXTENSION_VERSION=""
 INSTALLED_LEGACY_EXTENSION_VERSION=""
+CLAUDE_SETTINGS_TMP=""
 
 SKILLS=(
   "tressoir-artifact-md"
   "tressoir-artifact-html"
   "tressoir-plan"
   "tressoir-working-area"
-  "tressoir-memory"
+  "tressoir-canon"
   "tressoir-structured-review"
 )
+
+cleanup_claude_settings_tmp() {
+  if [ -n "$CLAUDE_SETTINGS_TMP" ]; then
+    rm -f "$CLAUDE_SETTINGS_TMP"
+    CLAUDE_SETTINGS_TMP=""
+  fi
+}
+
+# A Claude settings temp file can contain copied environment values. Remove it
+# on normal exit and interruption; successful replacement clears the path.
+trap cleanup_claude_settings_tmp EXIT
+trap 'cleanup_claude_settings_tmp; exit 129' HUP
+trap 'cleanup_claude_settings_tmp; exit 130' INT
+trap 'cleanup_claude_settings_tmp; exit 143' TERM
 
 usage() {
   cat <<'EOF'
@@ -48,14 +63,20 @@ Installs a supplied Tressoir Artifacts VSIX into regular VS Code by default.
 
 Root guidance registration is opt-in. With --register-guidance, setup creates
 or appends a small, idempotent Tressoir section in root CLAUDE.md, root
-AGENTS.md, and/or .pi/APPEND_SYSTEM.md for selected harnesses.
+AGENTS.md, and/or .pi/APPEND_SYSTEM.md for selected harnesses. It directly names
+IB/TRESSOIR.md, IB/STATE.md, and IB/CANON/ROOT_CANON.md, upgrades only the exact
+section it generated, and preserves edited, duplicated, or unrelated content.
+When Claude is selected, it also writes Tressoir defaults into .claude/settings.json
+(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW=400000 and autoMemoryEnabled=false), merging
+into any existing file with jq or python3 and preserving other settings.
 
 Options:
   --claude           Link portable skills into .claude/skills/
   --codex            Link portable skills into .agents/skills/
   --pi               Link portable skills into .agents/skills/
   --register-guidance
-                     Register IB/TRESSOIR.md in selected harness prompt files
+                     Register IB/TRESSOIR.md, IB/STATE.md, and
+                     IB/CANON/ROOT_CANON.md in selected harness prompt files
   --root PATH        Project root; defaults exactly to the current directory
   --vsix PATH        Tressoir Artifacts VSIX to install
   --vscode-bin PATH  VS Code CLI name or path; defaults to code
@@ -199,7 +220,7 @@ preflight_project() {
   [ -d "$ROOT" ] || fatal "project root is not a directory: $ROOT"
   [ ! -L "$ROOT" ] || fatal "resolved project root must not be a symlink"
 
-  for rel in IB IB/ARTIFACTS IB/TMP IB/CANON IB/skills; do
+  for rel in IB IB/ARTIFACTS IB/TMP IB/CANON IB/CANON/CANON_ARTIFACTS IB/skills; do
     validate_existing_dir_chain "$rel" ||
       fatal "unsafe or incompatible canonical directory path: $rel"
   done
@@ -217,6 +238,8 @@ preflight_project() {
   [ -f "$PAYLOAD/seeds/STATE.md" ] || fatal "payload is missing seeds/STATE.md"
   [ -f "$PAYLOAD/seeds/ROOT_CANON.md" ] ||
     fatal "payload is missing seeds/ROOT_CANON.md"
+  [ -f "$PAYLOAD/seeds/CANON_ARTIFACTS_README.md" ] ||
+    fatal "payload is missing seeds/CANON_ARTIFACTS_README.md"
 
   if [ "$NO_VSCODE" -eq 0 ]; then
     [ -n "$VSIX_INPUT" ] ||
@@ -426,6 +449,13 @@ setup_agents_skills() {
   local skill
   say ""
   say "Codex/Pi shared skills:"
+  # Report only KNOWN Tressoir adapters misplaced under the singular .agent/skills path.
+  # Never create, move, remove, or traverse unrelated .agent/skills content.
+  for skill in "${SKILLS[@]}"; do
+    if occupied "$ROOT/.agent/skills/$skill"; then
+      degrade ".agent/skills/$skill is a non-canonical Tressoir adapter (canonical path is .agents/skills/$skill); preserving it — migrate it manually"
+    fi
+  done
   if ! ensure_dir ".agents/skills"; then
     say "manual action: expose IB/skills/* under .agents/skills/ without replacing existing entries"
     return
@@ -439,15 +469,47 @@ setup_agents_skills() {
   done
 }
 
-guidance_is_registered() {
-  grep -F 'TRESSOIR.md' "$1" >/dev/null 2>&1
+# Classify an existing guidance file's managed "# Tressoir Guidance" section, so setup can
+# safely upgrade only what it generated and never clobber user-authored or ambiguous content.
+#   complete  = exactly the current generated section
+#   legacy    = exactly a prior release's generated section (safe to upgrade in place)
+#   absent    = no managed section and no unrelated TRESSOIR.md mention
+#   ambiguous = edited/duplicated managed section, or an unrelated TRESSOIR.md mention
+guidance_state() {
+  local file canonical legacy count section
+  file="$1"
+  canonical="$2"
+  legacy="$3"
+  count=$(grep -c '^# Tressoir Guidance$' "$file" 2>/dev/null)
+  count=${count:-0}
+  if [ "$count" -eq 0 ]; then
+    if grep -F 'TRESSOIR.md' "$file" >/dev/null 2>&1; then
+      echo ambiguous
+    else
+      echo absent
+    fi
+    return
+  fi
+  if [ "$count" -gt 1 ]; then
+    echo ambiguous
+    return
+  fi
+  section=$(awk '/^# Tressoir Guidance$/{f=1} f{print}' "$file")
+  if [ "$section" = "$(printf '# Tressoir Guidance\n\n%s' "$canonical")" ]; then
+    echo complete
+  elif [ "$section" = "$(printf '# Tressoir Guidance\n\n%s' "$legacy")" ]; then
+    echo legacy
+  else
+    echo ambiguous
+  fi
 }
 
 register_guidance_file() {
-  local relative body label destination
+  local relative canonical legacy label destination state pre
   relative="$1"
-  body="$2"
-  label="$3"
+  canonical="$2"
+  legacy="$3"
+  label="$4"
   destination="$ROOT/$relative"
 
   if [ -L "$destination" ]; then
@@ -460,18 +522,48 @@ register_guidance_file() {
       degrade "$relative (expected a regular file for $label)"
       return
     fi
-    if guidance_is_registered "$destination"; then
-      say "already registered: $relative mentions TRESSOIR.md"
-      return
-    fi
-    if [ "$DRY_RUN" -eq 1 ]; then
-      say "would append root guidance: $relative"
-      return
-    fi
-    printf '\n\n# Tressoir Guidance\n\n%s\n' "$body" >> "$destination" ||
-      fatal "failed to append root guidance: $relative"
-    say "appended root guidance: $relative"
-    return
+    state=$(guidance_state "$destination" "$canonical" "$legacy")
+    case "$state" in
+      complete)
+        say "already registered (current Tressoir guidance): $relative"
+        return
+        ;;
+      legacy)
+        if [ "$DRY_RUN" -eq 1 ]; then
+          say "would upgrade root guidance: $relative"
+          return
+        fi
+        pre=$(awk '/^# Tressoir Guidance$/{exit} {print}' "$destination")
+        if [ -n "$pre" ]; then
+          printf '%s\n\n# Tressoir Guidance\n\n%s\n' "$pre" "$canonical" > "$destination" ||
+            fatal "failed to upgrade root guidance: $relative"
+        else
+          printf '# Tressoir Guidance\n\n%s\n' "$canonical" > "$destination" ||
+            fatal "failed to upgrade root guidance: $relative"
+        fi
+        say "upgraded root guidance: $relative"
+        return
+        ;;
+      ambiguous)
+        degrade "$relative (existing guidance is edited, duplicated, or unrelated; preserving it)"
+        say "manual action for $relative — add this section yourself:"
+        say ""
+        say "# Tressoir Guidance"
+        say ""
+        printf '%s\n' "$canonical"
+        return
+        ;;
+      *)
+        if [ "$DRY_RUN" -eq 1 ]; then
+          say "would append root guidance: $relative"
+          return
+        fi
+        printf '\n\n# Tressoir Guidance\n\n%s\n' "$canonical" >> "$destination" ||
+          fatal "failed to append root guidance: $relative"
+        say "appended root guidance: $relative"
+        return
+        ;;
+    esac
   fi
 
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -481,7 +573,7 @@ register_guidance_file() {
 
   if (
     set -o noclobber
-    printf '# Tressoir Guidance\n\n%s\n' "$body" > "$destination"
+    printf '# Tressoir Guidance\n\n%s\n' "$canonical" > "$destination"
   ) 2>/dev/null; then
     say "created root guidance file: $relative"
   elif occupied "$destination"; then
@@ -491,31 +583,156 @@ register_guidance_file() {
   fi
 }
 
+register_claude_settings() {
+  # Rides the --register-guidance permission (same gate as editing CLAUDE.md).
+  # Applies Tressoir's Claude Code defaults, preserving any other settings:
+  #   env.CLAUDE_CODE_AUTO_COMPACT_WINDOW=400000 (Claude Code's 1M default is
+  #   costly and unnecessary here) and autoMemoryEnabled=false (IB owns memory).
+  local relative destination tmp writer had
+  relative=".claude/settings.json"
+  destination="$ROOT/$relative"
+
+  if [ -L "$destination" ]; then
+    degrade "$relative (refusing to edit a symlink for Claude settings)"
+    return
+  fi
+  if [ -e "$destination" ] && [ ! -f "$destination" ]; then
+    degrade "$relative (expected a regular file for Claude settings)"
+    return
+  fi
+
+  if command -v jq >/dev/null 2>&1; then
+    writer=jq
+  elif command -v python3 >/dev/null 2>&1; then
+    writer=python3
+  else
+    degrade "$relative (needs jq or python3; add manually: env.CLAUDE_CODE_AUTO_COMPACT_WINDOW=\"400000\", autoMemoryEnabled=false)"
+    return
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    if [ -f "$destination" ]; then
+      say "would update Claude settings: $relative"
+    else
+      say "would create Claude settings: $relative"
+    fi
+    return
+  fi
+
+  ensure_dir ".claude" || return
+
+  # Use a securely created, private file in the destination directory. Never
+  # claim or remove a predictable user-owned path. For updates, copy metadata
+  # before truncating the temp file so a restrictive settings mode is retained.
+  tmp=$(mktemp "$ROOT/.claude/.tressoir-settings.XXXXXX") ||
+    fatal "failed to create a temporary Claude settings file"
+  CLAUDE_SETTINGS_TMP="$tmp"
+  had=0
+  if [ -f "$destination" ]; then
+    had=1
+    cp -p "$destination" "$tmp" || {
+      cleanup_claude_settings_tmp
+      fatal "failed to preserve Claude settings metadata: $relative"
+    }
+  fi
+
+  if [ "$writer" = jq ]; then
+    if [ "$had" -eq 1 ]; then
+      jq -S '.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = "400000" | .autoMemoryEnabled = false' \
+        "$destination" > "$tmp" 2>/dev/null || {
+        cleanup_claude_settings_tmp
+        degrade "$relative (existing file is not valid JSON; preserving it)"
+        return
+      }
+    else
+      printf '{}\n' | jq -S '.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = "400000" | .autoMemoryEnabled = false' \
+        > "$tmp" || {
+          cleanup_claude_settings_tmp
+          fatal "failed to create Claude settings: $relative"
+        }
+    fi
+  else
+    if ! CLAUDE_SETTINGS_SRC="$destination" CLAUDE_SETTINGS_DST="$tmp" python3 - <<'PY' 2>/dev/null
+import json, os
+src = os.environ["CLAUDE_SETTINGS_SRC"]
+dst = os.environ["CLAUDE_SETTINGS_DST"]
+data = {}
+if os.path.isfile(src):
+    with open(src) as handle:
+        data = json.load(handle)
+if not isinstance(data, dict):
+    raise SystemExit(1)
+env = data.get("env")
+if not isinstance(env, dict):
+    env = {}
+env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "400000"
+data["env"] = env
+data["autoMemoryEnabled"] = False
+with open(dst, "w") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+    then
+      cleanup_claude_settings_tmp
+      degrade "$relative (existing file is not valid JSON; preserving it)"
+      return
+    fi
+  fi
+
+  if [ "$had" -eq 1 ] && cmp -s "$tmp" "$destination"; then
+    cleanup_claude_settings_tmp
+    say "already current (Claude settings): $relative"
+    return
+  fi
+  mv "$tmp" "$destination" || {
+    cleanup_claude_settings_tmp
+    fatal "failed to write Claude settings: $relative"
+  }
+  CLAUDE_SETTINGS_TMP=""
+  if [ "$had" -eq 1 ]; then
+    say "updated Claude settings: $relative"
+  else
+    say "created Claude settings: $relative"
+  fi
+}
+
 register_root_guidance() {
   [ "$REGISTER_GUIDANCE" -eq 1 ] || return
+
+  local claude_canonical claude_legacy agents_canonical agents_legacy
+  # Claude directly @-includes the agreement, current status, and durable decisions.
+  claude_canonical=$'@IB/TRESSOIR.md\n@IB/STATE.md\n@IB/CANON/ROOT_CANON.md'
+  claude_legacy=$'@IB/TRESSOIR.md'
+  # Codex/Pi prompts directly name the same three live files.
+  agents_canonical=$'Before substantial work, read and follow `IB/TRESSOIR.md`.\nRead current status and open decisions in `IB/STATE.md`.\nRead durable project decisions in `IB/CANON/ROOT_CANON.md`.'
+  agents_legacy=$'Before beginning substantial work, read and follow `IB/TRESSOIR.md`.'
 
   say ""
   say "Root guidance:"
   if [ "$CLAUDE" -eq 1 ]; then
     register_guidance_file \
       "CLAUDE.md" \
-      "@IB/TRESSOIR.md" \
+      "$claude_canonical" \
+      "$claude_legacy" \
       "Claude root guidance"
+    register_claude_settings
   fi
   if [ "$CODEX" -eq 1 ]; then
     register_guidance_file \
       "AGENTS.md" \
-      'Before beginning substantial work, read and follow `IB/TRESSOIR.md`.' \
+      "$agents_canonical" \
+      "$agents_legacy" \
       "Codex root guidance"
   fi
   if [ "$PI" -eq 1 ] && [ "$CODEX" -eq 0 ]; then
     if ensure_dir ".pi"; then
       register_guidance_file \
         ".pi/APPEND_SYSTEM.md" \
-        'Before beginning substantial work, read and follow `IB/TRESSOIR.md`.' \
+        "$agents_canonical" \
+        "$agents_legacy" \
         "Pi project guidance"
     else
-      say "manual action: reference IB/TRESSOIR.md from your Pi project prompt"
+      say "manual action: reference IB/TRESSOIR.md, IB/STATE.md, and IB/CANON/ROOT_CANON.md from your Pi project prompt"
     fi
   fi
 }
@@ -639,6 +856,7 @@ print_instruction_handoff() {
     say "  opt-in root registration was requested"
     if [ "$CLAUDE" -eq 1 ]; then
       say "  Claude Code target: CLAUDE.md"
+      say "  Claude Code defaults: .claude/settings.json (compact window + auto-memory off)"
     fi
     if [ "$CODEX" -eq 1 ]; then
       say "  Codex target: AGENTS.md"
@@ -648,16 +866,17 @@ print_instruction_handoff() {
     elif [ "$PI" -eq 1 ]; then
       say "  Pi target: .pi/APPEND_SYSTEM.md"
     fi
-    say "  Existing TRESSOIR.md mentions were left unchanged."
+    say "  Edited, duplicated, or unrelated guidance was preserved unchanged."
   else
     if [ "$CLAUDE" -eq 1 ]; then
-      say "  Claude Code option: add @IB/TRESSOIR.md to your chosen CLAUDE.md"
+      say "  Claude Code option: add @IB/TRESSOIR.md, @IB/STATE.md, and @IB/CANON/ROOT_CANON.md to your chosen CLAUDE.md"
+      say "  Claude Code option: set .claude/settings.json env.CLAUDE_CODE_AUTO_COMPACT_WINDOW=400000 and autoMemoryEnabled=false"
     fi
     if [ "$CODEX" -eq 1 ]; then
-      say "  Codex option: add 'Before work, read and follow IB/TRESSOIR.md.' to your chosen AGENTS.md"
+      say "  Codex option: tell agents to read IB/TRESSOIR.md, IB/STATE.md, and IB/CANON/ROOT_CANON.md in your chosen AGENTS.md"
     fi
     if [ "$PI" -eq 1 ]; then
-      say "  Pi option: reference it from your chosen context file, copy it there, or launch with:"
+      say "  Pi option: reference IB/TRESSOIR.md, IB/STATE.md, and IB/CANON/ROOT_CANON.md from your chosen context file, or launch with:"
       say "             pi --append-system-prompt ./IB/TRESSOIR.md"
     fi
   fi
@@ -774,11 +993,17 @@ say "Canonical IB:"
 ensure_dir "IB/ARTIFACTS" || fatal "canonical IB/ARTIFACTS path is unsafe"
 ensure_dir "IB/TMP" || fatal "canonical IB/TMP path is unsafe"
 ensure_dir "IB/CANON" || fatal "canonical IB/CANON path is unsafe"
+ensure_dir "IB/CANON/CANON_ARTIFACTS" ||
+  fatal "canonical IB/CANON/CANON_ARTIFACTS path is unsafe"
 ensure_dir "IB/skills" || fatal "canonical IB/skills path is unsafe"
 
 copy_file_if_absent "$PAYLOAD/seeds/TASK.md" "IB/TASK.md" "user task seed"
 copy_file_if_absent "$PAYLOAD/seeds/STATE.md" "IB/STATE.md" "project state seed"
 copy_file_if_absent "$PAYLOAD/seeds/ROOT_CANON.md" "IB/CANON/ROOT_CANON.md" "root canon seed"
+copy_file_if_absent \
+  "$PAYLOAD/seeds/CANON_ARTIFACTS_README.md" \
+  "IB/CANON/CANON_ARTIFACTS/README.md" \
+  "canon artifacts guide"
 copy_file_if_absent "$PAYLOAD/instructions/TRESSOIR.md" "IB/TRESSOIR.md" "canonical instructions"
 copy_file_if_absent "$PAYLOAD/seeds/IB.gitignore" "IB/.gitignore" "IB ignore rules"
 

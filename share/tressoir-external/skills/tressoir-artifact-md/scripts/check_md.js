@@ -65,6 +65,26 @@ function loadRuntime(assetsDir) {
   return sandbox.TressoirMd
 }
 
+// Filesystem-level advisory check: when a projection `X.tressoir.md` has an
+// exact sibling source `X.md` that is newer, the projection may be stale.
+// Advisory only (warning) — never inspects or classifies interactions.json.
+function sourceProjectionWarnings(target) {
+  const findings = []
+  if (!target.endsWith('.tressoir.md')) return findings
+  const source = target.slice(0, -'.tressoir.md'.length) + '.md'
+  let srcStat, projStat
+  try { srcStat = fs.statSync(source) } catch (error) { return findings }
+  try { projStat = fs.statSync(target) } catch (error) { return findings }
+  if (srcStat.mtimeMs > projStat.mtimeMs) {
+    findings.push({
+      level: 'warn',
+      line: 0,
+      msg: `source \`${path.basename(source)}\` is newer than this projection — re-project and verify the change landed before handoff`,
+    })
+  }
+  return findings
+}
+
 function usage() {
   console.error(
     'usage: node check_md.js <file.tressoir.md> [...] [--assets=<dir>] [--quiet]',
@@ -136,6 +156,8 @@ function main(argv) {
       hadLoadFailure = true
       continue
     }
+    // Advisory filesystem warnings (exit status stays 0 for warnings).
+    findings = findings.concat(sourceProjectionWarnings(target))
 
     const errors = findings.filter((finding) => finding.level === 'error').length
     const warnings = findings.filter((finding) => finding.level === 'warn').length

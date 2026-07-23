@@ -96,11 +96,13 @@ mkdir -p \
   "$DEST/src" \
   "$DEST/IB/ARTIFACTS/EXISTING_WORK" \
   "$DEST/IB/CANON" \
+  "$DEST/IB/CANON/CANON_ARTIFACTS" \
   "$DEST/IB/skills/tressoir-plan" \
   "$DEST/IB/skills/acme-project-skill" \
   "$DEST/.claude/rules" \
   "$DEST/.claude/skills/acme-review" \
   "$DEST/.agents/skills/acme-review" \
+  "$DEST/.agent/skills/tressoir-plan" \
   "$DEST/.pi" \
   "$DEST/foreign/plan-skill" \
   "$DEST/.dummy-test" || fatal "could not create fixture directories"
@@ -199,6 +201,11 @@ cat > "$DEST/IB/CANON/ROOT_CANON.md" <<'EOF'
 - Existing invariant: setup is non-clobbering.
 EOF
 
+cat > "$DEST/IB/CANON/CANON_ARTIFACTS/example.conf" <<'EOF'
+# Existing validated reusable configuration example
+enabled=true
+EOF
+
 cat > "$DEST/IB/ARTIFACTS/EXISTING_WORK/NOTES.md" <<'EOF'
 # Existing artifact
 
@@ -262,6 +269,15 @@ description: Deliberate foreign target for a wrong-target adapter collision.
 ---
 
 # Foreign Plan Skill
+EOF
+
+cat > "$DEST/.agent/skills/tressoir-plan/SKILL.md" <<'EOF'
+---
+name: tressoir-plan
+description: A Tressoir adapter misplaced under the singular .agent/skills path.
+---
+
+# Misplaced Tressoir Plan Adapter
 EOF
 
 ln -s "../../foreign/plan-skill" "$DEST/.agents/skills/tressoir-plan" ||
@@ -381,6 +397,7 @@ PROTECTED_FILES=(
   "IB/TRESSOIR.md"
   "IB/.gitignore"
   "IB/CANON/ROOT_CANON.md"
+  "IB/CANON/CANON_ARTIFACTS/example.conf"
   "IB/ARTIFACTS/EXISTING_WORK/NOTES.md"
   "IB/ARTIFACTS/EXISTING_WORK/interactions.json"
   "IB/skills/tressoir-plan/SKILL.md"
@@ -388,6 +405,7 @@ PROTECTED_FILES=(
   ".claude/skills/tressoir-plan"
   ".claude/skills/acme-review/SKILL.md"
   ".agents/skills/acme-review/SKILL.md"
+  ".agent/skills/tressoir-plan/SKILL.md"
   "foreign/plan-skill/SKILL.md"
 )
 
@@ -428,7 +446,7 @@ To test the VS Code phase too, build the extension in the distribution checkout
 and replace `--no-vscode` with:
 
 ```bash
---vsix "$TRESSOIR_EXTERNAL/extension/dist/tressoir-artifacts-0.1.2.vsix"
+--vsix "$TRESSOIR_EXTERNAL/extension/dist/tressoir-artifacts-0.1.3.vsix"
 ```
 
 ## 2. Verify non-clobbering and multi-harness links
@@ -445,7 +463,7 @@ test "$(readlink .agents/skills/tressoir-artifact-md)" = \
 
 for skill in \
   tressoir-artifact-md tressoir-artifact-html tressoir-working-area \
-  tressoir-memory tressoir-structured-review; do
+  tressoir-canon tressoir-structured-review; do
   test -L ".claude/skills/$skill"
   test -L ".agents/skills/$skill"
 done
@@ -454,6 +472,10 @@ done
 test -f .claude/skills/tressoir-plan
 test "$(readlink .agents/skills/tressoir-plan)" = \
   '../../foreign/plan-skill'
+# A known Tressoir adapter misplaced under the singular .agent/skills path is
+# reported (setup output includes "non-canonical Tressoir adapter") but never
+# modified:
+test -f .agent/skills/tressoir-plan/SKILL.md
 ```
 
 Codex and Pi intentionally share `.agents/skills/`; Claude uses
