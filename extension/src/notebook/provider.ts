@@ -3,6 +3,7 @@ import * as fs from 'fs'
 import * as http from 'http'
 import * as https from 'https'
 import * as crypto from 'crypto'
+import * as path from 'path'
 import {
   clearNotebookStateForPath,
   setActiveNotebookDocument,
@@ -52,23 +53,25 @@ type NotebookInboundMessage =
     }
   | { type: 'openRawText' }
   | {
-      // Narrow, contained navigation: open a sibling file INSIDE the artifact folder in the editor.
+      // Narrow navigation: open a relative file contained by the artifact folder or workspace.
       type: 'openArtifactFile'
       path: string
     }
   | {
       // Persist an authored-content interaction (e.g. a CodeMirror feedback field, a decision
       // pick) to a contained JSON file in the artifact folder. The ONLY authored disk-write
-      // capability; strictly validated (contained basename, JSON-only, size-capped).
+      // capability; strictly validated (contained interaction basename, JSON-only, size-capped).
       type: 'storeInteraction'
       key: string
       value: unknown
       filename?: string
     }
 
-// Contained-basename allowlist: `interactions.json` or `interactions.<suffix>.json`. The pattern
-// forbids path separators and `..`, so a matching name is always a basename inside the folder.
-const INTERACTIONS_FILE_RE = /^interactions(\.[A-Za-z0-9_-]+)?\.json$/
+// Contained-basename allowlist. Keep both legacy forms and accept the opt-in
+// `<source>.interactions.json` form. The latter may contain ordinary basename dots but never
+// traversal, separators, or a leading dot.
+const LEGACY_INTERACTIONS_FILE_RE = /^interactions(\.[A-Za-z0-9_-]+)?\.json$/
+const SCOPED_INTERACTIONS_FILE_RE = /^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._-]*\.interactions\.json$/
 const MAX_INTERACTION_KEY_LEN = 256
 // A supported macOS/Linux filename component can contain up to 255 bytes, so 512 accommodates
 // every exact source stem plus the automatic suffix. Arbitrary authored keys retain the tighter
@@ -138,6 +141,10 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
     // still asks for plain `free_form_feedback` cannot read or write a sibling artifact's value.
     const sourceNamespace = sourceNamespaceFromPath(currentDocument.fileName)
     const feedbackKey = freeFormFeedbackKey(sourceNamespace)
+    const interactionsFilename =
+      this.sourceKind === 'md' && this.parseFrontmatterInteractions(currentDocument.getText()) === 'scoped'
+        ? scopedInteractionsFilename(sourceNamespace)
+        : 'interactions.json'
 
     // Widen localResourceRoots to the artifact's own folder so authored relative includes
     // (e.g. an author's own ./vendor/d3.js or ./data.json) are served as webview resources. Scope
@@ -181,6 +188,7 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
         userLinks,
         sourceNamespace,
         feedbackKey,
+        interactionsFilename,
       )
     }
     renderWebviewHtml()
@@ -279,22 +287,41 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
             return
           case 'openArtifactFile': {
             const rel = message.path
-            // Reject absolute paths and any traversal; only open files within the artifact folder.
-            if (typeof rel !== 'string' || rel.length === 0 || rel.startsWith('/') || rel.includes('..')) {
+            // Relative links may traverse upward when the resolved target remains inside either
+            // the artifact folder or an open workspace folder. This supports links from
+            // IB/ARTIFACTS/... to project files without granting arbitrary filesystem access.
+            if (
+              typeof rel !== 'string' ||
+              rel.length === 0 ||
+              rel.includes('\0') ||
+              path.isAbsolute(rel) ||
+              /^[A-Za-z][A-Za-z0-9+.-]*:/.test(rel)
+            ) {
               return
             }
-            const target = vscode.Uri.joinPath(artifactFolder, rel)
-            const baseFs = artifactFolder.fsPath.endsWith('/')
-              ? artifactFolder.fsPath
-              : `${artifactFolder.fsPath}/`
-            if (target.fsPath !== artifactFolder.fsPath && !target.fsPath.startsWith(baseFs)) {
+            const targetFs = path.resolve(artifactFolder.fsPath, rel)
+            const allowedRoots = [
+              artifactFolder.fsPath,
+              ...(vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath),
+            ]
+            const contained = allowedRoots.some((root) => {
+              const relative = path.relative(path.resolve(root), targetFs)
+              return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+            })
+            if (!contained) {
               return
             }
+            const target = vscode.Uri.file(targetFs)
             void vscode.commands.executeCommand('vscode.open', target)
             return
           }
           case 'storeInteraction':
-            await this.handleStoreInteraction(artifactFolder, message, feedbackKey)
+            await this.handleStoreInteraction(
+              artifactFolder,
+              message,
+              feedbackKey,
+              interactionsFilename,
+            )
             return
           case 'openRawText':
             return
@@ -333,12 +360,13 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
     artifactFolder: vscode.Uri,
     message: { key: string; value: unknown; filename?: string },
     feedbackKey: string,
+    defaultInteractionsFilename = 'interactions.json',
   ): Promise<void> {
     const filename =
       typeof message.filename === 'string' && message.filename.length > 0
         ? message.filename
-        : 'interactions.json'
-    if (!INTERACTIONS_FILE_RE.test(filename)) {
+        : defaultInteractionsFilename
+    if (!isInteractionsFilename(filename)) {
       console.warn(`[tressoir-notebook] Rejected storeInteraction for invalid filename: ${filename}`)
       return
     }
@@ -422,7 +450,7 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
       return snapshot
     }
     for (const [name, type] of entries) {
-      if (type !== vscode.FileType.File || !INTERACTIONS_FILE_RE.test(name)) {
+      if (type !== vscode.FileType.File || !isInteractionsFilename(name)) {
         continue
       }
       try {
@@ -553,6 +581,24 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
     return entries.filter((e) => e.length > 0)
   }
 
+  // `interactions: scoped` opts a Markdown artifact into a sibling
+  // `<source>.interactions.json` file. Any other value (or no frontmatter) preserves the legacy
+  // shared `interactions.json` behavior. Like `links:`, changing this setting requires reopening
+  // the artifact because it configures the one-time webview realm.
+  private parseFrontmatterInteractions(text: string): 'shared' | 'scoped' {
+    const fmMatch = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)
+    if (!fmMatch) {
+      return 'shared'
+    }
+    for (const line of fmMatch[1].split(/\r?\n/)) {
+      const match = /^\s*interactions\s*:\s*(.*?)\s*$/.exec(line)
+      if (!match) continue
+      const value = match[1].replace(/^['"]|['"]$/g, '').trim().toLowerCase()
+      return value === 'scoped' ? 'scoped' : 'shared'
+    }
+    return 'shared'
+  }
+
   // Stable, filesystem-safe cache name for a declared script URL: a short content hash of the URL
   // (so two different URLs never collide) prefixed to a sanitized basename (for human legibility).
   private cacheFilenameForUrl(url: string): string {
@@ -666,6 +712,7 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
     userLinks: { styleTags: string[]; scriptTags: string[] } = { styleTags: [], scriptTags: [] },
     sourceNamespace = '',
     feedbackKey = freeFormFeedbackKey(sourceNamespace),
+    interactionsFilename = 'interactions.json',
   ): string {
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'notebook-webview.js'),
@@ -713,6 +760,7 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
     data-csp-nonce="${nonce}"
     data-source-name="${escapeHtmlAttribute(sourceNamespace)}"
     data-feedback-key="${escapeHtmlAttribute(feedbackKey)}"
+    data-interactions-file="${escapeHtmlAttribute(interactionsFilename)}"
   >
     <div id="app"></div>
     ${mdAssets.scripts}
@@ -743,6 +791,24 @@ function sourceNamespaceFromPath(p: string): string {
 
 function freeFormFeedbackKey(sourceName: string): string {
   return `${sourceName}-free_form_feedback`
+}
+
+function scopedInteractionsFilename(sourceName: string): string {
+  // Preserve ordinary human-readable basenames exactly. For unusual source names, retain a
+  // readable sanitized stem plus a short hash so distinct artifacts cannot collapse together.
+  if (/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(sourceName) && !sourceName.includes('..')) {
+    return `${sourceName}.interactions.json`
+  }
+  const readable = sourceName.replace(/[^A-Za-z0-9._-]/g, '_').replace(/^\.+/, '').slice(0, 120)
+  const hash = crypto.createHash('sha256').update(sourceName).digest('hex').slice(0, 10)
+  return `${readable || 'artifact'}-${hash}.interactions.json`
+}
+
+function isInteractionsFilename(filename: string): boolean {
+  return (
+    filename.length <= 255 &&
+    (LEGACY_INTERACTIONS_FILE_RE.test(filename) || SCOPED_INTERACTIONS_FILE_RE.test(filename))
+  )
 }
 
 function escapeHtmlAttribute(value: string): string {

@@ -33,7 +33,7 @@ Opening either artifact format is **not** equivalent to opening an inert Markdow
 - Authored inline and relative scripts can execute in the VS Code webview.
 - Markdown permits raw HTML and scripts.
 - A Markdown `links:` frontmatter list can load local CSS/JavaScript and remote CSS. Remote JavaScript is fetched by the extension host, cached in the artifact folder's `vendor/` directory, and then loaded locally.
-- Authored code can use the deliberately narrow `window.tressoirNotebook` helper to open a contained sibling file and read/write contained interaction JSON.
+- Authored code can use the deliberately narrow `window.tressoirNotebook` helper to open a relative file contained by the artifact folder or an open workspace, and to read/write contained interaction JSON.
 
 Only open artifacts from authors and workspaces you trust. This MVP does not provide a sanitized or script-free preview mode.
 
@@ -47,7 +47,22 @@ await window.tressoirNotebook?.storeInteraction?.('choice', 'A')
 const value = await window.tressoirNotebook?.getInteraction?.('choice')
 ```
 
-`openFile` rejects absolute paths and `..` traversal. Interaction writes are constrained to `interactions.json` or `interactions.<suffix>.json` in the artifact folder, with bounded keys and serialized file size.
+`openFile` rejects absolute paths. Parent-relative paths are accepted only when the resolved file
+remains inside the artifact folder or an open workspace. Interaction writes are constrained to
+`interactions.json`, `interactions.<suffix>.json`, or the generated
+`<artifact-basename>.interactions.json` in the artifact folder, with bounded keys and serialized
+file size.
+
+Rendered Markdown local links and images open through the same contained `openFile` bridge. Add
+`interactions: scoped` to Markdown frontmatter to store new widget values in
+`<artifact-basename>.interactions.json`; the default remains the shared `interactions.json`, and
+scoped artifacts fall back to legacy shared values until those values are edited.
+
+A card declared with `copy_button=true` includes a **Copy Markdown** control that copies that
+card's original Markdown, including its declaration and nested directives, for a lossless handoff.
+Cards without the attribute and ordinary `##` sections have no copy control. Set `feedback:
+disabled` in Markdown frontmatter when the artifact should omit the automatic top-level feedback
+editor.
 
 ## Build and package
 

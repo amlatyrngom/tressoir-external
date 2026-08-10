@@ -73,6 +73,11 @@ Card body
 ::::
 ```
 
+Add `copy_button=true` to the declaration only when a card needs to be handed off. When present,
+the rendered card has a **Copy Markdown** control
+that copies that card's original Markdown for handoff. Cards without it—and `##` sections—do not
+show a copy control.
+
 Items and inputs use three colons:
 
 ```md

@@ -123,6 +123,7 @@ describe('notebook provider (editor-agnostic)', () => {
   it('merges multiple interactions.*.json files into the snapshot', async () => {
     __seedFile(folderFile('interactions.json'), JSON.stringify({ a: 1 }))
     __seedFile(folderFile('interactions.notes.json'), JSON.stringify({ b: 2 }))
+    __seedFile(folderFile('PLAN.interactions.json'), JSON.stringify({ c: 3 }))
     const panel = await resolve(makeProvider(), createDocument('<h1>Plan</h1>'))
 
     expect(panel.webview.postMessage).toHaveBeenCalledWith(
@@ -131,6 +132,7 @@ describe('notebook provider (editor-agnostic)', () => {
         interactions: {
           'interactions.json': { a: 1 },
           'interactions.notes.json': { b: 2 },
+          'PLAN.interactions.json': { c: 3 },
         },
       }),
     )
@@ -410,6 +412,20 @@ describe('notebook provider storeInteraction (contained disk-write boundary)', (
     expect(written).toEqual({ note: { ok: true } })
   })
 
+  it('uses <source>.interactions.json when Markdown frontmatter opts into scoped storage', async () => {
+    const text = ['---', 'title: Plan', 'interactions: scoped', '---', '', '# Plan'].join('\n')
+    const panel = await resolve(
+      makeProvider('md'),
+      createDocument(text, 1, '/tmp/PLAN.tressoir.md'),
+    )
+
+    expect(panel.webview.html).toContain('data-interactions-file="PLAN.interactions.json"')
+    await panel.__emitMessage({ type: 'storeInteraction', key: 'choice', value: 'A' })
+
+    expect(JSON.parse(__readFile(folderFile('PLAN.interactions.json'))!)).toEqual({ choice: 'A' })
+    expect(__readFile(folderFile('interactions.json'))).toBeUndefined()
+  })
+
   it('rejects writes to disallowed / traversal filenames', async () => {
     const panel = await resolve(makeProvider(), createDocument('<h1>Plan</h1>'))
 
@@ -480,5 +496,18 @@ describe('notebook provider parseFrontmatterLinks (author-declared JS/CSS libs)'
     expect(parse('---\ntitle: T\n---\n')).toEqual([])
     const md = ['---', 'links:', '  - ./local/relative.js', '  - https://ok.test/z.js', '---'].join('\n')
     expect(parse(md)).toEqual(['./local/relative.js', 'https://ok.test/z.js'])
+  })
+})
+
+describe('notebook provider scoped-interactions frontmatter', () => {
+  const parse = (text: string): 'shared' | 'scoped' =>
+    (makeProvider('md') as any).parseFrontmatterInteractions(text)
+
+  it('opts in only for the exact scoped value', () => {
+    expect(parse('---\ninteractions: scoped\n---\n')).toBe('scoped')
+    expect(parse('---\ninteractions: "SCOPED"\n---\n')).toBe('scoped')
+    expect(parse('---\ninteractions: shared\n---\n')).toBe('shared')
+    expect(parse('---\ntitle: Plan\n---\n')).toBe('shared')
+    expect(parse('# no frontmatter')).toBe('shared')
   })
 })

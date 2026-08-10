@@ -70,6 +70,8 @@ type WebviewPersistedState = { scrollY?: number }
 const DEFAULT_INTERACTIONS_FILE = 'interactions.json'
 
 const vscodeApi = acquireVsCodeApi()
+const artifactInteractionsFile =
+  document.body.dataset.interactionsFile || DEFAULT_INTERACTIONS_FILE
 
 // Authored content is rendered into THIS realm, so authored interactions are persisted via the
 // snapshot below (kept current as `state` messages arrive) and the `storeInteraction` bridge.
@@ -100,11 +102,11 @@ try {
 }
 
 function resolveInteractionsFile(filename?: unknown): string {
-  return typeof filename === 'string' && filename.length > 0 ? filename : DEFAULT_INTERACTIONS_FILE
+  return typeof filename === 'string' && filename.length > 0 ? filename : artifactInteractionsFile
 }
 
 // Narrow, deliberate capabilities exposed to authored content (trusted-artifact model):
-//   - openFile: open a sibling file INSIDE the artifact folder in the editor;
+//   - openFile: open a relative file contained by the artifact folder or workspace in the editor;
 //   - storeInteraction / getInteraction: persist + read widget state in a contained JSON file.
 // These cannot read/write the document content or reach the rest of the vscode API. The
 // provider validates containment + filename + size for every write.
@@ -134,7 +136,16 @@ try {
         if (typeof key !== 'string' || key.length === 0) {
           return undefined
         }
-        return currentInteractions[resolveInteractionsFile(filename)]?.[key]
+        const file = resolveInteractionsFile(filename)
+        const value = currentInteractions[file]?.[key]
+        if (value !== undefined) {
+          return value
+        }
+        // Opt-in scoped artifacts can read their existing shared value until the next edit writes
+        // it to the scoped file. Explicit custom-filename reads remain exact.
+        return filename === undefined && file !== DEFAULT_INTERACTIONS_FILE
+          ? currentInteractions[DEFAULT_INTERACTIONS_FILE]?.[key]
+          : undefined
       },
     }),
   })

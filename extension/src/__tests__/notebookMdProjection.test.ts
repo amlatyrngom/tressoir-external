@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { existsSync, readFileSync } from 'fs'
 import { resolve } from 'path'
 
@@ -27,16 +27,20 @@ function loadScript(p: string): void {
 
 describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js project())', () => {
   let project: (markdown: string) => string
+  let applyBehaviors: () => void
 
   beforeAll(() => {
     loadScript(remarkPath)
     loadScript(yamlPath)
     loadScript(runtimePath)
-    const runtime = (globalThis as unknown as { TressoirMd?: { project: (m: string) => string } }).TressoirMd
+    const runtime = (globalThis as unknown as {
+      TressoirMd?: { project: (m: string) => string; applyBehaviors: () => void }
+    }).TressoirMd
     if (!runtime) {
       throw new Error('TressoirMd runtime did not load.')
     }
     project = runtime.project
+    applyBehaviors = runtime.applyBehaviors
   })
 
   it('projects front-matter title/description into the locked header (type optional)', () => {
@@ -67,6 +71,15 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
     expect(html).not.toContain('badge type')
   })
 
+  it('can disable the automatic top-level feedback editor in frontmatter', () => {
+    for (const value of ['disabled', 'disable', 'off', 'false']) {
+      const md = ['---', 'title: Quiet Artifact', `feedback: ${value}`, '---', '', 'Body.'].join('\n')
+      const html = project(md)
+      expect(html).not.toContain('class="head-feedback"')
+      expect(html).not.toContain('id="ff-editor"')
+    }
+  })
+
   it('projects :::item directives into morph-safe .ctx-item disclosure rows', () => {
     const md = [
       '## Executive Summary',
@@ -82,6 +95,7 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
     const html = project(md)
     // Section heading.
     expect(html).toContain('<section class="ua-section"><h2 class="section">Executive Summary</h2>')
+    expect(html).not.toContain('data-copy-card')
     // Consecutive items group into a single .ctx-list.
     expect(html).toContain('<div class="ctx-list">')
     // Open item carries the open class + keep-class contract; closed item does not start open.
@@ -90,6 +104,40 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
     expect(html).toContain('aria-expanded="true"')
     expect(html).toContain('Goal')
     expect(html).toContain('Make it first-class.')
+  })
+
+  it('copies original card Markdown only when copy_button=true', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const md = [
+      '---',
+      'title: Copy Test',
+      'feedback: disabled',
+      '---',
+      '',
+      '## Tasks',
+      '',
+      '::::card{title="Copy Me" oneliner="Handoff-ready." copy_button=true}',
+      'Card body.',
+      '::::',
+      '',
+      '::::card{title="Ordinary" oneliner="No control."}',
+      'Other body.',
+      '::::',
+      '',
+    ].join('\n')
+    document.body.innerHTML = project(md)
+    applyBehaviors()
+    const buttons = document.querySelectorAll<HTMLButtonElement>('[data-copy-card]')
+    expect(buttons).toHaveLength(1)
+    buttons[0].click()
+    expect(writeText).toHaveBeenCalledWith([
+      '::::card{title="Copy Me" oneliner="Handoff-ready." copy_button=true}',
+      'Card body.',
+      '::::',
+    ].join('\n'))
+    expect(buttons[0].closest('.milestone')?.classList.contains('selected')).toBe(false)
+    await vi.waitFor(() => expect(buttons[0].textContent).toBe('Copied'))
   })
 
   it('projects ::::card into a .milestone reveal card with a raw inline state badge', () => {
@@ -110,6 +158,7 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
     expect(html).toContain('<div class="m-intent">Wire the projector</div>')
     // State is injected RAW (inline badge HTML) inside the .m-state slot.
     expect(html).toContain('<span class="m-state"><span class=\'badge ok\'>Done</span></span>')
+    expect(html).not.toContain('data-copy-card')
     // Card head is a keyboard-activatable div button; the item nests inside.
     expect(html).toContain('<div class="m-head" role="button" tabindex="0" aria-expanded="false">')
     expect(html).toContain('<div class="ctx-item" data-morph-keep-class="open">')

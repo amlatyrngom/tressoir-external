@@ -39,6 +39,7 @@ describe('notebook provider JS support (CSP / base / resource roots)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     clearNotebookState()
+    ;(vscode.workspace as any).workspaceFolders = []
     ;(vscode.window as any).activeColorTheme = { kind: ColorThemeKind.Dark }
   })
 
@@ -100,6 +101,7 @@ describe('notebook provider JS support (CSP / base / resource roots)', () => {
     // Document is /tmp/notebook.tressoir.html -> stem `notebook`.
     expect(html).toContain('data-source-name="notebook"')
     expect(html).toContain('data-feedback-key="notebook-free_form_feedback"')
+    expect(html).toContain('data-interactions-file="interactions.json"')
   })
 
   it('encodes adversarial source names injectively before browser transport', async () => {
@@ -142,14 +144,19 @@ describe('notebook provider openArtifactFile (contained sibling open)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     clearNotebookState()
+    ;(vscode.workspace as any).workspaceFolders = []
     ;(vscode.window as any).activeColorTheme = { kind: ColorThemeKind.Dark }
   })
 
-  async function resolveAndGetHandler() {
+  async function resolveAndGetHandler(fileName = '/tmp/notebook.tressoir.html') {
     const provider = new TressoirNotebookEditorProvider({
       extensionUri: { fsPath: '/tmp/ext', path: '/tmp/ext' },
     } as unknown as vscode.ExtensionContext)
-    const document = createDocument('<tressoir-editor-cell data-tressoir-cell="a">hi</tressoir-editor-cell>')
+    const document = {
+      ...createDocument('<tressoir-editor-cell data-tressoir-cell="a">hi</tressoir-editor-cell>'),
+      uri: vscode.Uri.file(fileName),
+      fileName,
+    }
     const panel = createPanel()
     await provider.resolveCustomTextEditor(
       document as unknown as vscode.TextDocument,
@@ -170,13 +177,32 @@ describe('notebook provider openArtifactFile (contained sibling open)', () => {
     expect((uri as any).fsPath).toContain('PLAN.md')
   })
 
-  it('rejects path traversal, absolute paths, and empty paths', async () => {
+  it('rejects traversal outside allowed roots, absolute paths, and empty paths', async () => {
     const { handler } = await resolveAndGetHandler()
     await handler({ type: 'openArtifactFile', path: '../secret.txt' })
     await handler({ type: 'openArtifactFile', path: 'a/../../escape.txt' })
     await handler({ type: 'openArtifactFile', path: '/etc/passwd' })
     await handler({ type: 'openArtifactFile', path: '' })
     expect(vscode.commands.executeCommand).not.toHaveBeenCalled()
+  })
+
+  it('opens a parent-relative file when it resolves inside an open workspace', async () => {
+    ;(vscode.workspace as any).workspaceFolders = [
+      { uri: vscode.Uri.file('/tmp/workspace') },
+    ]
+    const { handler } = await resolveAndGetHandler(
+      '/tmp/workspace/IB/ARTIFACTS/ANALOG/plan.tressoir.md',
+    )
+
+    await handler({
+      type: 'openArtifactFile',
+      path: '../../../Summer2026/RQE/TRESSOIR_PAPER.pdf',
+    })
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledTimes(1)
+    const [cmd, uri] = (vscode.commands.executeCommand as any).mock.calls[0]
+    expect(cmd).toBe('vscode.open')
+    expect((uri as any).fsPath).toBe('/tmp/workspace/Summer2026/RQE/TRESSOIR_PAPER.pdf')
   })
 })
 

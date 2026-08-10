@@ -28,12 +28,16 @@ function feedbackRealm(
   const calls: Call[] = []
   const handlers: Record<string, () => void> = {}
   let value = ''
+  const sizes: Array<[unknown, number]> = []
 
   ;(dom.window as any).CodeMirror = {
     fromTextArea(textarea: HTMLTextAreaElement) {
       value = textarea.value
       return {
         getValue: () => value,
+        lineCount: () => value.split('\n').length,
+        defaultTextHeight: () => 20,
+        setSize: (width: unknown, height: number) => sizes.push([width, height]),
         on: (name: string, handler: () => void) => {
           handlers[name] = handler
         },
@@ -57,6 +61,11 @@ function feedbackRealm(
     dom,
     calls,
     value: () => value,
+    sizes,
+    change(nextValue: string) {
+      value = nextValue
+      handlers.change()
+    },
     save(nextValue: string) {
       value = nextValue
       handlers.blur()
@@ -129,5 +138,16 @@ describe('free-form feedback runtime isolation', () => {
     expect(literalName.value()).toBe('literal ampersand')
     expect(entityName.calls[0]).toEqual(['get', 'A&amp;B-free_form_feedback'])
     expect(literalName.calls[0]).toEqual(['get', 'A&B-free_form_feedback'])
+  })
+
+  it('starts at four rows, grows through eight, then keeps the eight-row viewport', () => {
+    const realm = feedbackRealm('PLAN', {})
+    realms.push(realm.dom)
+
+    expect(realm.sizes.at(-1)).toEqual([null, 96])
+    realm.change(['1', '2', '3', '4', '5', '6'].join('\n'))
+    expect(realm.sizes.at(-1)).toEqual([null, 136])
+    realm.change(Array.from({ length: 10 }, (_, i) => String(i)).join('\n'))
+    expect(realm.sizes.at(-1)).toEqual([null, 176])
   })
 })

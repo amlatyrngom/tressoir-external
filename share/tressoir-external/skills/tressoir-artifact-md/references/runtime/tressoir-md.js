@@ -6,7 +6,7 @@
  * standalone SHIM (TressoirMd.render()).
  *
  * v2 authoring surface (minimal): YAML front-matter (title/description/links) + depth-styled
- * markdown headings + THREE container directives — `::::card{title oneliner state}` (4 colons,
+ * markdown headings + THREE container directives — `::::card{title oneliner state copy_button}` (4 colons,
  * explicit close, groups items), `:::item{oneliner}` (3 colons, reveal row), `:::input{key}`
  * (3 colons, a decision: question + markdown options + a bound text box) — plus plain markdown,
  * fenced code (```lang / ```diff), and raw HTML/SVG passthrough. The only nesting is
@@ -30,6 +30,11 @@
     return esc(s).replace(/"/g, '&quot;');
   }
   function cap(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
+  function feedbackEnabled(fm) {
+    if (fm && fm.feedback === false) return false;
+    var value = fm && fm.feedback;
+    return !/^(?:disable|disabled|off|false|none)$/i.test(String(value == null ? '' : value).trim());
+  }
   function textOf(node) {
     if (!node) return '';
     if (node.type === 'text' || node.type === 'inlineCode') return node.value || '';
@@ -77,22 +82,40 @@
     return proc.stringify(hast);
   }
 
-  // ---- ::::card{title oneliner state} -> .milestone reveal card (groups items).
+  // ---- ::::card{title oneliner state copy_button} -> .milestone reveal card (groups items).
   // title / oneliner / state are injected RAW so an author can put an inline badge or other
   // inline HTML in them (e.g. state="<span class='badge ok'>Done</span>"). `open` (or
-  // `selected`) starts the card expanded.
+  // `selected`) starts the card expanded. `copy_button=true` opts this card into a control that
+  // copies its original Markdown source.
+  var _sourceMarkdown = '';
+  var _cardMarkdown = [];
+  function enabledAttribute(value) {
+    if (value === true || value === '') return true;
+    return /^(?:true|yes|on|1)$/i.test(String(value == null ? '' : value).trim());
+  }
   function renderCard(node) {
     var a = node.attributes || {};
     var open = ('open' in a) || ('selected' in a);
     var title = a.title || '';
     var oneliner = a.oneliner || '';
     var state = a.state || '';
+    var copy = '';
+    if (enabledAttribute(a.copy_button)) {
+      var start = node.position && node.position.start && node.position.start.offset;
+      var end = node.position && node.position.end && node.position.end.offset;
+      var source = (typeof start === 'number' && typeof end === 'number')
+        ? _sourceMarkdown.slice(start, end).trim() : '';
+      var copyIndex = _cardMarkdown.push(source) - 1;
+      copy = '<button type="button" class="card-copy" data-copy-card="' + copyIndex + '" aria-label="Copy ' + escAttr(title) + ' card as Markdown">Copy Markdown</button>';
+    }
+    var actions = (state || copy) ? '<span class="m-actions">' +
+      (state ? '<span class="m-state">' + state + '</span>' : '') + copy + '</span>' : '';
     var body = renderBlocks(node.children || []);
     return '<section class="milestone' + (open ? ' selected' : '') + '" data-morph-keep-class="selected">' +
       '<div class="m-head" role="button" tabindex="0" aria-expanded="' + (open ? 'true' : 'false') + '">' +
       '<div><div class="m-title">' + title + '</div>' +
       (oneliner ? '<div class="m-intent">' + oneliner + '</div>' : '') + '</div>' +
-      (state ? '<span class="m-state">' + state + '</span>' : '') + '</div>' +
+      actions + '</div>' +
       '<div class="m-detail">' + body + '</div></section>';
   }
 
@@ -171,8 +194,8 @@
     var badge = (type != null && type !== '') ? '<span class="badge type">' + esc(cap(String(type))) + '</span>' : '';
     var desc = fm.description ? '<p class="dek">' + esc(fm.description) + '</p>' : '';
     var ph = 'Type any questions, constraints, or edits for the next pass. Markdown; fenced code blocks highlight.';
-    var ff = '<div class="head-feedback" data-morph-skip>' +
-      '<textarea id="ff-editor" placeholder="' + escAttr(ph) + '"></textarea></div>';
+    var ff = feedbackEnabled(fm) ? '<div class="head-feedback" data-morph-skip>' +
+      '<textarea id="ff-editor" placeholder="' + escAttr(ph) + '"></textarea></div>' : '';
     return '<header class="plan-head"><div class="title-row"><h1>' + title + '</h1>' + badge + '</div>' +
       desc + ff + '</header>';
   }
@@ -192,6 +215,8 @@
       else if (cur) { cur.blocks.push(n); }
       else { preamble.push(n); }
     });
+    _sourceMarkdown = markdown;
+    _cardMarkdown = [];
     var body = renderBlocks(preamble);
     sections.forEach(function (s) {
       body += '<section class="ua-section"><h2 class="section">' + esc(s.title) + '</h2>' +
@@ -296,6 +321,7 @@
         if (dec && val.length) dec.classList.add('resolved');
       }
     });
+    prepareLocalArtifactLinks();
     initFreeForm();
   }
 
@@ -340,9 +366,17 @@
       lineWrapping: true, lineNumbers: false,
       placeholder: ta.getAttribute('placeholder') || ''
     });
+    function resizeFeedbackEditor() {
+      if (typeof cm.setSize !== 'function') return;
+      var lines = typeof cm.lineCount === 'function' ? cm.lineCount() : cm.getValue().split('\n').length;
+      var rows = Math.max(4, Math.min(8, lines));
+      var rowHeight = typeof cm.defaultTextHeight === 'function' ? cm.defaultTextHeight() : 20;
+      cm.setSize(null, Math.ceil(rows * rowHeight + 16));
+    }
+    resizeFeedbackEditor();
     var saveTimer = null;
     function flush() { if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; } noteInteraction(FF_KEY, cm.getValue()); }
-    cm.on('change', function () { if (saveTimer) clearTimeout(saveTimer); saveTimer = setTimeout(flush, 500); });
+    cm.on('change', function () { resizeFeedbackEditor(); if (saveTimer) clearTimeout(saveTimer); saveTimer = setTimeout(flush, 500); });
     cm.on('blur', flush);
     document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') flush(); });
     global.addEventListener('pagehide', flush);
@@ -352,16 +386,88 @@
   // Event delegation (morph-safe; bound to document ONCE).
   var _delegated = false;
   var _inputTimers = {};
+  function localArtifactPath(value) {
+    if (!value || value.charAt(0) === '#' || value.charAt(0) === '/' || value.slice(0, 2) === '//') return null;
+    if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)) return null;
+    var path = value.split('#')[0].split('?')[0];
+    try { path = decodeURIComponent(path); } catch (_) { return null; }
+    if (!path) return null;
+    return path;
+  }
+  function prepareLocalArtifactLinks() {
+    qsa('a[href]').forEach(function (anchor) {
+      var path = anchor.getAttribute('data-tressoir-local-path') || localArtifactPath(anchor.getAttribute('href'));
+      if (!path) return;
+      // Remove the browser-navigation target entirely. The original contained path lives only in
+      // data and is opened by the VS Code bridge below.
+      anchor.setAttribute('data-tressoir-local-path', path);
+      anchor.setAttribute('href', '#');
+      anchor.removeAttribute('target');
+    });
+  }
+  function copyCardMarkdown(index, button) {
+    var source = _cardMarkdown[index];
+    if (typeof source !== 'string') return;
+    function report(ok) {
+      if (!button) return;
+      button.textContent = ok ? 'Copied' : 'Copy failed';
+      if (button.__tressoirCopyReset) clearTimeout(button.__tressoirCopyReset);
+      button.__tressoirCopyReset = setTimeout(function () { button.textContent = 'Copy Markdown'; }, 1600);
+    }
+    var clipboard = global.navigator && global.navigator.clipboard;
+    if (clipboard && typeof clipboard.writeText === 'function') {
+      try {
+        Promise.resolve(clipboard.writeText(source)).then(function () { report(true); }, function () { report(false); });
+        return;
+      } catch (_) {}
+    }
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = source;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = typeof document.execCommand === 'function' && document.execCommand('copy');
+      document.body.removeChild(ta);
+      report(!!ok);
+    } catch (_) { report(false); }
+  }
   function initDelegation() {
     if (_delegated) return; _delegated = true;
     document.addEventListener('click', function (e) {
       var t = e.target; if (!t || !t.closest) return;
+      var copyEl = t.closest('[data-copy-card]');
+      if (copyEl) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        copyCardMarkdown(parseInt(copyEl.getAttribute('data-copy-card'), 10), copyEl);
+        return;
+      }
       var openFileEl = t.closest('[data-open-file]');
       if (openFileEl) {
         e.preventDefault();
+        e.stopImmediatePropagation();
         var rel = openFileEl.getAttribute('data-open-file');
         if (rel && global.tressoirNotebook && typeof global.tressoirNotebook.openFile === 'function') global.tressoirNotebook.openFile(rel);
         return;
+      }
+      // Plain Markdown links and embedded images use the same contained open-file bridge as
+      // explicit data-open-file controls. External URLs, fragments, absolute paths, and
+      // traversal continue through normal browser handling (or are rejected by the provider).
+      var localEl = t.closest('a[data-tressoir-local-path]') || t.closest('img[src]');
+      if (localEl) {
+        var localPath = localEl.tagName === 'A'
+          ? localEl.getAttribute('data-tressoir-local-path')
+          : localArtifactPath(localEl.getAttribute('src'));
+        if (localPath) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          if (global.tressoirNotebook && typeof global.tressoirNotebook.openFile === 'function') {
+            global.tressoirNotebook.openFile(localPath);
+          }
+          return;
+        }
       }
       var ctxHead = t.closest('.ctx-item-head');
       if (ctxHead) {
@@ -379,6 +485,7 @@
     document.addEventListener('keydown', function (e) {
       if (e.key !== 'Enter' && e.key !== ' ') return;
       var t = e.target; if (!t || !t.closest) return;
+      if (t.closest('[data-copy-card]')) return;
       // ctx-item-head / openFile are real <button>s (native Enter/Space) — only the div-based
       // .m-head needs explicit keyboard activation.
       var mHead = t.closest('.m-head');
