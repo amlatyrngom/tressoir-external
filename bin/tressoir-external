@@ -476,10 +476,11 @@ setup_agents_skills() {
 #   absent    = no managed section and no unrelated TRESSOIR.md mention
 #   ambiguous = edited/duplicated managed section, or an unrelated TRESSOIR.md mention
 guidance_state() {
-  local file canonical legacy count section
+  local file canonical legacy older_legacy count section
   file="$1"
   canonical="$2"
   legacy="$3"
+  older_legacy="${4:-}"
   count=$(grep -c '^# Tressoir Guidance$' "$file" 2>/dev/null)
   count=${count:-0}
   if [ "$count" -eq 0 ]; then
@@ -497,7 +498,8 @@ guidance_state() {
   section=$(awk '/^# Tressoir Guidance$/{f=1} f{print}' "$file")
   if [ "$section" = "$(printf '# Tressoir Guidance\n\n%s' "$canonical")" ]; then
     echo complete
-  elif [ "$section" = "$(printf '# Tressoir Guidance\n\n%s' "$legacy")" ]; then
+  elif [ "$section" = "$(printf '# Tressoir Guidance\n\n%s' "$legacy")" ] ||
+    { [ -n "$older_legacy" ] && [ "$section" = "$(printf '# Tressoir Guidance\n\n%s' "$older_legacy")" ]; }; then
     echo legacy
   else
     echo ambiguous
@@ -505,11 +507,12 @@ guidance_state() {
 }
 
 register_guidance_file() {
-  local relative canonical legacy label destination state pre
+  local relative canonical legacy older_legacy label destination state pre
   relative="$1"
   canonical="$2"
   legacy="$3"
-  label="$4"
+  older_legacy="$4"
+  label="$5"
   destination="$ROOT/$relative"
 
   if [ -L "$destination" ]; then
@@ -522,7 +525,7 @@ register_guidance_file() {
       degrade "$relative (expected a regular file for $label)"
       return
     fi
-    state=$(guidance_state "$destination" "$canonical" "$legacy")
+    state=$(guidance_state "$destination" "$canonical" "$legacy" "$older_legacy")
     case "$state" in
       complete)
         say "already registered (current Tressoir guidance): $relative"
@@ -699,13 +702,13 @@ PY
 register_root_guidance() {
   [ "$REGISTER_GUIDANCE" -eq 1 ] || return
 
-  local claude_canonical claude_legacy agents_canonical agents_legacy
-  # Claude directly @-includes the agreement, current status, and durable decisions.
-  claude_canonical=$'@IB/TRESSOIR.md\n@IB/STATE.md\n@IB/CANON/ROOT_CANON.md'
-  claude_legacy=$'@IB/TRESSOIR.md'
-  # Codex/Pi prompts directly name the same three live files.
+  local claude_canonical claude_legacy claude_older_legacy agents_canonical agents_legacy
+  # All harness prompts directly name the same three live files and ask the agent to read them.
   agents_canonical=$'Before substantial work, read and follow `IB/TRESSOIR.md`.\nRead current status and open decisions in `IB/STATE.md`.\nRead durable project decisions in `IB/CANON/ROOT_CANON.md`.'
   agents_legacy=$'Before beginning substantial work, read and follow `IB/TRESSOIR.md`.'
+  claude_canonical="$agents_canonical"
+  claude_legacy=$'@IB/TRESSOIR.md\n@IB/STATE.md\n@IB/CANON/ROOT_CANON.md'
+  claude_older_legacy=$'@IB/TRESSOIR.md'
 
   say ""
   say "Root guidance:"
@@ -714,6 +717,7 @@ register_root_guidance() {
       "CLAUDE.md" \
       "$claude_canonical" \
       "$claude_legacy" \
+      "$claude_older_legacy" \
       "Claude root guidance"
     register_claude_settings
   fi
@@ -722,6 +726,7 @@ register_root_guidance() {
       "AGENTS.md" \
       "$agents_canonical" \
       "$agents_legacy" \
+      "" \
       "Codex root guidance"
   fi
   if [ "$PI" -eq 1 ] && [ "$CODEX" -eq 0 ]; then
@@ -730,6 +735,7 @@ register_root_guidance() {
         ".pi/APPEND_SYSTEM.md" \
         "$agents_canonical" \
         "$agents_legacy" \
+        "" \
         "Pi project guidance"
     else
       say "manual action: reference IB/TRESSOIR.md, IB/STATE.md, and IB/CANON/ROOT_CANON.md from your Pi project prompt"
@@ -869,7 +875,7 @@ print_instruction_handoff() {
     say "  Edited, duplicated, or unrelated guidance was preserved unchanged."
   else
     if [ "$CLAUDE" -eq 1 ]; then
-      say "  Claude Code option: add @IB/TRESSOIR.md, @IB/STATE.md, and @IB/CANON/ROOT_CANON.md to your chosen CLAUDE.md"
+      say "  Claude Code option: tell agents to read IB/TRESSOIR.md, IB/STATE.md, and IB/CANON/ROOT_CANON.md in your chosen CLAUDE.md"
       say "  Claude Code option: set .claude/settings.json env.CLAUDE_CODE_AUTO_COMPACT_WINDOW=400000 and autoMemoryEnabled=false"
     fi
     if [ "$CODEX" -eq 1 ]; then

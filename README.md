@@ -60,7 +60,7 @@ Register root guidance in system prompts? [y/N]
 
 If accepted, the managed `# Tressoir Guidance` section directly names
 `IB/TRESSOIR.md`, `IB/STATE.md`, and `IB/CANON/ROOT_CANON.md`. Claude uses root
-`CLAUDE.md` with `@`-includes; Codex uses root `AGENTS.md`; Pi-only setup uses
+`CLAUDE.md`; Codex uses root `AGENTS.md`; Pi-only setup uses
 `.pi/APPEND_SYSTEM.md`. Codex and Pi selected together share `AGENTS.md`,
 avoiding duplicate guidance. Missing files are created. Setup upgrades only the
 exact section it generated in earlier releases and preserves edited, duplicated,
@@ -185,12 +185,12 @@ For selected Claude setup, the managed section in root `CLAUDE.md` is:
 ```md
 # Tressoir Guidance
 
-@IB/TRESSOIR.md
-@IB/STATE.md
-@IB/CANON/ROOT_CANON.md
+Before substantial work, read and follow `IB/TRESSOIR.md`.
+Read current status and open decisions in `IB/STATE.md`.
+Read durable project decisions in `IB/CANON/ROOT_CANON.md`.
 ```
 
-For selected Codex setup, the managed section in root `AGENTS.md` is:
+For selected Codex setup, the managed section in root `AGENTS.md` is identical:
 
 ```md
 # Tressoir Guidance

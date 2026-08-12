@@ -605,3 +605,8 @@
   .ctx-item:not(.m-decision) > .ctx-item-head .dot::before { content:"\203A"; }
   .ctx-item:not(.m-decision).open > .ctx-item-head .dot { transform:rotate(90deg); color:var(--accent); }
   .ctx-item:not(.m-decision) > .ctx-item-head:hover .dot { color:var(--accent); }
+
+  /* The zero-margin h1 near the top of this file is for the compact frontmatter title. Markdown
+     level-one headings are document structure and need the same card separation as h2 sections. */
+  .wrap h1 { margin:30px 0 12px; }
+  .wrap .title-row h1 { margin:0; }

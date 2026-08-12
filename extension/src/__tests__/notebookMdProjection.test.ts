@@ -14,6 +14,7 @@ const assetsDir = resolve(__dirname, '../notebook/assets')
 const remarkPath = resolve(assetsDir, 'core/tressoir-remark.umd.js')
 const yamlPath = resolve(assetsDir, 'core/js-yaml.min.js')
 const runtimePath = resolve(assetsDir, 'tressoir-md.js')
+const artifactCssPath = resolve(assetsDir, 'artifact.css')
 const corePresent = existsSync(remarkPath) && existsSync(yamlPath) && existsSync(runtimePath)
 
 // Evaluate a classic/UMD script into the current jsdom global. The core bundles attach to
@@ -232,6 +233,38 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
     expect(html).toContain('<h2 class="section">Section</h2>')
     expect(html).toContain('<h3>A sub heading</h3>')
     expect(html).toContain('<h4>A label</h4>')
+  })
+
+  it('keeps a Markdown h1 separated from a following card while the frontmatter h1 stays compact', () => {
+    const md = [
+      '---',
+      'title: Header title',
+      'feedback: disabled',
+      '---',
+      '',
+      '# Large body title',
+      '',
+      '::::card{title="First card"}',
+      'Card body.',
+      '::::',
+    ].join('\n')
+    const style = document.createElement('style')
+    style.textContent = readFileSync(artifactCssPath, 'utf8')
+    document.head.append(style)
+    document.body.innerHTML = project(md)
+
+    try {
+      const headerTitle = document.querySelector<HTMLElement>('.title-row h1')
+      const bodyTitle = document.querySelector<HTMLElement>('.wrap > h1')
+      expect(headerTitle).not.toBeNull()
+      expect(bodyTitle).not.toBeNull()
+      expect(getComputedStyle(headerTitle!).marginBottom).toBe('0px')
+      expect(getComputedStyle(bodyTitle!).marginBottom).toBe('12px')
+      expect(bodyTitle?.nextElementSibling?.classList.contains('milestones')).toBe(true)
+    } finally {
+      style.remove()
+      document.body.innerHTML = ''
+    }
   })
 
   it('passes raw HTML / SVG through untouched (diagrams + advanced styling)', () => {

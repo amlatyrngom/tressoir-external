@@ -284,9 +284,13 @@ case_opt_in_root_guidance() (
   assert_file "$fresh/CLAUDE.md"
   assert_file "$fresh/AGENTS.md"
   grep -Fx '# Tressoir Guidance' "$fresh/CLAUDE.md" >/dev/null
-  grep -Fx '@IB/TRESSOIR.md' "$fresh/CLAUDE.md" >/dev/null
-  grep -Fx '@IB/STATE.md' "$fresh/CLAUDE.md" >/dev/null
-  grep -Fx '@IB/CANON/ROOT_CANON.md' "$fresh/CLAUDE.md" >/dev/null
+  grep -Fx \
+    'Before substantial work, read and follow `IB/TRESSOIR.md`.' \
+    "$fresh/CLAUDE.md" >/dev/null
+  grep -Fx 'Read current status and open decisions in `IB/STATE.md`.' \
+    "$fresh/CLAUDE.md" >/dev/null
+  grep -Fx 'Read durable project decisions in `IB/CANON/ROOT_CANON.md`.' \
+    "$fresh/CLAUDE.md" >/dev/null
   grep -Fx '# Tressoir Guidance' "$fresh/AGENTS.md" >/dev/null
   grep -Fx \
     'Before substantial work, read and follow `IB/TRESSOIR.md`.' \
@@ -333,8 +337,11 @@ case_opt_in_root_guidance() (
   sed -n '1,3p' "$existing/CLAUDE.md" |
     diff -u "$TMP_ROOT/guidance-existing-claude-before" -
   grep -Fx '# Tressoir Guidance' "$existing/CLAUDE.md" >/dev/null
-  grep -Fx '@IB/TRESSOIR.md' "$existing/CLAUDE.md" >/dev/null
-  grep -Fx '@IB/STATE.md' "$existing/CLAUDE.md" >/dev/null
+  grep -Fx \
+    'Before substantial work, read and follow `IB/TRESSOIR.md`.' \
+    "$existing/CLAUDE.md" >/dev/null
+  grep -Fx 'Read current status and open decisions in `IB/STATE.md`.' \
+    "$existing/CLAUDE.md" >/dev/null
   grep 'appended root guidance: CLAUDE.md' \
     "$TMP_ROOT/guidance-existing.log" >/dev/null
 
@@ -619,8 +626,9 @@ case_guidance_legacy_upgrade() (
   set -e
   legacy="$TMP_ROOT/guidance-legacy"
   mkdir -p "$legacy"
-  # Claude: the exact prior generated section (created form) upgrades in place.
-  printf '# Tressoir Guidance\n\n@IB/TRESSOIR.md\n' > "$legacy/CLAUDE.md"
+  # Claude: the exact prior generated @-include section upgrades in place.
+  printf '# Tressoir Guidance\n\n@IB/TRESSOIR.md\n@IB/STATE.md\n@IB/CANON/ROOT_CANON.md\n' \
+    > "$legacy/CLAUDE.md"
   # AGENTS: the exact prior generated section appended after user content upgrades,
   # preserving the user's pre-content.
   printf 'My notes.\n\nMore.\n\n# Tressoir Guidance\n\nBefore beginning substantial work, read and follow `IB/TRESSOIR.md`.\n' \
@@ -631,8 +639,13 @@ case_guidance_legacy_upgrade() (
 
   grep 'upgraded root guidance: CLAUDE.md' "$TMP_ROOT/guidance-legacy.log" >/dev/null
   grep 'upgraded root guidance: AGENTS.md' "$TMP_ROOT/guidance-legacy.log" >/dev/null
-  grep -Fx '@IB/STATE.md' "$legacy/CLAUDE.md" >/dev/null
-  grep -Fx '@IB/CANON/ROOT_CANON.md' "$legacy/CLAUDE.md" >/dev/null
+  grep -Fx \
+    'Before substantial work, read and follow `IB/TRESSOIR.md`.' \
+    "$legacy/CLAUDE.md" >/dev/null
+  grep -Fx 'Read current status and open decisions in `IB/STATE.md`.' \
+    "$legacy/CLAUDE.md" >/dev/null
+  grep -Fx 'Read durable project decisions in `IB/CANON/ROOT_CANON.md`.' \
+    "$legacy/CLAUDE.md" >/dev/null
   [ "$(grep -c '^# Tressoir Guidance$' "$legacy/CLAUDE.md")" -eq 1 ]
   grep -Fx 'My notes.' "$legacy/AGENTS.md" >/dev/null
   grep -Fx 'Read durable project decisions in `IB/CANON/ROOT_CANON.md`.' \
@@ -646,6 +659,17 @@ case_guidance_legacy_upgrade() (
   diff -u "$TMP_ROOT/guidance-legacy-before.txt" "$TMP_ROOT/guidance-legacy-after.txt"
   grep 'already registered (current Tressoir guidance): CLAUDE.md' \
     "$TMP_ROOT/guidance-legacy-rerun.log" >/dev/null
+
+  older_legacy="$TMP_ROOT/guidance-older-legacy"
+  mkdir -p "$older_legacy"
+  printf '# Tressoir Guidance\n\n@IB/TRESSOIR.md\n' > "$older_legacy/CLAUDE.md"
+  "$SETUP" setup --root "$older_legacy" --claude \
+    --register-guidance --no-vscode > "$TMP_ROOT/guidance-older-legacy.log"
+  grep 'upgraded root guidance: CLAUDE.md' \
+    "$TMP_ROOT/guidance-older-legacy.log" >/dev/null
+  grep -Fx \
+    'Before substantial work, read and follow `IB/TRESSOIR.md`.' \
+    "$older_legacy/CLAUDE.md" >/dev/null
 )
 
 case_guidance_ambiguous_preserved() (

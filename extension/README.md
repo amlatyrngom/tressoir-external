@@ -9,6 +9,8 @@ It is the artifact-editor portion of Tressoir, extracted into a self-contained e
 
 ## Notable in this release (0.1.3)
 
+- Markdown level-one headings now keep normal section spacing before a following card; the compact
+  frontmatter title remains unchanged.
 - Markdown decision inputs keep a stable identity across live edits: an answer stays bound to its `:::input{key=...}` even when surrounding cards are reordered, inserted, removed, or renamed, so typed values no longer shift to the wrong row during re-projection.
 - The Markdown projection view emits advisory authoring warnings (over-long titles/questions, duplicate input keys, lifecycle sections missing their Planned Changes / Completion Report, and stray fenced code) without blocking rendering.
 - After any upgrade, reload the window (or reopen affected artifact tabs) so retained webviews pick up the new runtime JavaScript.

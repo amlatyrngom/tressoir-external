@@ -156,7 +156,13 @@ case_piped_source_install() (
   assert_file "$project/CLAUDE.md"
   assert_file "$project/AGENTS.md"
   grep -Fx '# Tressoir Guidance' "$project/CLAUDE.md" >/dev/null
-  grep -Fx '@IB/TRESSOIR.md' "$project/CLAUDE.md" >/dev/null
+  grep -Fx \
+    'Before substantial work, read and follow `IB/TRESSOIR.md`.' \
+    "$project/CLAUDE.md" >/dev/null
+  grep -Fx 'Read current status and open decisions in `IB/STATE.md`.' \
+    "$project/CLAUDE.md" >/dev/null
+  grep -Fx 'Read durable project decisions in `IB/CANON/ROOT_CANON.md`.' \
+    "$project/CLAUDE.md" >/dev/null
   assert_file "$project/.claude/settings.json"
   grep -F '"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "400000"' \
     "$project/.claude/settings.json" >/dev/null
