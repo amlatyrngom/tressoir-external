@@ -78,7 +78,7 @@ case "$*" in
     ;;
   "run package:vsix")
     mkdir -p dist
-    printf '%s\n' 'mock VSIX' > dist/tressoir-artifacts-0.1.3.vsix
+    printf '%s\n' 'mock VSIX' > dist/tressoir-artifacts-0.1.4.vsix
     printf '%s\n' 'mock package complete'
     ;;
   *)
@@ -102,7 +102,7 @@ case "${1:-}" in
   --install-extension)
     [ -f "${2:-}" ] || exit 3
     printf '%s\n' "$2" > "$MOCK_CODE_INSTALL_LOG"
-    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.3' > "$MOCK_CODE_STATE"
+    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.4' > "$MOCK_CODE_STATE"
     printf '%s\n' 'mock installation succeeded'
     ;;
   *)
@@ -173,10 +173,10 @@ case_piped_source_install() (
     "$project/AGENTS.md" >/dev/null
   assert_absent "$project/.pi"
 
-  grep -Fx 'tressoir.tressoir-artifacts@0.1.3' "$state" >/dev/null
+  grep -Fx 'tressoir.tressoir-artifacts@0.1.4' "$state" >/dev/null
   built_vsix=$(sed -n '1p' "$install_log")
   case "$built_vsix" in
-    "$ephemeral"/*/source/tressoir-external-main/extension/dist/tressoir-artifacts-0.1.3.vsix)
+    "$ephemeral"/*/source/tressoir-external-main/extension/dist/tressoir-artifacts-0.1.4.vsix)
       ;;
     *)
       printf 'VSIX was not installed from temporary storage: %s\n' "$built_vsix" >&2

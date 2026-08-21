@@ -71,6 +71,23 @@ describe('scriptInjection.recreateScripts', () => {
     expect(scripts[2]!.getAttribute('nonce')).toBe('N')
   })
 
+  it('leaves inert JSON data scripts in place for a following renderer', async () => {
+    const container = document.createElement('div')
+    container.innerHTML =
+      '<script id="data" type="application/json">{"title":"Daily briefing"}</script>' +
+      '<main id="root"></main><script>document.getElementById("root").textContent = JSON.parse(document.getElementById("data").textContent).title</script>'
+    const dataScript = container.querySelector<HTMLScriptElement>('#data')!
+
+    await recreateScripts(container, 'N')
+
+    expect(container.querySelector('#data')).toBe(dataScript)
+    expect(dataScript.getAttribute('data-tressoir-script-ran')).toBe('1')
+    expect(dataScript.hasAttribute('nonce')).toBe(false)
+    const renderer = container.querySelectorAll('script')[1]!
+    expect(renderer.getAttribute('data-tressoir-script-ran')).toBe('1')
+    expect(renderer.getAttribute('nonce')).toBe('N')
+  })
+
   it('stamps a ran-marker and only re-creates NEW scripts on a second pass (morph case)', async () => {
     // The morph "lightweight refresh" re-runs recreateScripts over the same container; already
     // executed scripts must NOT run again (no double-init of authored top-level declarations),

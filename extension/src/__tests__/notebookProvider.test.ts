@@ -3,10 +3,12 @@ import * as vscode from 'vscode'
 import {
   __fireDidChangeActiveColorTheme,
   __fireDidChangeTextDocument,
+  __clearMockConfig,
   __readFile,
   __resetFs,
   __seedFile,
   ColorThemeKind,
+  __setMockConfig,
 } from './mocks/vscode'
 import { TressoirNotebookEditorProvider } from '../notebook/provider'
 import { clearNotebookState, getNotebookSelection } from '../notebook/state'
@@ -99,6 +101,7 @@ describe('notebook provider (editor-agnostic)', () => {
     vi.clearAllMocks()
     clearNotebookState()
     __resetFs()
+    __clearMockConfig()
     ;(vscode.window as any).activeColorTheme = { kind: ColorThemeKind.Dark }
   })
 
@@ -118,6 +121,18 @@ describe('notebook provider (editor-agnostic)', () => {
         interactions: { 'interactions.json': { greeting: 'hi' } },
       }),
     )
+  })
+
+  it('posts separate configured base font sizes for HTML and Markdown', async () => {
+    __setMockConfig('tressoir', 'html.baseFontSize', 18)
+    const htmlPanel = await resolve(makeProvider('html'), createDocument('<h1>HTML</h1>'))
+    const htmlState = vi.mocked(htmlPanel.webview.postMessage).mock.calls.at(-1)?.[0] as any
+    expect(htmlState.baseFontSize).toBe(18)
+
+    __setMockConfig('tressoir', 'markdown.baseFontSize', 13)
+    const mdPanel = await resolve(makeProvider('md'), createDocument('# Markdown'))
+    const mdState = vi.mocked(mdPanel.webview.postMessage).mock.calls.at(-1)?.[0] as any
+    expect(mdState.baseFontSize).toBe(13)
   })
 
   it('merges multiple interactions.*.json files into the snapshot', async () => {

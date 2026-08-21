@@ -593,6 +593,14 @@
   .comp-sub-title { color:var(--fg); font-size:14px; font-weight:750; text-transform:none; letter-spacing:0;   margin:14px 0 4px; }
 
   .ctx-item:not(.m-decision) > .ctx-item-head { font-size:15px; font-weight:500; }
+
+  /* Live user typography settings. Keep spacing and diagrams stable while the standard reading
+     hierarchy follows `tressoir.markdown.baseFontSize` without an extension rebuild. */
+  body { font-size:var(--tressoir-base-font-size, 14px); }
+  h1 { font-size:var(--tressoir-font-h1, 23px); }
+  h2.section { font-size:var(--tressoir-font-h2, 19px); }
+  .wrap h3 { font-size:var(--tressoir-font-h3, 17px); }
+  .wrap h4 { font-size:var(--tressoir-font-h4, 15px); }
   .ctx-item:not(.m-decision) > .ctx-item-head::after { content:none; }
   /* Leading affordance: a clean hairline chevron (no container). Muted at rest; flows INLINE on the
      first text line so it stays vertically centered regardless of row padding or wrapping; rotates to

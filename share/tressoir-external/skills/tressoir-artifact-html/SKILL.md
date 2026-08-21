@@ -78,6 +78,10 @@ Keep third-party assets inspectable and record their provenance. Decide explicit
 
 Even though the format is unconstrained:
 
+- use one simple linear document flow by default; specialized compositions should be requested or clearly justified by the content;
+- keep body text near browser defaults and use a modest heading scale rather than display-sized typography;
+- do not wrap the whole authored page in a decorative card or rounded outer sheet;
+- contain overflow-risk tables, SVG diagrams, preformatted text, canvases, and wide widgets in local horizontal scroll regions so they never widen or clip the document;
 - lead with the user's goal and current decision;
 - use plain labels and expand uncommon acronyms;
 - keep important state visible;

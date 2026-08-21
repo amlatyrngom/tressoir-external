@@ -24,6 +24,7 @@ type NotebookStateMessage = {
   sourceKind: NotebookSourceKind
   theme: NotebookThemeState
   interactions: InteractionsSnapshot
+  baseFontSize: number
 }
 
 // Sent on an authored-content change while the webview realm is alive. The webview DOM-morphs
@@ -35,6 +36,13 @@ type NotebookUpdateMessage = {
   sourceHtml: string
   sourceKind: NotebookSourceKind
   interactions: InteractionsSnapshot
+  baseFontSize: number
+}
+
+type NotebookTypographyMessage = {
+  type: 'typography'
+  sourceKind: NotebookSourceKind
+  baseFontSize: number
 }
 
 type NotebookThemeMessage = {
@@ -81,6 +89,10 @@ const MAX_INTERACTIONS_BYTES = 512 * 1024
 const LEGACY_FREE_FORM_FEEDBACK_KEY = 'free_form_feedback'
 
 export const NOTEBOOK_VIEW_TYPE = 'tressoir.notebookHtml'
+// Optional renderer for ordinary `*.html`: available through Reopen With without replacing the
+// normal text editor. A distinct view type is required because custom-editor priority applies to
+// the whole contribution, while `*.tressoir.html` must remain a default renderer.
+export const GENERIC_HTML_VIEW_TYPE = 'tressoir.genericHtml'
 // USER_ARTIFACT_MD: a SECOND custom editor for `*.tressoir.md`. Same provider class, but the
 // `md` source kind projects the markdown source -> the LOCKED user-artifact HTML in the webview
 // (via the bundled eval-free TressoirMd runtime) BEFORE feeding the existing morph pipeline. A
@@ -106,6 +118,16 @@ export function registerTressoirNotebookEditor(
 ): vscode.Disposable {
   return vscode.window.registerCustomEditorProvider(
     NOTEBOOK_VIEW_TYPE,
+    new TressoirNotebookEditorProvider(context, 'html'),
+    SHARED_EDITOR_OPTIONS,
+  )
+}
+
+export function registerGenericHtmlEditor(
+  context: vscode.ExtensionContext,
+): vscode.Disposable {
+  return vscode.window.registerCustomEditorProvider(
+    GENERIC_HTML_VIEW_TYPE,
     new TressoirNotebookEditorProvider(context, 'html'),
     SHARED_EDITOR_OPTIONS,
   )
@@ -196,7 +218,7 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
     setActiveNotebookDocument(currentDocument.fileName)
 
     const postMessage = (
-      message: NotebookStateMessage | NotebookUpdateMessage | NotebookThemeMessage,
+      message: NotebookStateMessage | NotebookUpdateMessage | NotebookThemeMessage | NotebookTypographyMessage,
       label: string,
     ): void => {
       void webviewPanel.webview.postMessage(message).then(
@@ -223,6 +245,7 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
           sourceKind: this.sourceKind,
           theme: this.currentTheme(),
           interactions,
+          baseFontSize: this.currentBaseFontSize(currentDocument),
         },
         'state',
       )
@@ -239,6 +262,7 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
           sourceHtml: currentDocument.getText(),
           sourceKind: this.sourceKind,
           interactions,
+          baseFontSize: this.currentBaseFontSize(currentDocument),
         },
         'update',
       )
@@ -246,6 +270,17 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
 
     const postTheme = (): void => {
       postMessage({ type: 'theme', theme: this.currentTheme() }, 'theme')
+    }
+
+    const postTypography = (): void => {
+      postMessage(
+        {
+          type: 'typography',
+          sourceKind: this.sourceKind,
+          baseFontSize: this.currentBaseFontSize(currentDocument),
+        },
+        'typography',
+      )
     }
 
     const documentChangeDisposable = vscode.workspace.onDidChangeTextDocument((event) => {
@@ -269,6 +304,16 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
 
     const themeChangeDisposable = vscode.window.onDidChangeActiveColorTheme(() => {
       postTheme()
+    })
+
+    const typographySetting =
+      this.sourceKind === 'md'
+        ? 'tressoir.markdown.baseFontSize'
+        : 'tressoir.html.baseFontSize'
+    const configurationChangeDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration(typographySetting, currentDocument.uri)) {
+        postTypography()
+      }
     })
 
     const receiveDisposable = webviewPanel.webview.onDidReceiveMessage(
@@ -341,6 +386,7 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
       clearNotebookStateForPath(currentDocument.fileName)
       documentChangeDisposable.dispose()
       themeChangeDisposable.dispose()
+      configurationChangeDisposable.dispose()
       receiveDisposable.dispose()
       viewStateDisposable.dispose()
     }
@@ -348,6 +394,15 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
     webviewPanel.onDidDispose(disposeAll)
 
     await postState()
+  }
+
+  private currentBaseFontSize(document: vscode.TextDocument): number {
+    const key = this.sourceKind === 'md' ? 'markdown.baseFontSize' : 'html.baseFontSize'
+    const fallback = this.sourceKind === 'md' ? 14 : 16
+    const configured = vscode.workspace
+      .getConfiguration('tressoir', document.uri)
+      .get<number>(key, fallback)
+    return Number.isFinite(configured) ? Math.min(28, Math.max(10, configured)) : fallback
   }
 
   // Validate + merge + persist a single interaction into a contained JSON file. This is the
@@ -761,6 +816,7 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
     data-source-name="${escapeHtmlAttribute(sourceNamespace)}"
     data-feedback-key="${escapeHtmlAttribute(feedbackKey)}"
     data-interactions-file="${escapeHtmlAttribute(interactionsFilename)}"
+    data-source-kind="${this.sourceKind}"
   >
     <div id="app"></div>
     ${mdAssets.scripts}
@@ -780,7 +836,7 @@ function sourceNamespaceFromPath(p: string): string {
   const slash = p.lastIndexOf('/')
   const base = slash >= 0 ? p.slice(slash + 1) : p
   let stem = base
-  for (const suffix of ['.tressoir.md', '.tressoir.html']) {
+  for (const suffix of ['.tressoir.md', '.tressoir.html', '.html']) {
     if (base.endsWith(suffix)) {
       stem = base.slice(0, -suffix.length)
       break

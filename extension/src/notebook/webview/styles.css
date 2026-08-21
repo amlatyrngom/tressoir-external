@@ -7,7 +7,7 @@
   --nb-muted: #a6adc8;
   --nb-accent: #89b4fa;
   --nb-selection: #45475a;
-  --nb-font-sans: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+  --nb-font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --nb-font-mono: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", monospace;
 }
 
@@ -74,4 +74,29 @@ code {
   border-radius: 18px;
   background: color-mix(in srgb, var(--nb-bg) 88%, var(--nb-surface) 12%);
   overflow: hidden;
+}
+
+/* Raw authored HTML is already a complete page. Do not place it inside a second page-shaped
+   card or impose Markdown-oriented spacing. These selectors deliberately style only extension
+   chrome; authored rules inside `.tressoir-preview` remain in control of the artifact itself. */
+body[data-source-kind="html"] #app {
+  padding: 0;
+}
+
+body[data-source-kind="html"] .notebook-shell {
+  gap: 0;
+  min-width: 0;
+}
+
+body[data-source-kind="html"] .notebook-preview-host {
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+body[data-source-kind="html"] .tressoir-preview {
+  min-width: 0;
+  max-width: 100%;
 }

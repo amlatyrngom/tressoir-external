@@ -1,5 +1,6 @@
 import * as vscode from 'vscode'
 import {
+  registerGenericHtmlEditor,
   registerTressoirNotebookEditor,
   registerTressoirNotebookMdEditor,
 } from './notebook/provider'
@@ -18,6 +19,7 @@ export function activate(context: vscode.ExtensionContext): void {
     return
   }
   context.subscriptions.push(registerTressoirNotebookEditor(context))
+  context.subscriptions.push(registerGenericHtmlEditor(context))
   context.subscriptions.push(registerTressoirNotebookMdEditor(context))
 }
 

@@ -46,6 +46,18 @@ export function ensureArtifactBaseHref(href: string): void {
  */
 const RAN_MARKER_ATTR = 'data-tressoir-script-ran'
 
+// Data blocks such as `<script type="application/json">` are DOM content, not executable
+// JavaScript. Leave them in place so a following renderer can read the exact original node and
+// text. Re-creating every script is unnecessary and has produced browser/webview differences for
+// full HTML documents that use the common data-block + renderer pattern.
+function isExecutableScript(script: HTMLScriptElement): boolean {
+  const type = (script.getAttribute('type') ?? '').trim().toLowerCase()
+  if (type === '' || type === 'module') {
+    return true
+  }
+  return type.includes('javascript') || type.includes('ecmascript')
+}
+
 export async function recreateScripts(container: HTMLElement, nonce: string): Promise<void> {
   // Only (re-)execute scripts that have NOT already run. On the initial full render every
   // authored script is new; on a morph "lightweight refresh" the previously-executed scripts
@@ -55,6 +67,10 @@ export async function recreateScripts(container: HTMLElement, nonce: string): Pr
     (s) => !s.hasAttribute(RAN_MARKER_ATTR),
   )
   for (const oldScript of scripts) {
+    if (!isExecutableScript(oldScript)) {
+      oldScript.setAttribute(RAN_MARKER_ATTR, '1')
+      continue
+    }
     const fresh = document.createElement('script')
     for (const attr of Array.from(oldScript.attributes)) {
       fresh.setAttribute(attr.name, attr.value)

@@ -115,8 +115,16 @@ npm run package:vsix
 ../bin/tressoir-external setup \
   --root /path/to/project \
   --claude --codex --pi --register-guidance \
-  --vsix "$PWD/dist/tressoir-artifacts-0.1.3.vsix"
+  --vsix "$PWD/dist/tressoir-artifacts-0.1.4.vsix"
 ```
+
+Ordinary `.html` files remain text by default. Use **Reopen With → Tressoir Artifact Preview
+(HTML)** for the trusted rendered view; `.tressoir.html` remains rendered by default. Raw HTML is
+presented without an extension-owned outer card so the authored page controls its own layout.
+
+Set `tressoir.markdown.baseFontSize` or `tressoir.html.baseFontSize` in VS Code settings to tune
+open artifacts live without recompiling. Markdown headings scale with the projection hierarchy;
+HTML `rem`/`em` typography scales from the configured root size.
 
 Useful setup options:
 
@@ -377,7 +385,7 @@ Release checks build transient output locally; no npm package is published.
 For a final desktop smoke, install the built VSIX into isolated VS Code directories and confirm:
 
 ```text
-tressoir.tressoir-artifacts@0.1.3
+tressoir.tressoir-artifacts@0.1.4
 ```
 
 ## Licensing

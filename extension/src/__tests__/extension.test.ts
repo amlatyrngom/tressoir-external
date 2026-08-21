@@ -14,7 +14,7 @@ describe('artifact-only extension activation', () => {
     vi.mocked(vscode.extensions.getExtension).mockReturnValue(undefined)
   })
 
-  it('registers both artifact custom editors and no commands', async () => {
+  it('registers the two artifact editors plus optional generic HTML preview and no commands', async () => {
     const vscode = await import('vscode')
     const { activate } = await import('../extension')
 
@@ -23,6 +23,7 @@ describe('artifact-only extension activation', () => {
     const registrations = vi.mocked(vscode.window.registerCustomEditorProvider).mock.calls
     expect(registrations.map(([viewType]) => viewType)).toEqual([
       'tressoir.notebookHtml',
+      'tressoir.genericHtml',
       'tressoir.notebookMd',
     ])
     for (const registration of registrations) {

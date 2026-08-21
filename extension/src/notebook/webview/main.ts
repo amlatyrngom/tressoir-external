@@ -39,6 +39,7 @@ type NotebookStateMessage = {
   sourceKind?: NotebookSourceKind
   theme: NotebookThemeState
   interactions: InteractionsSnapshot
+  baseFontSize?: number
 }
 
 // Lightweight-refresh message: morph the live preview to this HTML instead of rebuilding the
@@ -48,6 +49,13 @@ type NotebookUpdateMessage = {
   sourceHtml: string
   sourceKind?: NotebookSourceKind
   interactions: InteractionsSnapshot
+  baseFontSize?: number
+}
+
+type NotebookTypographyMessage = {
+  type: 'typography'
+  sourceKind: NotebookSourceKind
+  baseFontSize: number
 }
 
 // The bundled, eval-free markdown projection runtime (assets/tressoir-md.js), injected as a
@@ -85,6 +93,26 @@ let previewHost: HTMLDivElement | null = null
 let previewEl: HTMLDivElement | null = null
 let renderGeneration = 0
 let scrollPersistTimer: number | null = null
+
+function applySourceKind(sourceKind: NotebookSourceKind): void {
+  currentSourceKind = sourceKind
+  document.body.dataset.sourceKind = sourceKind
+}
+
+function applyTypography(sourceKind: NotebookSourceKind, baseFontSize?: number): void {
+  const fallback = sourceKind === 'md' ? 14 : 16
+  const size = Number.isFinite(baseFontSize) ? Math.min(28, Math.max(10, baseFontSize!)) : fallback
+  const root = document.documentElement
+  root.style.fontSize = `${size}px`
+  root.style.setProperty('--tressoir-base-font-size', `${size}px`)
+  // Standard Markdown hierarchy values are derived from its 14px baseline. Authored HTML uses
+  // the root size directly, so rem/em headings scale and explicit px values remain author-owned.
+  const markdownScale = size / 14
+  root.style.setProperty('--tressoir-font-h1', `${23 * markdownScale}px`)
+  root.style.setProperty('--tressoir-font-h2', `${19 * markdownScale}px`)
+  root.style.setProperty('--tressoir-font-h3', `${17 * markdownScale}px`)
+  root.style.setProperty('--tressoir-font-h4', `${15 * markdownScale}px`)
+}
 
 // Best-effort host hardening (NOT a security boundary): authored scripts share this realm, so
 // neutralize the bridge-handle factory before any authored script runs. The captured
@@ -399,14 +427,16 @@ async function renderNotebook(state: NotebookStateMessage): Promise<void> {
 
 function handleStateMessage(message: NotebookStateMessage): void {
   currentInteractions = message.interactions ?? {}
-  currentSourceKind = message.sourceKind ?? 'html'
+  applySourceKind(message.sourceKind ?? 'html')
+  applyTypography(currentSourceKind, message.baseFontSize)
   applyTheme(message.theme)
   void renderNotebook(message)
 }
 
 function handleUpdateMessage(message: NotebookUpdateMessage): void {
   currentInteractions = message.interactions ?? {}
-  currentSourceKind = message.sourceKind ?? currentSourceKind
+  applySourceKind(message.sourceKind ?? currentSourceKind)
+  applyTypography(currentSourceKind, message.baseFontSize)
   if (!previewEl) {
     // An update arrived before the first full render established a realm: fall back to a full
     // build so the preview is initialized correctly.
@@ -426,7 +456,7 @@ ensureArtifactBaseHref(artifactBaseUri)
 
 window.addEventListener(
   'message',
-  (event: MessageEvent<NotebookStateMessage | NotebookUpdateMessage | NotebookThemeMessage>) => {
+  (event: MessageEvent<NotebookStateMessage | NotebookUpdateMessage | NotebookThemeMessage | NotebookTypographyMessage>) => {
     const message = event.data
     if (!message || typeof message !== 'object' || !('type' in message)) {
       return
@@ -441,6 +471,11 @@ window.addEventListener(
     }
     if (message.type === 'theme') {
       applyTheme(message.theme)
+      return
+    }
+    if (message.type === 'typography') {
+      applySourceKind(message.sourceKind)
+      applyTypography(message.sourceKind, message.baseFontSize)
     }
   },
 )
@@ -463,5 +498,7 @@ function reportSelectionSoon(): void {
 document.addEventListener('selectionchange', reportSelectionSoon)
 
 renderLoadingState()
+applySourceKind(currentSourceKind)
+applyTypography(currentSourceKind)
 applyTheme(currentTheme)
 vscodeApi.postMessage({ type: 'ready' })

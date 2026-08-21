@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 EXTENSION="$ROOT/extension"
 PAYLOAD="$ROOT/share/tressoir-external"
-VERSION="0.1.3"
+VERSION="0.1.4"
 VSIX="$EXTENSION/dist/tressoir-artifacts-$VERSION.vsix"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/tressoir-release-check.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
@@ -43,7 +43,7 @@ node - "$TMP/package.json" <<'NODE'
 const fs = require('fs')
 const manifest = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
 const identity = `${manifest.publisher}.${manifest.name}@${manifest.version}`
-if (identity !== 'tressoir.tressoir-artifacts@0.1.3') {
+if (identity !== 'tressoir.tressoir-artifacts@0.1.4') {
   throw new Error(`unexpected packaged identity: ${identity}`)
 }
 if (manifest.license !== 'MIT') {
@@ -51,14 +51,16 @@ if (manifest.license !== 'MIT') {
 }
 const editors = manifest.contributes?.customEditors ?? []
 const byType = new Map(editors.map((editor) => [editor.viewType, editor]))
-for (const [viewType, pattern] of [
-  ['tressoir.notebookHtml', '*.tressoir.html'],
-  ['tressoir.notebookMd', '*.tressoir.md'],
+for (const [viewType, pattern, priority] of [
+  ['tressoir.notebookHtml', '*.tressoir.html', 'default'],
+  ['tressoir.genericHtml', '*.html', 'option'],
+  ['tressoir.notebookMd', '*.tressoir.md', 'default'],
 ]) {
   const editor = byType.get(viewType)
   if (!editor) throw new Error(`missing custom editor: ${viewType}`)
   const patterns = (editor.selector ?? []).map((selector) => selector.filenamePattern)
   if (!patterns.includes(pattern)) throw new Error(`missing selector: ${pattern}`)
+  if (editor.priority !== priority) throw new Error(`unexpected priority for ${viewType}: ${editor.priority}`)
 }
 NODE
 

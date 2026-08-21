@@ -4,11 +4,15 @@ This extension renders two trusted, text-backed artifact formats in regular desk
 
 - `*.tressoir.md` — Markdown projected into an attention-aware view with cards, reveal rows, decision inputs, highlighted code/diffs, and folder-local interaction persistence.
 - `*.tressoir.html` — raw HTML/CSS/JavaScript rendered directly for fully custom artifacts.
+- ordinary `*.html` — available as **Reopen With → Tressoir Artifact Preview (HTML)** without taking over normal text editing.
 
 It is the artifact-editor portion of Tressoir, extracted into a self-contained extension. It does not connect to the Tressoir daemon and does not include editor automation, the plugin host, code-server management, a Python runtime, or an SDK backend.
 
-## Notable in this release (0.1.3)
+## Notable in this release (0.1.4)
 
+- Ordinary HTML can opt into the same trusted preview while the normal text editor remains the default.
+- Raw HTML no longer sits inside an extension-owned padded rounded sheet or inherits a serif host font; authored pages render full-bleed with a restrained system fallback.
+- Inert script data blocks such as `type="application/json"` remain untouched while following executable renderers run with the webview nonce, covering full-document data-plus-renderer artifacts such as generated briefings.
 - Markdown level-one headings now keep normal section spacing before a following card; the compact
   frontmatter title remains unchanged.
 - Markdown decision inputs keep a stable identity across live edits: an answer stays bound to its `:::input{key=...}` even when surrounding cards are reordered, inserted, removed, or renamed, so typed values no longer shift to the wrong row during re-projection.
@@ -20,6 +24,21 @@ First-party extension code is licensed under the MIT License. Bundled third-part
 ## Runtime requirements
 
 The installed VSIX needs only a compatible regular desktop VS Code (`^1.85.0`). Node and npm are build/release dependencies, not separate end-user runtime requirements. Core Markdown projection assets ship inside the VSIX.
+
+## Live typography settings
+
+Font sizes can be tuned per user, workspace, or resource without rebuilding the extension:
+
+```json
+{
+  "tressoir.markdown.baseFontSize": 14,
+  "tressoir.html.baseFontSize": 16
+}
+```
+
+Open artifact views update when either setting changes. Markdown's standard heading hierarchy
+scales from its base. HTML changes the document root size, so `rem`/`em` typography—including
+headings—scales while explicit authored pixel sizes remain fixed.
 
 The standalone extension cannot be enabled at the same time as the older
 `tressoir.bridge` extension because both own the same artifact editor view
@@ -75,7 +94,7 @@ npm test
 npm run package:vsix
 ```
 
-The versioned package is written to `dist/tressoir-artifacts-0.1.3.vsix`. Always inspect the newly produced archive and packaged manifest before release; do not reuse an older bridge VSIX.
+The versioned package is written to `dist/tressoir-artifacts-0.1.4.vsix`. Always inspect the newly produced archive and packaged manifest before release; do not reuse an older bridge VSIX.
 
 ## Source provenance
 

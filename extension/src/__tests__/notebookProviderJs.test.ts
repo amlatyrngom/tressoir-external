@@ -71,6 +71,11 @@ describe('notebook provider JS support (CSP / base / resource roots)', () => {
     expect(html).toContain(`data-csp-nonce="${nonce}"`)
   })
 
+  it('marks the initial webview as raw HTML so extension chrome stays neutral', async () => {
+    const panel = await buildHtml()
+    expect(panel.webview.html).toContain('data-source-kind="html"')
+  })
+
   it('uses a hardened CSP: no unsafe-eval, no strict-dynamic, with connect-src for authored fetch', async () => {
     const panel = await buildHtml()
     const html = panel.webview.html
@@ -102,6 +107,12 @@ describe('notebook provider JS support (CSP / base / resource roots)', () => {
     expect(html).toContain('data-source-name="notebook"')
     expect(html).toContain('data-feedback-key="notebook-free_form_feedback"')
     expect(html).toContain('data-interactions-file="interactions.json"')
+  })
+
+  it('strips the ordinary .html suffix for generic preview interaction namespacing', async () => {
+    const panel = await buildHtml('/tmp/landing.html')
+    expect(panel.webview.html).toContain('data-source-name="landing"')
+    expect(panel.webview.html).toContain('data-feedback-key="landing-free_form_feedback"')
   })
 
   it('encodes adversarial source names injectively before browser transport', async () => {

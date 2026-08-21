@@ -93,7 +93,7 @@ case "${1:-}" in
       exit 1
     fi
     [ -f "${2:-}" ] || exit 3
-    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.3' > "$MOCK_CODE_STATE"
+    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.4' > "$MOCK_CODE_STATE"
     printf '%s\n' 'mock installation succeeded'
     ;;
   *)
@@ -174,7 +174,7 @@ case_fresh_all_with_extension() (
   assert_absent "$project/AGENTS.md"
   assert_absent "$project/.claude/rules"
   assert_absent "$project/.pi"
-  grep -Fx 'tressoir.tressoir-artifacts@0.1.3' "$state" >/dev/null
+  grep -Fx 'tressoir.tressoir-artifacts@0.1.4' "$state" >/dev/null
 
   digest_tree "$project" > "$TMP_ROOT/fresh-before.txt"
   MOCK_CODE_STATE="$state" "$SETUP" setup \
@@ -184,7 +184,7 @@ case_fresh_all_with_extension() (
   digest_tree "$project" > "$TMP_ROOT/fresh-after.txt"
   diff -u "$TMP_ROOT/fresh-before.txt" "$TMP_ROOT/fresh-after.txt"
   grep 'already linked' "$TMP_ROOT/fresh-rerun.log" >/dev/null
-  grep 'already installed: tressoir.tressoir-artifacts@0.1.3' \
+  grep 'already installed: tressoir.tressoir-artifacts@0.1.4' \
     "$TMP_ROOT/fresh-rerun.log" >/dev/null
 )
 
@@ -230,8 +230,8 @@ case_extension_upgrade() (
     --root "$project" --vsix "$vsix" --vscode-bin "$mock" \
     > "$TMP_ROOT/extension-upgrade.log"
 
-  [ "$(cat "$state")" = 'tressoir.tressoir-artifacts@0.1.3' ]
-  grep 'installed: tressoir.tressoir-artifacts@0.1.3' \
+  [ "$(cat "$state")" = 'tressoir.tressoir-artifacts@0.1.4' ]
+  grep 'installed: tressoir.tressoir-artifacts@0.1.4' \
     "$TMP_ROOT/extension-upgrade.log" >/dev/null
   grep 'reload the VS Code window or close and reopen affected artifact tabs' \
     "$TMP_ROOT/extension-upgrade.log" >/dev/null
