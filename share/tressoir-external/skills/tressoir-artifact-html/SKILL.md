@@ -7,7 +7,9 @@ description: Author or revise a raw .tressoir.html artifact with custom HTML, CS
 
 Use `.tressoir.html` when you know the exact interface you need and the structured `.tressoir.md` projection is not flexible enough.
 
-The Tressoir Artifacts VS Code extension renders the file directly in a webview. Your HTML, CSS, and JavaScript are the page. There is no required template or enforced information architecture.
+The Tressoir Artifacts VS Code extension renders the file directly in a webview. Your HTML, CSS, and JavaScript are the page. For a new artifact, start from the bundled `html_artifact_template/` unless the user requests a genuinely different composition. Copy the entire folder into the broad-task artifact directory and rename `ARTIFACT.tressoir.html`.
+
+Keep the starter's core CSS, JavaScript, tracked local vendor assets, single linear flow, and floating feedback dock intact. Replace its example content and add only narrow, token-based artifact CSS. This is an authoring default, not styling imposed by the extension on arbitrary HTML. The extension bundles the same source bytes for Markdown, so do not fork the standard component styles.
 
 Prefer `.tressoir.md` for plans, research, standard decisions, reveal rows, and focused review surfaces. Custom reports and explainers are common HTML uses. Keep plans and decision surfaces in `.tressoir.md`; Markdown accepts inline raw HTML and SVG, so a single table or diagram never requires moving a plan to another format.
 
@@ -26,12 +28,14 @@ The webview hides the raw VS Code API and exposes a narrow helper, but authored 
 Authored scripts can use:
 
 ```js
+const context = window.tressoirNotebook?.context?.()
 await window.tressoirNotebook?.openFile?.('./sibling.md')
 await window.tressoirNotebook?.storeInteraction?.('choice', { option: 'A' })
 const saved = await window.tressoirNotebook?.getInteraction?.('choice')
 ```
 
 - `openFile(relativePath)` opens a sibling inside the artifact folder. Absolute paths and `..` traversal are rejected.
+- `context()` returns one frozen object with the current artifact's generated `feedbackKey` and `interactionsFile`; it exposes no filesystem path or additional authority.
 - `storeInteraction(key, value, filename?)` persists a JSON-serializable value.
 - `getInteraction(key, filename?)` reads it back.
 - The default filename is `interactions.json`.
@@ -74,6 +78,30 @@ A one-time script does not necessarily rerun after every morph.
 
 Keep third-party assets inspectable and record their provenance. Decide explicitly whether a project should commit or ignore `vendor/`.
 
+The standard starter already vendors KaTeX, Prism, and CodeMirror for the feedback editor. Use its
+documented math, code, diff, single-decision, card, interaction, link, table/SVG, and floating feedback forms instead of
+adding another component system. Write in simple, concise language and keep ordinary information
+visible. Use a card only when one complete section is genuinely optional; do not turn individual
+paragraphs or list items into disclosures. There is deliberately no static card box, separate
+reveal component, or default item row.
+
+Keep `data-tressoir-markdown` on standard cards so their public opening tags match Markdown. In raw
+HTML, author the included `.card-body`, `.card-gutter`, and `.card-content` wrapper exactly as the
+starter does. The full-height outer-edge gutter collapses a long open card without covering its
+selectable, inset content; its bottom hook and end rule delineate the optional section.
+
+Keep the feedback dock non-modal: its small bottom-right trigger opens the form above the page
+without a backdrop, focus trap, or scroll lock. The document must remain readable and scrollable
+while the form is open. Preserve the close button, Escape handling, and silent persistence.
+
+When an HTML artifact needs a decision, use one `.decision` for one clearly worded question. Its
+checkbox answers use stable interaction keys, and it has one **Free Response** textarea. The
+starter derives **Unresolved** versus **Resolved** from whether any checkbox is selected. Free
+Response text alone never resolves it. Preserve the `rows="2"` and
+`data-tressoir-autogrow="2:6"` contract so the textarea grows through six lines and then scrolls.
+Persistence is silent; do not add saved/restored status text. Do not use the decision indicator as
+a decorative status badge elsewhere.
+
 ## Human-facing quality
 
 Even though the format is unconstrained:
@@ -81,11 +109,12 @@ Even though the format is unconstrained:
 - use one simple linear document flow by default; specialized compositions should be requested or clearly justified by the content;
 - keep body text near browser defaults and use a modest heading scale rather than display-sized typography;
 - do not wrap the whole authored page in a decorative card or rounded outer sheet;
-- contain overflow-risk tables, SVG diagrams, preformatted text, canvases, and wide widgets in local horizontal scroll regions so they never widen or clip the document;
+- let the starter automatically contain document tables and SVG diagrams; keep other overflow-risk preformatted text, canvases, and wide widgets in local horizontal scroll regions so they never widen or clip the document;
 - lead with the user's goal and current decision;
 - use plain labels and expand uncommon acronyms;
 - keep important state visible;
-- reveal depth progressively;
+- use the standardized decision component only for one actual question, never as a collection of unrelated controls;
+- prefer concise visible prose; reserve a card for an optional whole section;
 - make controls keyboard-accessible;
 - respect light and dark themes;
 - avoid ornamental interaction that obscures the work.

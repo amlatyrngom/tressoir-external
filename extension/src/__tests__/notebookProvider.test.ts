@@ -93,6 +93,7 @@ async function resolve(provider: ReturnType<typeof makeProvider>, document: Retu
     document as unknown as vscode.TextDocument,
     panel as unknown as vscode.WebviewPanel,
   )
+  await panel.__emitMessage({ type: 'ready' })
   return panel
 }
 
@@ -119,6 +120,26 @@ describe('notebook provider (editor-agnostic)', () => {
         sourceHtml: '<h1>Plan</h1>',
         theme: { kind: 'dark', flavor: 'mocha' },
         interactions: { 'interactions.json': { greeting: 'hi' } },
+      }),
+    )
+  })
+
+  it('waits for ready and posts exactly one initial state message', async () => {
+    const panel = createPanel()
+    await makeProvider().resolveCustomTextEditor(
+      createDocument('<script>const D = 1</script>') as unknown as vscode.TextDocument,
+      panel as unknown as vscode.WebviewPanel,
+    )
+
+    expect(panel.webview.postMessage).not.toHaveBeenCalled()
+
+    await panel.__emitMessage({ type: 'ready' })
+
+    expect(panel.webview.postMessage).toHaveBeenCalledTimes(1)
+    expect(panel.webview.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'state',
+        sourceHtml: '<script>const D = 1</script>',
       }),
     )
   })
@@ -373,11 +394,13 @@ describe('notebook provider storeInteraction (contained disk-write boundary)', (
       value: 'plan only',
     })
 
-    const written = JSON.parse(__readFile(folderFile('interactions.json'))!)
-    expect(written).toEqual({
+    const shared = JSON.parse(__readFile(folderFile('interactions.json'))!)
+    expect(shared).toEqual({
       free_form_feedback: 'ambiguous old shared text',
-      'PLAN-free_form_feedback': 'plan only',
       explicit_input: 'kept',
+    })
+    expect(JSON.parse(__readFile(folderFile('PLAN.interactions.json'))!)).toEqual({
+      'PLAN-free_form_feedback': 'plan only',
     })
   })
 
@@ -393,7 +416,9 @@ describe('notebook provider storeInteraction (contained disk-write boundary)', (
         key: expectedKey,
         value: 'saved',
       })
-      expect(JSON.parse(__readFile(folderFile('interactions.json'))!)).toEqual({
+      const filename = /data-interactions-file="([^"]+)"/.exec(panel.webview.html)?.[1]
+      expect(filename).toBeTruthy()
+      expect(JSON.parse(__readFile(folderFile(filename!))!)).toEqual({
         [expectedKey]: 'saved',
       })
     }
@@ -518,11 +543,11 @@ describe('notebook provider scoped-interactions frontmatter', () => {
   const parse = (text: string): 'shared' | 'scoped' =>
     (makeProvider('md') as any).parseFrontmatterInteractions(text)
 
-  it('opts in only for the exact scoped value', () => {
+  it('defaults to scoped and keeps shared as the explicit compatibility override', () => {
     expect(parse('---\ninteractions: scoped\n---\n')).toBe('scoped')
     expect(parse('---\ninteractions: "SCOPED"\n---\n')).toBe('scoped')
     expect(parse('---\ninteractions: shared\n---\n')).toBe('shared')
-    expect(parse('---\ntitle: Plan\n---\n')).toBe('shared')
-    expect(parse('# no frontmatter')).toBe('shared')
+    expect(parse('---\ntitle: Plan\n---\n')).toBe('scoped')
+    expect(parse('# no frontmatter')).toBe('scoped')
   })
 })

@@ -5,14 +5,9 @@
  * consumed by the bridge webview (which calls TressoirMd.project() then morphs) and by the
  * standalone SHIM (TressoirMd.render()).
  *
- * v2 authoring surface (minimal): YAML front-matter (title/description/links) + depth-styled
- * markdown headings + THREE container directives — `::::card{title oneliner state copy_button}` (4 colons,
- * explicit close, groups items), `:::item{oneliner}` (3 colons, reveal row), `:::input{key}`
- * (3 colons, a decision: question + markdown options + a bound text box) — plus plain markdown,
- * fenced code (```lang / ```diff), and raw HTML/SVG passthrough. The only nesting is
- * ::::card(4) ⊃ :::item(3). The locked artifact.css is OUTPUT-side, so the projector still
- * emits the same locked DOM classes (.milestone / .ctx-item / .m-decision / ...) from this
- * simpler input.
+ * Public authoring is ordinary Markdown: a leading H1 + lede, visible sections, and exact shared
+ * HTML card/decision components only when interaction is useful. Legacy card/item/input directives
+ * remain accepted and are adapted into the current component DOM.
  *
  * Dependencies (window globals, all eval-free UMD): TressoirRemark (unified/remark/rehype
  * bundle), jsyaml, Prism, CodeMirror. No `eval`/`new Function`; projection is a mdast->HTML
@@ -29,7 +24,6 @@
   function escAttr(s) {
     return esc(s).replace(/"/g, '&quot;');
   }
-  function cap(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
   function feedbackEnabled(fm) {
     if (fm && fm.feedback === false) return false;
     var value = fm && fm.feedback;
@@ -55,10 +49,12 @@
   // styled by the appended depth rules in artifact.css.
   function renderCodeBlock(node) {
     var lang = String(node.lang || '').toLowerCase();
-    if (lang === 'diff') {
-      return '<pre class="diff" data-lang="">' + esc(node.value) + '</pre>';
-    }
-    return '<pre class="code" data-lang="' + escAttr(lang) + '">' + esc(node.value) + '</pre>';
+    var aliases = { py: 'python', rs: 'rust', ts: 'typescript', js: 'javascript', sh: 'bash', shell: 'bash', zsh: 'bash', yml: 'yaml', md: 'markdown' };
+    lang = aliases[lang] || lang;
+    var classes = 'code-block';
+    var language = lang || 'text';
+    if (language === 'diff' || language.indexOf('diff-') === 0) classes += ' diff-highlight';
+    return '<pre class="' + classes + '"><code class="language-' + escAttr(language) + '">' + esc(node.value) + '</code></pre>';
   }
   function transformCodeDeep(node) {
     if (!node || typeof node !== 'object') return node;
@@ -79,10 +75,16 @@
       .use(R.rehypeStringify, { allowDangerousHtml: true });
     var root = { type: 'root', children: nodes.map(transformCodeDeep) };
     var hast = proc.runSync(root);
-    return proc.stringify(hast);
+    return proc.stringify(hast).replace(/<table>/g, '<table class="table">');
   }
 
-  // ---- ::::card{title oneliner state copy_button} -> .milestone reveal card (groups items).
+  function cardBody(body) {
+    return '<div class="card-body"><button class="card-gutter" type="button" data-card-collapse ' +
+      'aria-label="Collapse optional section" title="Collapse section"></button>' +
+      '<div class="card-content">' + body + '</div></div>';
+  }
+
+  // ---- Legacy ::::card -> the canonical native details card.
   // title / oneliner / state are injected RAW so an author can put an inline badge or other
   // inline HTML in them (e.g. state="<span class='badge ok'>Done</span>"). `open` (or
   // `selected`) starts the card expanded. `copy_button=true` opts this card into a control that
@@ -108,15 +110,13 @@
       var copyIndex = _cardMarkdown.push(source) - 1;
       copy = '<button type="button" class="card-copy" data-copy-card="' + copyIndex + '" aria-label="Copy ' + escAttr(title) + ' card as Markdown">Copy Markdown</button>';
     }
-    var actions = (state || copy) ? '<span class="m-actions">' +
-      (state ? '<span class="m-state">' + state + '</span>' : '') + copy + '</span>' : '';
     var body = renderBlocks(node.children || []);
-    return '<section class="milestone' + (open ? ' selected' : '') + '" data-morph-keep-class="selected">' +
-      '<div class="m-head" role="button" tabindex="0" aria-expanded="' + (open ? 'true' : 'false') + '">' +
-      '<div><div class="m-title">' + title + '</div>' +
-      (oneliner ? '<div class="m-intent">' + oneliner + '</div>' : '') + '</div>' +
-      actions + '</div>' +
-      '<div class="m-detail">' + body + '</div></section>';
+    if (copy) body = copy + body;
+    return '<details class="card" data-tressoir-markdown' + (open ? ' open' : '') + '>' +
+      '<summary><span class="card-title">' + title + '</span>' +
+      '<span class="card-oneliner">' + oneliner + '</span>' +
+      '<span class="card-badge">' + (state || 'Optional') + '</span></summary>' +
+      cardBody(body) + '</details>';
   }
 
   // ---- :::item{oneliner} -> .ctx-item disclosure row. oneliner injected RAW (inline HTML ok).
@@ -131,9 +131,7 @@
       '<div class="ctx-item-body">' + body + '</div></div>';
   }
 
-  // ---- :::input{key} -> .ctx-item.m-decision.m-input decision row. The head is the question
-  // (the `oneliner`/`question` attr, else the first paragraph). The body holds the options
-  // (plain markdown) + a bound text box; typing answers it (read back from interactions.json).
+  // ---- Legacy :::input -> the canonical checkbox + Free Response decision.
   function renderInput(node) {
     var a = node.attributes || {};
     var key = a.key || ('input.' + Math.random().toString(36).slice(2, 8));
@@ -144,20 +142,31 @@
       children = children.slice(1);
     }
     if (!question) question = 'Decision';
-    var body = renderBlocks(children);
-    var ph = 'Type a pick, a tweak, or a question for the next pass...';
-    return '<div class="ctx-item m-decision m-input" data-key="' + escAttr(key) + '" data-morph-key="tressoir-input:' + escAttr(key) + '" data-morph-keep-class="open">' +
-      '<button class="ctx-item-head" type="button" aria-expanded="false">' +
-      '<span class="dec-check" aria-hidden="true"></span>' +
-      '<span class="dec-name">' + esc(question) + '</span></button>' +
-      '<div class="ctx-item-body">' + body +
-      '<div class="other-box show" data-morph-skip>' +
-      '<textarea data-input-key="' + escAttr(key) + '" placeholder="' + escAttr(ph) + '"></textarea></div>' +
-      '</div></div>';
+    var listIndex = children.findIndex(function (child) { return child.type === 'list'; });
+    var choices = listIndex >= 0 ? children[listIndex].children || [] : [];
+    var choiceHtml = choices.map(function (item, index) {
+      var label = textOf(item).trim() || ('Option ' + (index + 1));
+      return '<label class="decision-option"><input type="checkbox" data-tressoir-input="' +
+        escAttr(key + '.choice.' + (index + 1)) + '"><span><strong>' + esc(label) +
+        '</strong></span></label>';
+    }).join('');
+    if (!choiceHtml) {
+      choiceHtml = '<label class="decision-option"><input type="checkbox" data-tressoir-input="' +
+        escAttr(key + '.choice.1') + '"><span><strong>Accept it as shown</strong></span></label>';
+    }
+    var safeId = 'decision-' + String(key).replace(/[^A-Za-z0-9_-]/g, '-');
+    return '<article class="decision" data-tressoir-decision data-decision-state="unresolved" ' +
+      'data-morph-key="tressoir-input:' + escAttr(key) + '" aria-labelledby="' + safeId + '-question">' +
+      '<header class="decision-header"><div><h3 class="decision-title" id="' + safeId + '-question">' + esc(question) +
+      '</h3><p class="decision-context">Check every applicable answer. Choosing at least one marks the decision resolved.</p></div>' +
+      '<span class="decision-state" data-decision-indicator role="status" aria-live="polite">Unresolved</span></header>' +
+      '<fieldset class="decision-options"><legend class="visually-hidden">Decision answers</legend>' + choiceHtml + '</fieldset>' +
+      '<div class="field decision-feedback"><label for="' + safeId + '-response">Free Response</label>' +
+      '<textarea id="' + safeId + '-response" rows="2" data-tressoir-input="' + escAttr(key) +
+      '" data-tressoir-autogrow="2:6" placeholder="Add anything the choices miss…"></textarea></div></article>';
   }
 
-  // ---- generic block renderer (recursive). Groups consecutive cards into .milestones and
-  // consecutive item/input rows into a .ctx-list; everything else is plain markdown.
+  // ---- generic block renderer. Legacy items retain their compatibility wrapper.
   function isCardDir(n) { return n.type === 'containerDirective' && n.name === 'card'; }
   function isRowDir(n) { return n.type === 'containerDirective' && (n.name === 'item' || n.name === 'input'); }
 
@@ -168,9 +177,7 @@
       var n = nodes[i];
       if (isCardDir(n)) {
         flushProse();
-        var cards = [];
-        while (i < nodes.length && isCardDir(nodes[i])) { cards.push(nodes[i]); i += 1; }
-        out += '<div class="milestones">' + cards.map(renderCard).join('') + '</div>';
+        while (i < nodes.length && isCardDir(nodes[i])) { out += renderCard(nodes[i]); i += 1; }
         continue;
       }
       if (isRowDir(n)) {
@@ -188,27 +195,106 @@
     return out;
   }
 
-  function renderHeader(fm) {
-    var title = esc(fm.title || 'Untitled');
-    var type = fm.tressoir;
-    var badge = (type != null && type !== '') ? '<span class="badge type">' + esc(cap(String(type))) + '</span>' : '';
-    var desc = fm.description ? '<p class="dek">' + esc(fm.description) + '</p>' : '';
-    var ph = 'Type any questions, constraints, or edits for the next pass. Markdown; fenced code blocks highlight.';
-    var ff = feedbackEnabled(fm) ? '<div class="head-feedback" data-morph-skip>' +
-      '<textarea id="ff-editor" placeholder="' + escAttr(ph) + '"></textarea></div>' : '';
-    return '<header class="plan-head"><div class="title-row"><h1>' + title + '</h1>' + badge + '</div>' +
-      desc + ff + '</header>';
+  function renderFeedbackDock(fm) {
+    if (!feedbackEnabled(fm)) return '';
+    return '<aside class="feedback-dock" data-feedback-dock>' +
+      '<section class="feedback-popover" id="artifact-feedback-panel" data-feedback-panel role="dialog" aria-modal="false" aria-labelledby="artifact-feedback-title" hidden>' +
+      '<header class="feedback-popover-header"><h2 id="artifact-feedback-title">Feedback Form</h2>' +
+      '<button class="feedback-close" type="button" data-feedback-close aria-label="Close feedback form">×</button></header>' +
+      '<div class="feedback-editor"><textarea id="artifact-feedback" data-tressoir-feedback aria-label="Feedback Form (Markdown)"></textarea></div></section>' +
+      '<button class="feedback-trigger" type="button" data-feedback-toggle aria-expanded="false" aria-controls="artifact-feedback-panel" aria-label="Open feedback form">' +
+      '<svg data-tressoir-inline viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.75h14v9.5H9.5L5 19v-13.25Z"></path><path d="M8.5 9h7M8.5 12h5"></path></svg></button></aside>';
+  }
+
+  // CommonMark treats parentheses/brackets as escapable punctuation, so protect the accepted
+  // KaTeX delimiters before remark parses them and restore the literal delimiters afterward.
+  function protectMath(markdown) {
+    var values = [];
+    function token(raw) {
+      var index = values.push(raw) - 1;
+      return 'TRESSOIR_MATH_' + index + '_TOKEN';
+    }
+    var protectedMarkdown = String(markdown)
+      .replace(/\\\[[\s\S]*?\\\]/g, token)
+      .replace(/\\\([^\n]*?\\\)/g, token);
+    return { markdown: protectedMarkdown, values: values };
+  }
+
+  function restoreMath(html, values) {
+    values.forEach(function (raw, index) {
+      html = html.replace(new RegExp('TRESSOIR_MATH_' + index + '_TOKEN', 'g'), esc(raw));
+    });
+    return html;
+  }
+
+  function extractMarkedCards(markdown) {
+    var lines = String(markdown).split(/\r?\n/), output = [], cards = [], findings = [];
+    var opener = /^\s*<details\b(?=[^>]*\bclass=(['"])card\1)(?=[^>]*\bdata-tressoir-markdown(?:\s|=|>))[^>]*>\s*$/;
+    for (var i = 0; i < lines.length; i += 1) {
+      if (!opener.test(lines[i])) { output.push(lines[i]); continue; }
+      var start = i, end = -1, nested = false;
+      for (var j = i + 1; j < lines.length; j += 1) {
+        if (opener.test(lines[j])) nested = true;
+        if (/^\s*<\/details>\s*$/.test(lines[j])) { end = j; break; }
+      }
+      if (nested) findings.push({ level: 'error', line: start + 1, msg: 'marked card blocks cannot nest' });
+      if (end < 0) {
+        findings.push({ level: 'error', line: start + 1, msg: 'marked card has no matching </details>' });
+        output.push(lines[i]);
+        continue;
+      }
+      var inner = lines.slice(i + 1, end).join('\n');
+      var summaryStart = inner.indexOf('<summary');
+      var summaryEnd = inner.indexOf('</summary>');
+      if (summaryStart < 0 || summaryEnd < summaryStart) {
+        findings.push({ level: 'error', line: start + 1, msg: 'marked card needs one complete <summary> before its Markdown body' });
+        output.push(lines.slice(i, end + 1).join('\n'));
+        i = end;
+        continue;
+      }
+      summaryEnd += '</summary>'.length;
+      var token = 'TRESSOIR_MARKED_CARD_' + cards.length + '_TOKEN';
+      cards.push({
+        opener: lines[start].trim(),
+        summary: inner.slice(summaryStart, summaryEnd).trim(),
+        body: inner.slice(summaryEnd).trim(),
+      });
+      output.push('', token, '');
+      i = end;
+    }
+    return { markdown: output.join('\n'), cards: cards, findings: findings };
+  }
+
+  function renderMarkedCards(html, cards, parseProc) {
+    cards.forEach(function (card, index) {
+      var bodyTree = parseProc.parse(card.body);
+      var rendered = card.opener + card.summary + cardBody(renderBlocks(bodyTree.children || [])) + '</details>';
+      html = html.replace('<p>TRESSOIR_MARKED_CARD_' + index + '_TOKEN</p>', rendered);
+    });
+    return html;
   }
 
   function project(markdown) {
     var R = getRemark();
     var parseProc = R.unified().use(R.remarkParse).use(R.remarkGfm).use(R.remarkFrontmatter, ['yaml']).use(R.remarkDirective);
-    var tree = parseProc.parse(markdown);
+    var protectedMath = protectMath(markdown);
+    var extracted = extractMarkedCards(protectedMath.markdown);
+    var tree = parseProc.parse(extracted.markdown);
     var fm = {};
     var fmNode = null;
     tree.children.forEach(function (n) { if (n.type === 'yaml' && !fmNode) fmNode = n; });
     if (fmNode) { try { fm = global.jsyaml.load(fmNode.value) || {}; } catch (e) { fm = {}; } }
     var content = tree.children.filter(function (n) { return n.type !== 'yaml'; });
+    var header = '';
+    if (content[0] && content[0].type === 'heading' && content[0].depth === 1) {
+      var titleNode = content.shift();
+      var ledeNode = content[0] && content[0].type === 'paragraph' ? content.shift() : null;
+      header = '<header class="document-header"><h1>' + esc(textOf(titleNode)) + '</h1>' +
+        (ledeNode ? mdastToHtml([ledeNode]).replace(/^<p>/, '<p class="lede">') : '') + '</header>';
+    } else if (fm.title) {
+      header = '<header class="document-header"><h1>' + esc(fm.title) + '</h1>' +
+        (fm.description ? '<p class="lede">' + esc(fm.description) + '</p>' : '') + '</header>';
+    }
     var preamble = [], sections = [], cur = null;
     content.forEach(function (n) {
       if (n.type === 'heading' && n.depth === 2) { cur = { title: textOf(n), blocks: [] }; sections.push(cur); }
@@ -219,11 +305,11 @@
     _cardMarkdown = [];
     var body = renderBlocks(preamble);
     sections.forEach(function (s) {
-      body += '<section class="ua-section"><h2 class="section">' + esc(s.title) + '</h2>' +
+      body += '<section class="section"><h2>' + esc(s.title) + '</h2>' +
         renderBlocks(s.blocks) + '</section>';
     });
-    var footer = '<footer class="gen"><span id="gen-marker">Generated by Tressoir. Consult the user-artifact-md skill before editing.</span></footer>';
-    return '<div class="wrap">' + renderHeader(fm) + body + footer + '</div>';
+    body = renderMarkedCards(body, extracted.cards, parseProc);
+    return restoreMath('<main class="tressoir-document">' + header + body + renderFeedbackDock(fm) + '</main>', protectedMath.values);
   }
 
   // ------------------------------------------------------------- behaviors
@@ -612,24 +698,25 @@
       }
     }
 
+    var extracted = extractMarkedCards(protectMath(markdown).markdown);
+    extracted.findings.forEach(function (finding) { findings.push(finding); });
     var R = getRemark();
     var tree;
     try {
       tree = R.unified().use(R.remarkParse).use(R.remarkGfm)
-        .use(R.remarkFrontmatter, ['yaml']).use(R.remarkDirective).parse(markdown);
+        .use(R.remarkFrontmatter, ['yaml']).use(R.remarkDirective).parse(extracted.markdown);
     } catch (e) {
       add('error', 0, 'markdown failed to parse: ' + (e && e.message || e));
       return findings;
     }
 
-    // ---- front-matter: optional, but if present must be a valid YAML mapping.
+    // ---- front-matter: optional control plane, never required presentation metadata.
     var fmNode = null;
+    var fm = {};
     tree.children.forEach(function (n) { if (n.type === 'yaml' && !fmNode) fmNode = n; });
-    if (!fmNode) {
-      add('warn', 1, 'no YAML front-matter (a `title:` becomes the H1, `description:` the dek)');
-    } else {
+    if (fmNode) {
       var fmLine = lineOf(fmNode) || 1;
-      var fm, fmOk = true;
+      var fmOk = true;
       try { fm = global.jsyaml.load(fmNode.value); }
       catch (e) { fmOk = false; add('error', fmLine, 'front-matter YAML is invalid: ' + (e && e.message || e)); }
       if (fmOk) {
@@ -643,11 +730,35 @@
           if (ttype != null && ttype !== '' && allowed.indexOf(String(ttype)) < 0) {
             add('warn', fmLine, 'front-matter `tressoir: ' + ttype + '` is not one of plan | research | interactive (type is optional)');
           }
-          if (fm.title == null || String(fm.title) === '') {
-            add('warn', fmLine, 'front-matter missing `title:` (header will show "Untitled")');
-          }
+          var links = Array.isArray(fm.links) ? fm.links : [];
+          links.forEach(function (link) {
+            if (/(?:tressoir-linear|katex|prism|codemirror)/i.test(String(link))) {
+              add('error', fmLine, 'front-matter `links:` must not include standard linear, KaTeX, Prism, or CodeMirror assets; the extension loads them automatically');
+            }
+          });
         }
       }
+    }
+
+    var publicContent = tree.children.filter(function (n) { return n.type !== 'yaml'; });
+    var leadingH1 = publicContent[0] && publicContent[0].type === 'heading' && publicContent[0].depth === 1;
+    if (leadingH1) {
+      if (!publicContent[1] || publicContent[1].type !== 'paragraph') {
+        add('warn', lineOf(publicContent[0]), 'leading H1 has no immediately following lede paragraph');
+      }
+    } else if (!fm || !fm.title) {
+      add('error', lineOf(publicContent[0]) || 1, 'artifact needs a leading H1; legacy front-matter `title` remains accepted only for existing files');
+    }
+
+    var seenControlKeys = {};
+    var controlPattern = /data-tressoir-input\s*=\s*(["'])(.*?)\1/g;
+    var controlMatch;
+    while ((controlMatch = controlPattern.exec(markdown))) {
+      var controlKey = controlMatch[2];
+      var controlLine = markdown.slice(0, controlMatch.index).split(/\r?\n/).length;
+      if (!controlKey) add('error', controlLine, 'data-tressoir-input needs a stable non-empty key');
+      else if (seenControlKeys[controlKey]) add('warn', controlLine, 'data-tressoir-input key `' + controlKey + '` is reused; independent controls need independent keys');
+      else seenControlKeys[controlKey] = true;
     }
 
     // ---- :::input — needs a `key=` (read-back) and a question (head text).
@@ -698,7 +809,14 @@
           add('warn', lineOf(node), 'looks like prose inside a plain ``` code fence — renders as a set-apart gray monospace box, not a paragraph (drop the fence, or move it to `description:`/lead text)');
         }
         if (!inItem) {
-          add('warn', lineOf(node), 'fenced code/diff outside an :::item — tie every snippet to an item that names its file and symbol (orphan snippet)');
+          // Use the same protected/grouped source that produced these AST line numbers. Display
+          // math and marked-card extraction can otherwise shift later nodes away from their label.
+          var sourceLines = String(extracted.markdown).split(/\r?\n/);
+          var startLine = Math.max(0, lineOf(node) - 4);
+          var nearby = sourceLines.slice(startLine, Math.max(0, lineOf(node) - 1)).join('\n');
+          if (!/`[^`]*(?:\/|\.[A-Za-z0-9]+|\w+\([^)]*\))[^`]*`/.test(nearby)) {
+            add('warn', lineOf(node), 'fenced code/diff has no nearby backticked file or symbol name');
+          }
         }
       }
       var childInItem = inItem;

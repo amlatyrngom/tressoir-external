@@ -22,6 +22,8 @@ import {
 } from '../theme'
 import morphdom from 'morphdom'
 import { ensureArtifactBaseHref, recreateScripts } from './scriptInjection'
+import { createArtifactContext } from './artifactContext'
+import { preserveDetailsState } from './morphState'
 
 declare function acquireVsCodeApi(): {
   postMessage(message: unknown): void
@@ -80,6 +82,7 @@ const DEFAULT_INTERACTIONS_FILE = 'interactions.json'
 const vscodeApi = acquireVsCodeApi()
 const artifactInteractionsFile =
   document.body.dataset.interactionsFile || DEFAULT_INTERACTIONS_FILE
+const artifactContext = createArtifactContext(document.body.dataset)
 
 // Authored content is rendered into THIS realm, so authored interactions are persisted via the
 // snapshot below (kept current as `state` messages arrive) and the `storeInteraction` bridge.
@@ -134,6 +137,7 @@ function resolveInteractionsFile(filename?: unknown): string {
 }
 
 // Narrow, deliberate capabilities exposed to authored content (trusted-artifact model):
+//   - context: read the current artifact's generated feedback key and interaction filename;
 //   - openFile: open a relative file contained by the artifact folder or workspace in the editor;
 //   - storeInteraction / getInteraction: persist + read widget state in a contained JSON file.
 // These cannot read/write the document content or reach the rest of the vscode API. The
@@ -144,6 +148,9 @@ try {
     enumerable: true,
     writable: false,
     value: Object.freeze({
+      context() {
+        return artifactContext
+      },
       openFile(relativePath: string): void {
         if (typeof relativePath !== 'string' || relativePath.length === 0) {
           return
@@ -171,7 +178,8 @@ try {
         }
         // Opt-in scoped artifacts can read their existing shared value until the next edit writes
         // it to the scoped file. Explicit custom-filename reads remain exact.
-        return filename === undefined && file !== DEFAULT_INTERACTIONS_FILE
+        return file !== DEFAULT_INTERACTIONS_FILE &&
+          (filename === undefined || file === artifactInteractionsFile)
           ? currentInteractions[DEFAULT_INTERACTIONS_FILE]?.[key]
           : undefined
       },
@@ -230,10 +238,14 @@ function applyCssVariables(target: HTMLElement, palette: NotebookThemePalette): 
   target.style.setProperty('--nb-bg', palette.bg)
   target.style.setProperty('--nb-surface', palette.surface)
   target.style.setProperty('--nb-surface-alt', palette.surfaceAlt)
+  target.style.setProperty('--nb-code-bg', palette.codeSurface)
   target.style.setProperty('--nb-border', palette.border)
   target.style.setProperty('--nb-text', palette.text)
   target.style.setProperty('--nb-muted', palette.muted)
   target.style.setProperty('--nb-accent', palette.accent)
+  target.style.setProperty('--nb-green', palette.positive)
+  target.style.setProperty('--nb-yellow', palette.warning)
+  target.style.setProperty('--nb-red', palette.danger)
   target.style.setProperty('--nb-selection', palette.selection)
 }
 
@@ -370,11 +382,12 @@ async function morphPreview(message: NotebookUpdateMessage): Promise<void> {
   target.className = 'tressoir-preview'
   target.innerHTML = projectSource(message.sourceHtml)
   morphdom(previewEl, target, {
-    // Match nodes by stable identity so reordering/renaming an explicit `:::input`
-    // moves the correct row (and its skipped textarea) instead of binding by position.
+    // Match projected decisions and canonical controls by stable identity so live edits do not
+    // bind an in-progress answer to a different authored control merely by DOM position.
     getNodeKey(node) {
       const el = node.nodeType === 1 ? (node as Element) : null
-      return el?.getAttribute('data-morph-key') || el?.id || undefined
+      const inputKey = el?.getAttribute('data-tressoir-input')
+      return el?.getAttribute('data-morph-key') || (inputKey ? `tressoir-control:${inputKey}` : '') || el?.id || undefined
     },
     onBeforeElUpdated(fromEl, toEl) {
       // Never re-morph (or re-run) an already-executing authored script.
@@ -386,6 +399,7 @@ async function morphPreview(message: NotebookUpdateMessage): Promise<void> {
         return false
       }
       preserveFormState(fromEl, toEl)
+      preserveDetailsState(fromEl, toEl)
       preserveKeepClasses(fromEl, toEl)
       return true
     },
@@ -397,7 +411,7 @@ async function morphPreview(message: NotebookUpdateMessage): Promise<void> {
         const element = node as Element
         if (
           element.hasAttribute('data-morph-skip') &&
-          !element.closest('.m-input[data-morph-key]')
+          !element.closest('[data-morph-key]')
         ) {
           return false
         }

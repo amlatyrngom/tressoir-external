@@ -164,7 +164,7 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
     const sourceNamespace = sourceNamespaceFromPath(currentDocument.fileName)
     const feedbackKey = freeFormFeedbackKey(sourceNamespace)
     const interactionsFilename =
-      this.sourceKind === 'md' && this.parseFrontmatterInteractions(currentDocument.getText()) === 'scoped'
+      this.sourceKind === 'md' && this.parseFrontmatterInteractions(currentDocument.getText()) !== 'shared'
         ? scopedInteractionsFilename(sourceNamespace)
         : 'interactions.json'
 
@@ -213,7 +213,6 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
         interactionsFilename,
       )
     }
-    renderWebviewHtml()
 
     setActiveNotebookDocument(currentDocument.fileName)
 
@@ -393,7 +392,10 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
 
     webviewPanel.onDidDispose(disposeAll)
 
-    await postState()
+    // Install the message listener before creating the webview realm. The webview's `ready`
+    // message is the single initialization handshake; proactively posting state here as well can
+    // race with `ready` and execute authored top-level declarations twice in the same realm.
+    renderWebviewHtml()
   }
 
   private currentBaseFontSize(document: vscode.TextDocument): number {
@@ -551,39 +553,35 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
     return notebookThemeFromColorKind(vscode.window.activeColorTheme.kind)
   }
 
-  // Committed extension-core UMD runtime load order for the md projection (mirrors the SHIM
-  // preview_md.py + assets/core/README.md): the remark/yaml/prism/CodeMirror stack, the `simple`
-  // addon (rust mode needs defineSimpleMode) + placeholder addon, then CM modes in dependency
-  // order (meta before markdown), then the TressoirMd projection runtime LAST. These are the
-  // always-needed shared libs shipped INSIDE the extension under dist/assets/core (NOT a
-  // per-artifact vendor download). All eval-free classic scripts loaded under the
-  // `${webview.cspSource}` host-source (no nonce needed for src scripts).
+  // Projection parser followed by the exact tracked linear vendor/runtime bundle. The same bytes
+  // are copied beside new HTML artifacts and into dist/assets/linear for Markdown.
   private static readonly MD_CORE_PREFIX: readonly string[] = [
     'core/tressoir-remark.umd.js',
     'core/js-yaml.min.js',
-    'core/prism.js',
-    'core/codemirror.js',
-    'core/cm-addon/simple.js',
-    'core/cm-addon/placeholder.js',
+    'linear/vendor/katex/katex.min.js',
+    'linear/vendor/katex/auto-render.min.js',
+    'linear/vendor/prism/components/prism-core.min.js',
+    'linear/vendor/prism/components/prism-markup.min.js',
+    'linear/vendor/prism/components/prism-css.min.js',
+    'linear/vendor/prism/components/prism-clike.min.js',
+    'linear/vendor/prism/components/prism-javascript.min.js',
+    'linear/vendor/prism/components/prism-typescript.min.js',
+    'linear/vendor/prism/components/prism-jsx.min.js',
+    'linear/vendor/prism/components/prism-tsx.min.js',
+    'linear/vendor/prism/components/prism-json.min.js',
+    'linear/vendor/prism/components/prism-yaml.min.js',
+    'linear/vendor/prism/components/prism-markdown.min.js',
+    'linear/vendor/prism/components/prism-bash.min.js',
+    'linear/vendor/prism/components/prism-python.min.js',
+    'linear/vendor/prism/components/prism-rust.min.js',
+    'linear/vendor/prism/components/prism-sql.min.js',
+    'linear/vendor/prism/components/prism-diff.min.js',
+    'linear/vendor/prism/plugins/diff-highlight/prism-diff-highlight.min.js',
+    'linear/vendor/codemirror/codemirror.js',
+    'linear/vendor/codemirror/mode/xml.js',
+    'linear/vendor/codemirror/mode/meta.js',
+    'linear/vendor/codemirror/mode/markdown.js',
   ]
-
-  // CodeMirror language modes are injected DYNAMICALLY from core/cm-mode/*.js so adding a
-  // language is a SINGLE knob: drop the CodeMirror mode + Prism component into assets/core/ per
-  // assets/core/README.md and rebuild — no bridge edit needed. meta.js MUST load first (it
-  // provides the alias/extension resolution used by markdown fenced highlighting); order among the
-  // remaining modes is irrelevant because they are resolved lazily at tokenize time.
-  private cmModeScripts(assetsDir: vscode.Uri): string[] {
-    try {
-      const dir = vscode.Uri.joinPath(assetsDir, 'core', 'cm-mode').fsPath
-      return fs
-        .readdirSync(dir)
-        .filter((f) => f.endsWith('.js'))
-        .sort((a, b) => (a === 'meta.js' ? -1 : b === 'meta.js' ? 1 : a.localeCompare(b)))
-        .map((f) => `core/cm-mode/${f}`)
-    } catch {
-      return []
-    }
-  }
 
   // Parse the front-matter `links:` string list (dependency-free; the extension host has no
   // js-yaml). Supports a block list (`links:` then `  - <entry>` lines) and an inline flow list
@@ -636,22 +634,20 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
     return entries.filter((e) => e.length > 0)
   }
 
-  // `interactions: scoped` opts a Markdown artifact into a sibling
-  // `<source>.interactions.json` file. Any other value (or no frontmatter) preserves the legacy
-  // shared `interactions.json` behavior. Like `links:`, changing this setting requires reopening
-  // the artifact because it configures the one-time webview realm.
+  // Markdown interactions are artifact-scoped by default. `interactions: shared` is the explicit
+  // compatibility override; `interactions: scoped` remains accepted.
   private parseFrontmatterInteractions(text: string): 'shared' | 'scoped' {
     const fmMatch = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)
     if (!fmMatch) {
-      return 'shared'
+      return 'scoped'
     }
     for (const line of fmMatch[1].split(/\r?\n/)) {
       const match = /^\s*interactions\s*:\s*(.*?)\s*$/.exec(line)
       if (!match) continue
       const value = match[1].replace(/^['"]|['"]$/g, '').trim().toLowerCase()
-      return value === 'scoped' ? 'scoped' : 'shared'
+      return value === 'shared' ? 'shared' : 'scoped'
     }
-    return 'shared'
+    return 'scoped'
   }
 
   // Stable, filesystem-safe cache name for a declared script URL: a short content hash of the URL
@@ -738,23 +734,28 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
         return false
       }
     }
-    // Locked CSS first, then author-declared `links:` stylesheets (so an author can layer on top).
+    // Canonical linear styles first, then the narrow Markdown adapter and author overrides.
     const styleLinks = [
-      ...['core/codemirror.css', 'artifact.css']
+      ...[
+        'linear/vendor/katex/katex.min.css',
+        'linear/vendor/prism/plugins/diff-highlight/prism-diff-highlight.min.css',
+        'linear/vendor/codemirror/codemirror.css',
+        'linear/tressoir-linear.css',
+        'artifact.css',
+      ]
         .filter(exists)
         .map((rel) => `<link rel="stylesheet" href="${assetUri(rel)}" />`),
       ...userLinks.styleTags,
     ].join('\n    ')
     const orderedScripts = [
       ...TressoirNotebookEditorProvider.MD_CORE_PREFIX,
-      ...this.cmModeScripts(assetsDir),
     ]
     // Core libs first, then author-declared `links:` scripts (local or vendor-cached remote),
     // then the projection runtime LAST so it can consume them.
     const coreTags = orderedScripts
       .filter(exists)
       .map((rel) => `<script src="${assetUri(rel)}"></script>`)
-    const runtimeTags = ['tressoir-md.js']
+    const runtimeTags = ['tressoir-md.js', 'linear/tressoir-linear.js']
       .filter(exists)
       .map((rel) => `<script src="${assetUri(rel)}"></script>`)
     const scriptTags = [...coreTags, ...userLinks.scriptTags, ...runtimeTags].join('\n    ')

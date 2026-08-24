@@ -48,9 +48,23 @@ function copyNotebookAssets() {
   })
 }
 
+function copyLinearAssets() {
+  const srcLinear = '../share/tressoir-external/skills/tressoir-artifact-html/html_artifact_template'
+  const dstLinear = 'dist/assets/linear'
+  const required = ['tressoir-linear.css', 'tressoir-linear.js', 'vendor']
+  for (const entry of required) {
+    const source = nodePath.join(srcLinear, entry)
+    if (!fs.existsSync(source)) {
+      throw new Error(`Missing canonical linear asset: ${source}`)
+    }
+    fs.cpSync(source, nodePath.join(dstLinear, entry), { recursive: true })
+  }
+}
+
 async function main() {
   fs.mkdirSync('dist', { recursive: true })
   copyNotebookAssets()
+  copyLinearAssets()
 
   if (isWatch) {
     const extensionContext = await esbuild.context(extensionBuild)

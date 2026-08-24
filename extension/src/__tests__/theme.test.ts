@@ -21,5 +21,10 @@ describe('notebook theme mapping', () => {
 
     expect(light.bg).not.toBe(dark.bg)
     expect(light.text).not.toBe(dark.text)
+    expect(light.codeSurface).not.toBe(dark.codeSurface)
+    expect(dark.codeSurface).toBe('#111318')
+    expect(light.positive).toBeTruthy()
+    expect(dark.warning).toBeTruthy()
+    expect(dark.danger).toBeTruthy()
   })
 })

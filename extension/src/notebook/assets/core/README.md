@@ -1,21 +1,28 @@
 # `.tressoir.md` core runtime (committed)
 
-These files are the always-needed runtime for the `*.tressoir.md` projection. They ship inside the standalone Tressoir Artifacts extension under `dist/assets/core/` and are loaded through VS Code webview URIs.
+This directory retains the Markdown parser inputs and the previous Prism/CodeMirror payload for
+source compatibility. New Markdown rendering loads `js-yaml.min.js` and
+`tressoir-remark.umd.js` from here, then uses the exact tracked linear KaTeX/Prism/CodeMirror bundle
+copied from the HTML starter into `dist/assets/linear/`.
 
 They are committed build inputs. A normal extension build performs no download.
 
 ## Contents
 
-- `prism.js` — Prism 1.29.0 core and language grammars for read-only highlighting.
-- `codemirror.js`, `codemirror.css`, `cm-mode/*.js`, `cm-addon/*.js` — CodeMirror 5.65.16 for the free-form feedback editor.
+- `prism.js`, `codemirror.js`, `codemirror.css`, `cm-mode/*.js`, `cm-addon/*.js` — retained previous
+  renderer assets; not loaded by the new linear Markdown path.
 - `js-yaml.min.js` — js-yaml 4.1.0 for directive/frontmatter data parsing.
 - `tressoir-remark.umd.js` — a single classic IIFE exposing the unified/remark/rehype projection stack as `window.TressoirRemark`.
 
-Per-artifact dependencies are separate. A `.tressoir.md` file may declare a `links:` frontmatter list. Local CSS/JavaScript is loaded from the artifact folder; remote CSS is referenced directly; remote JavaScript is fetched by the extension host into the artifact-local `vendor/` cache and loaded locally. Only open trusted artifacts.
+Standard presentation dependencies are automatic and offline. A `.tressoir.md` file may declare a
+`links:` frontmatter list only for genuinely extra CSS/JavaScript. Local files load from the
+artifact folder; remote CSS is referenced directly; remote JavaScript is cached locally by the
+extension host. Only open trusted artifacts.
 
 ## Rebuilding the remark bundle
 
-The committed Prism, CodeMirror, and js-yaml files originate from their upstream distributions. The remark/rehype packages are ESM npm modules and are bundled into one browser IIFE. To regenerate it in a temporary directory:
+The committed js-yaml file originates from its upstream distribution. The remark/rehype packages
+are ESM npm modules and are bundled into one browser IIFE. To regenerate it in a temporary directory:
 
 ```bash
 mkdir -p /tmp/tressoir-remark-build

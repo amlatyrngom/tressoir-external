@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 EXTENSION="$ROOT/extension"
 PAYLOAD="$ROOT/share/tressoir-external"
+LINEAR_SOURCE="$PAYLOAD/skills/tressoir-artifact-html/html_artifact_template"
 VERSION="0.1.4"
 VSIX="$EXTENSION/dist/tressoir-artifacts-$VERSION.vsix"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/tressoir-release-check.XXXXXX")
@@ -26,6 +27,27 @@ cmp "$ROOT/LICENSE" "$EXTENSION/LICENSE.md"
 cmp "$EXTENSION/src/notebook/assets/tressoir-md.js" \
   "$PAYLOAD/skills/tressoir-artifact-md/references/runtime/tressoir-md.js"
 cmp "$EXTENSION/src/notebook/assets/tressoir-md.js" "$TMP/tressoir-md.js"
+
+# The reviewed HTML starter is the single source for both HTML copies and Markdown's VSIX assets.
+for source in "$LINEAR_SOURCE/tressoir-linear.css" "$LINEAR_SOURCE/tressoir-linear.js" \
+  $(find "$LINEAR_SOURCE/vendor" -type f | LC_ALL=C sort); do
+  rel=${source#"$LINEAR_SOURCE/"}
+  built="$EXTENSION/dist/assets/linear/$rel"
+  member="extension/dist/assets/linear/$rel"
+  [ -f "$built" ] || { echo "missing built linear asset: $rel" >&2; exit 1; }
+  cmp "$source" "$built"
+  grep -Fx "$member" "$TMP/archive.txt" >/dev/null || {
+    echo "missing VSIX linear asset: $rel" >&2
+    exit 1
+  }
+  mkdir -p "$TMP/linear/$(dirname "$rel")"
+  unzip -p "$VSIX" "$member" > "$TMP/linear/$rel"
+  cmp "$source" "$TMP/linear/$rel"
+done
+
+grep -F 'KaTeX 0.18.4' "$LINEAR_SOURCE/vendor/README.md" >/dev/null
+grep -F 'PrismJS 1.30.0' "$LINEAR_SOURCE/vendor/README.md" >/dev/null
+grep -F 'CodeMirror 5.65.16' "$LINEAR_SOURCE/vendor/README.md" >/dev/null
 grep -F 'free_form_feedback' "$TMP/extension.js" >/dev/null
 grep -F 'tressoir.bridge' "$TMP/extension.js" >/dev/null
 

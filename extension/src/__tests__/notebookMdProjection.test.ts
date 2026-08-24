@@ -3,11 +3,9 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { existsSync, readFileSync } from 'fs'
 import { resolve } from 'path'
 
-// USER_ARTIFACT_MD projection tests. These exercise the REAL eval-free runtime
-// (src/notebook/assets/tressoir-md.js) against the REAL committed extension-core remark + js-yaml
-// UMD bundles, so they prove the actual v2 directive->markup behavior the webview ships — not a
-// reimplementation. The v2 surface is front-matter + depth-styled headings + THREE directives
-// (::::card / :::item / :::input) + plain markdown. The core bundles are COMMITTED under
+// Markdown projection tests exercise the real eval-free runtime against the committed parser.
+// Public authoring is H1/lede Markdown plus exact shared HTML components; legacy directives remain
+// positive compatibility fixtures. The core bundles are committed under
 // assets/core/ (rebuilt rarely per assets/core/README.md); the existence guard is a
 // belt-and-suspenders no-op for an unusual checkout missing them.
 const assetsDir = resolve(__dirname, '../notebook/assets')
@@ -15,6 +13,10 @@ const remarkPath = resolve(assetsDir, 'core/tressoir-remark.umd.js')
 const yamlPath = resolve(assetsDir, 'core/js-yaml.min.js')
 const runtimePath = resolve(assetsDir, 'tressoir-md.js')
 const artifactCssPath = resolve(assetsDir, 'artifact.css')
+const linearDir = resolve(
+  __dirname,
+  '../../../share/tressoir-external/skills/tressoir-artifact-html/html_artifact_template',
+)
 const corePresent = existsSync(remarkPath) && existsSync(yamlPath) && existsSync(runtimePath)
 
 // Evaluate a classic/UMD script into the current jsdom global. The core bundles attach to
@@ -44,7 +46,7 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
     applyBehaviors = runtime.applyBehaviors
   })
 
-  it('projects front-matter title/description into the locked header (type optional)', () => {
+  it('keeps front-matter title/description as a presentation-neutral compatibility header', () => {
     const md = [
       '---',
       'tressoir: plan',
@@ -55,14 +57,13 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
       'Intro paragraph.',
     ].join('\n')
     const html = project(md)
-    expect(html).toContain('<div class="wrap">')
-    expect(html).toContain('<header class="plan-head">')
-    expect(html).toContain('My Plan Title')
-    expect(html).toContain('<span class="badge type">Plan</span>')
-    expect(html).toContain('<p class="dek">A one-line dek.</p>')
-    // Free-form feedback host must carry the morph-skip contract (CodeMirror lives here).
-    expect(html).toContain('<div class="head-feedback" data-morph-skip>')
-    expect(html).toContain('id="ff-editor"')
+    expect(html).toContain('<main class="tressoir-document">')
+    expect(html).toContain('<header class="document-header">')
+    expect(html).toContain('<h1>My Plan Title</h1>')
+    expect(html).toContain('<p class="lede">A one-line dek.</p>')
+    expect(html).not.toContain('badge type')
+    expect(html).toContain('<aside class="feedback-dock" data-feedback-dock>')
+    expect(html).toContain('data-tressoir-feedback')
   })
 
   it('omits the type badge when front-matter has no `tressoir:` type', () => {
@@ -95,7 +96,7 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
     ].join('\n')
     const html = project(md)
     // Section heading.
-    expect(html).toContain('<section class="ua-section"><h2 class="section">Executive Summary</h2>')
+    expect(html).toContain('<section class="section"><h2>Executive Summary</h2>')
     expect(html).not.toContain('data-copy-card')
     // Consecutive items group into a single .ctx-list.
     expect(html).toContain('<div class="ctx-list">')
@@ -137,11 +138,11 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
       'Card body.',
       '::::',
     ].join('\n'))
-    expect(buttons[0].closest('.milestone')?.classList.contains('selected')).toBe(false)
+    expect((buttons[0].closest('details.card') as HTMLDetailsElement | null)?.open).toBe(false)
     await vi.waitFor(() => expect(buttons[0].textContent).toBe('Copied'))
   })
 
-  it('projects ::::card into a .milestone reveal card with a raw inline state badge', () => {
+  it('projects a legacy ::::card into the canonical native card with a raw inline state badge', () => {
     const md = [
       '## Milestones',
       '',
@@ -152,16 +153,13 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
       '::::',
     ].join('\n')
     const html = project(md)
-    // Consecutive cards group into .milestones; card is collapsed by default.
-    expect(html).toContain('<div class="milestones">')
-    expect(html).toContain('<section class="milestone" data-morph-keep-class="selected">')
-    expect(html).toContain('<div class="m-title">M1 — Core</div>')
-    expect(html).toContain('<div class="m-intent">Wire the projector</div>')
-    // State is injected RAW (inline badge HTML) inside the .m-state slot.
-    expect(html).toContain('<span class="m-state"><span class=\'badge ok\'>Done</span></span>')
+    expect(html).toContain('<details class="card" data-tressoir-markdown>')
+    expect(html).toContain('<span class="card-title">M1 — Core</span>')
+    expect(html).toContain('<span class="card-oneliner">Wire the projector</span>')
+    expect(html).toContain('<span class="card-badge"><span class=\'badge ok\'>Done</span></span>')
+    expect(html).toContain('class="card-gutter"')
     expect(html).not.toContain('data-copy-card')
-    // Card head is a keyboard-activatable div button; the item nests inside.
-    expect(html).toContain('<div class="m-head" role="button" tabindex="0" aria-expanded="false">')
+    // The legacy item remains available inside the canonical card body.
     expect(html).toContain('<div class="ctx-item" data-morph-keep-class="open">')
     expect(html).toContain('Change the renderer')
   })
@@ -175,11 +173,10 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
       '::::',
     ].join('\n')
     const html = project(md)
-    expect(html).toContain('<section class="milestone selected" data-morph-keep-class="selected">')
-    expect(html).toContain('aria-expanded="true"')
+    expect(html).toContain('<details class="card" data-tressoir-markdown open>')
   })
 
-  it('projects :::input into a .m-decision row: question head, markdown options, bound textbox', () => {
+  it('projects legacy :::input into the canonical decision with stable derived choice keys', () => {
     const md = [
       '## Decisions',
       '',
@@ -193,17 +190,13 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
       ':::',
     ].join('\n')
     const html = project(md)
-    // Decision row carries the locked classes + the read-back key + a stable morph key.
-    expect(html).toContain('<div class="ctx-item m-decision m-input" data-key="approach.scope" data-morph-key="tressoir-input:approach.scope" data-morph-keep-class="open">')
-    // Head = the first paragraph (the question); a check turns green when resolved.
-    expect(html).toContain('<span class="dec-check" aria-hidden="true"></span>')
-    expect(html).toContain('<span class="dec-name">Which approach should we take?</span>')
-    // Options render as a normal markdown list, recommended via emphasis.
-    expect(html).toContain('<li>Approach A <em>(recommended)</em></li>')
-    expect(html).toContain('<li>Approach B</li>')
-    // Bound, morph-skipped text box keyed for interactions.json read-back.
-    expect(html).toContain('<div class="other-box show" data-morph-skip>')
-    expect(html).toContain('<textarea data-input-key="approach.scope"')
+    expect(html).toContain('<article class="decision" data-tressoir-decision')
+    expect(html).toContain('data-morph-key="tressoir-input:approach.scope"')
+    expect(html).toContain('class="decision-title"')
+    expect(html).toContain('Which approach should we take?')
+    expect(html).toContain('data-tressoir-input="approach.scope.choice.1"')
+    expect(html).toContain('data-tressoir-input="approach.scope.choice.2"')
+    expect(html).toContain('rows="2" data-tressoir-input="approach.scope" data-tressoir-autogrow="2:6"')
   })
 
   it('uses an `oneliner=`/`question=` attribute as the input head when present', () => {
@@ -213,8 +206,9 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
       ':::',
     ].join('\n')
     const html = project(md)
-    expect(html).toContain('<span class="dec-name">Explicit question?</span>')
-    expect(html).toContain('<li>opt</li>')
+    expect(html).toContain('class="decision-title"')
+    expect(html).toContain('Explicit question?')
+    expect(html).toContain('<strong>opt</strong>')
   })
 
   it('styles markdown headings by depth (### -> h3, #### -> h4) — no hand-written sub-titles', () => {
@@ -230,12 +224,12 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
       'More prose.',
     ].join('\n')
     const html = project(md)
-    expect(html).toContain('<h2 class="section">Section</h2>')
+    expect(html).toContain('<section class="section"><h2>Section</h2>')
     expect(html).toContain('<h3>A sub heading</h3>')
     expect(html).toContain('<h4>A label</h4>')
   })
 
-  it('keeps a Markdown h1 separated from a following card while the frontmatter h1 stays compact', () => {
+  it('uses a leading Markdown H1/lede instead of front-matter presentation fields', () => {
     const md = [
       '---',
       'title: Header title',
@@ -243,6 +237,8 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
       '---',
       '',
       '# Large body title',
+      '',
+      'A public lede.',
       '',
       '::::card{title="First card"}',
       'Card body.',
@@ -254,13 +250,11 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
     document.body.innerHTML = project(md)
 
     try {
-      const headerTitle = document.querySelector<HTMLElement>('.title-row h1')
-      const bodyTitle = document.querySelector<HTMLElement>('.wrap > h1')
-      expect(headerTitle).not.toBeNull()
-      expect(bodyTitle).not.toBeNull()
-      expect(getComputedStyle(headerTitle!).marginBottom).toBe('0px')
-      expect(getComputedStyle(bodyTitle!).marginBottom).toBe('12px')
-      expect(bodyTitle?.nextElementSibling?.classList.contains('milestones')).toBe(true)
+      const headerTitle = document.querySelector<HTMLElement>('.document-header h1')
+      expect(headerTitle?.textContent).toBe('Large body title')
+      expect(document.querySelector('.document-header .lede')?.textContent).toBe('A public lede.')
+      expect(document.body.textContent).not.toContain('Header title')
+      expect(document.querySelector('details.card')).not.toBeNull()
     } finally {
       style.remove()
       document.body.innerHTML = ''
@@ -280,7 +274,52 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
     expect(html).toContain('<svg class="arch-svg"')
   })
 
-  it('renders fenced code (```lang -> pre.code) and ```diff -> pre.diff', () => {
+  it('keeps ordinary Markdown inside the exact marked card contract', () => {
+    const md = [
+      '# Card acceptance',
+      '',
+      'A concise lede.',
+      '',
+      '<details class="card" data-tressoir-markdown>',
+      '  <summary>',
+      '    <span class="card-title">Optional details</span>',
+      '    <span class="card-oneliner">Open the section</span>',
+      '    <span class="card-badge">Optional</span>',
+      '  </summary>',
+      '',
+      '### Markdown heading inside',
+      '',
+      '- one',
+      '- two',
+      '',
+      '</details>',
+    ].join('\n')
+    const html = project(md)
+    expect(html).toContain('<details class="card" data-tressoir-markdown>')
+    expect(html).toContain('<div class="card-body"><button class="card-gutter"')
+    expect(html).toContain('<div class="card-content"><h3>Markdown heading inside</h3>')
+    expect(html).toContain('<li>one</li>')
+    expect(html.indexOf('Markdown heading inside')).toBeLessThan(html.indexOf('</details>'))
+  })
+
+  it('passes the exact raw decision component through for the shared runtime', () => {
+    const md = [
+      '# Decision acceptance',
+      '',
+      'A concise lede.',
+      '',
+      '<article class="decision" data-tressoir-decision data-decision-state="unresolved">',
+      '<input type="checkbox" data-tressoir-input="release.accept">',
+      '<textarea rows="2" data-tressoir-input="release.feedback" data-tressoir-autogrow="2:6"></textarea>',
+      '</article>',
+    ].join('\n')
+    const html = project(md)
+    expect(html).toContain('data-tressoir-decision')
+    expect(html).toContain('data-tressoir-input="release.accept"')
+    expect(html).toContain('data-tressoir-autogrow="2:6"')
+  })
+
+  it('renders fenced code and diffs into the shared Prism DOM', () => {
     const md = [
       ':::item{oneliner="snippet"}',
       '```py',
@@ -296,8 +335,8 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
       ':::',
     ].join('\n')
     const html = project(md)
-    expect(html).toContain('<pre class="code" data-lang="py">')
-    expect(html).toContain('<pre class="diff" data-lang="">')
+    expect(html).toContain('<pre class="code-block"><code class="language-python">')
+    expect(html).toContain('<pre class="code-block diff-highlight"><code class="language-diff">')
   })
 
   it('renders GFM tables, strikethrough, and task lists (remark-gfm in the core bundle)', () => {
@@ -314,7 +353,7 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
       '- [x] done item',
     ].join('\n')
     const html = project(md)
-    expect(html).toContain('<table>')
+    expect(html).toContain('<table class="table">')
     expect(html).toContain('<th>Col A</th>')
     expect(html).toContain('<td>one</td>')
     expect(html).toContain('<del>struck</del>')
@@ -331,6 +370,73 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD projection (real tressoir-md.js 
     expect(html).not.toContain('class="mtabs"')
     expect(html).not.toContain('class="turns"')
     expect(html).not.toContain('m-status')
+  })
+
+  it('enhances projected Markdown with the exact shared math, code, decision, overflow, card, and feedback runtime', () => {
+    ;(Range.prototype as any).getBoundingClientRect = () => ({
+      left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0,
+    })
+    ;(Range.prototype as any).getClientRects = () => []
+    ;(window as any).focus = () => {}
+    const stored = new Map<string, unknown>()
+    Object.defineProperty(window, 'tressoirNotebook', {
+      configurable: true,
+      value: {
+        context: () => ({ feedbackKey: 'acceptance-free_form_feedback', interactionsFile: 'acceptance.interactions.json' }),
+        getInteraction: (key: string) => stored.get(key),
+        storeInteraction: (key: string, value: unknown) => stored.set(key, value),
+      },
+    })
+
+    document.body.innerHTML = project([
+      '# Runtime acceptance', '', 'A concise lede.', '',
+      'Inline math: \\(x^2\\).', '',
+      '```typescript', 'const ready: boolean = true', '```', '',
+      '<table><tr><td>wide</td></tr></table>', '',
+      '<details class="card" data-tressoir-markdown>',
+      '<summary><span class="card-title">Optional</span><span class="card-oneliner">Open</span><span class="card-badge">Optional</span></summary>',
+      '', '### Inside', '', 'Selectable body.', '', '</details>', '',
+      '<article class="decision" data-tressoir-decision data-decision-state="unresolved">',
+      '<span data-decision-indicator>Unresolved</span>',
+      '<input type="checkbox" data-tressoir-input="runtime.accept">',
+      '</article>',
+    ].join('\n'))
+
+    for (const path of [
+      'vendor/katex/katex.min.js',
+      'vendor/katex/auto-render.min.js',
+      'vendor/prism/components/prism-core.min.js',
+      'vendor/prism/components/prism-markup.min.js',
+      'vendor/prism/components/prism-clike.min.js',
+      'vendor/prism/components/prism-javascript.min.js',
+      'vendor/prism/components/prism-typescript.min.js',
+      'vendor/prism/components/prism-diff.min.js',
+      'vendor/codemirror/codemirror.js',
+      'vendor/codemirror/mode/xml.js',
+      'vendor/codemirror/mode/meta.js',
+      'vendor/codemirror/mode/markdown.js',
+      'tressoir-linear.js',
+    ]) loadScript(resolve(linearDir, path))
+    document.dispatchEvent(new Event('DOMContentLoaded'))
+    document.dispatchEvent(new CustomEvent('tressoir:render'))
+
+    expect(document.querySelector('.katex')).not.toBeNull()
+    expect(document.querySelector('code.language-typescript .token.keyword')).not.toBeNull()
+    expect(document.querySelector('table')?.parentElement?.matches('.scroll-region')).toBe(true)
+    expect(document.querySelector('details.card > .card-body > [data-card-collapse]')).not.toBeNull()
+
+    const decision = document.querySelector('[data-tressoir-decision]')!
+    const choice = decision.querySelector('input') as HTMLInputElement
+    choice.checked = true
+    choice.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(decision.getAttribute('data-decision-state')).toBe('resolved')
+    expect(decision.querySelector('[data-decision-indicator]')?.textContent).toBe('Resolved')
+
+    const feedbackPanel = document.querySelector('[data-feedback-panel]') as HTMLElement
+    const feedbackToggle = document.querySelector('[data-feedback-toggle]') as HTMLButtonElement
+    expect(document.querySelector('.feedback-editor .CodeMirror')).not.toBeNull()
+    feedbackToggle.click()
+    expect(feedbackPanel.hidden).toBe(false)
   })
 })
 
@@ -381,10 +487,40 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD lint() (real tressoir-md.js, no 
     expect(levels(findings, 'error')).toHaveLength(0)
   })
 
-  it('treats missing front-matter as a WARNING, not an error (front-matter is optional in v2)', () => {
-    const findings = lint('Just a paragraph, no front-matter.\n')
+  it('accepts the public no-frontmatter H1/lede contract', () => {
+    const findings = lint('# Artifact title\n\nA concise lede.\n')
     expect(levels(findings, 'error')).toHaveLength(0)
-    expect(levels(findings, 'warn').some((f) => /front-matter/.test(f.msg))).toBe(true)
+    expect(levels(findings, 'warn').some((f) => /front-matter/.test(f.msg))).toBe(false)
+  })
+
+  it('requires either a leading H1 or a legacy frontmatter title', () => {
+    const findings = lint('Just a paragraph, no heading.\n')
+    expect(levels(findings, 'error').some((f) => /leading H1/.test(f.msg))).toBe(true)
+  })
+
+  it('rejects standard dependency links because the extension owns them', () => {
+    const findings = lint([
+      '---',
+      'links:',
+      '  - ./vendor/katex/katex.min.js',
+      '---',
+      '',
+      '# Artifact title',
+      '',
+      'A concise lede.',
+    ].join('\n'))
+    expect(levels(findings, 'error').some((f) => /loads them automatically/.test(f.msg))).toBe(true)
+  })
+
+  it('rejects unclosed or nested marked cards', () => {
+    const unclosed = lint('# T\n\nLede.\n\n<details class="card" data-tressoir-markdown>\n<summary>x</summary>\n')
+    expect(levels(unclosed, 'error').some((f) => /no matching/.test(f.msg))).toBe(true)
+    const nested = lint([
+      '# T', '', 'Lede.', '',
+      '<details class="card" data-tressoir-markdown>', '<summary>outer</summary>',
+      '<details class="card" data-tressoir-markdown>', '<summary>inner</summary>', '</details>', '</details>',
+    ].join('\n'))
+    expect(levels(nested, 'error').some((f) => /cannot nest/.test(f.msg))).toBe(true)
   })
 
   it('warns (not errors) on an unrecognized `tressoir:` type (type is optional/cosmetic)', () => {
@@ -587,7 +723,7 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD lint() (real tressoir-md.js, no 
     expect(warns.some((f) => /`TBD` but already has `#### Planned Changes`/.test(f.msg))).toBe(true)
   })
 
-  it('warns on an orphan fenced snippet outside an :::item, but not inside one', () => {
+  it('warns when a fenced snippet has no nearby file/symbol name', () => {
     const orphan = [
       '---', 'title: X', '---', '',
       '```diff',
@@ -595,7 +731,7 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD lint() (real tressoir-md.js, no 
       '+ b',
       '```',
     ].join('\n')
-    expect(levels(lint(orphan), 'warn').some((f) => /orphan snippet/.test(f.msg))).toBe(true)
+    expect(levels(lint(orphan), 'warn').some((f) => /file or symbol name/.test(f.msg))).toBe(true)
     const inside = [
       '---', 'title: X', '---', '',
       ':::item{oneliner="edit"}',
@@ -605,6 +741,9 @@ describe.skipIf(!corePresent)('USER_ARTIFACT_MD lint() (real tressoir-md.js, no 
       '```',
       ':::',
     ].join('\n')
-    expect(levels(lint(inside), 'warn').some((f) => /orphan snippet/.test(f.msg))).toBe(false)
+    expect(levels(lint(inside), 'warn').some((f) => /file or symbol name/.test(f.msg))).toBe(false)
+
+    const named = ['# X', '', 'Lede.', '', '`src/app.ts · render()`', '', '```diff', '- a', '+ b', '```'].join('\n')
+    expect(levels(lint(named), 'warn').some((f) => /file or symbol name/.test(f.msg))).toBe(false)
   })
 })

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as vscode from 'vscode'
 import { JSDOM } from 'jsdom'
+import { resolve as resolvePath } from 'path'
 import { ColorThemeKind } from './mocks/vscode'
 import { TressoirNotebookEditorProvider, fetchRemote } from '../notebook/provider'
 import { clearNotebookState } from '../notebook/state'
@@ -148,6 +149,48 @@ describe('notebook provider JS support (CSP / base / resource roots)', () => {
     expect(paths.some((p: string) => p.includes('/tmp/ext') && p.includes('dist'))).toBe(true)
     // Artifact folder is the document's parent directory.
     expect(paths.some((p: string) => p.includes('/tmp/notebook.tressoir.html/..') || p === '/tmp')).toBe(true)
+  })
+
+  it('loads the exact bundled linear assets for Markdown in dependency order', async () => {
+    const extensionRoot = resolvePath(__dirname, '../..')
+    const provider = new TressoirNotebookEditorProvider(
+      { extensionUri: vscode.Uri.file(extensionRoot) } as unknown as vscode.ExtensionContext,
+      'md',
+    )
+    const source = '# Linear Markdown\n\nA concise lede.\n'
+    const document = {
+      ...createDocument(source),
+      uri: vscode.Uri.file('/tmp/linear.tressoir.md'),
+      fileName: '/tmp/linear.tressoir.md',
+      getText: () => source,
+    }
+    const panel = createPanel()
+    await provider.resolveCustomTextEditor(
+      document as unknown as vscode.TextDocument,
+      panel as unknown as vscode.WebviewPanel,
+    )
+
+    const html = panel.webview.html
+    const ordered = [
+      'core/tressoir-remark.umd.js',
+      'core/js-yaml.min.js',
+      'linear/vendor/katex/katex.min.js',
+      'linear/vendor/prism/components/prism-core.min.js',
+      'linear/vendor/codemirror/codemirror.js',
+      'tressoir-md.js',
+      'linear/tressoir-linear.js',
+    ]
+    let previous = -1
+    for (const asset of ordered) {
+      const index = html.indexOf(asset)
+      expect(index).toBeGreaterThan(previous)
+      previous = index
+    }
+    expect(html).toContain('linear/tressoir-linear.css')
+    expect(html).toContain('linear/vendor/katex/katex.min.css')
+    expect(html).toContain('data-interactions-file="linear.interactions.json"')
+    expect(html).not.toContain('core/prism.js')
+    expect(html).not.toContain('core/codemirror.js')
   })
 })
 

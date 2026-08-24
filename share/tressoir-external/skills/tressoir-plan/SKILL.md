@@ -5,110 +5,103 @@ description: Create, review, and maintain a paired PLAN.md and PLAN.tressoir.md 
 
 # Tressoir Planning
 
-Use this workflow for substantial design or implementation that needs a human checkpoint before code changes.
+Use this workflow for substantial design or implementation that needs a human checkpoint before
+code changes. Read the `tressoir-artifact-md` skill before authoring the projection.
 
 A plan is a pair in one sticky upper-case folder under `IB/ARTIFACTS/`:
 
 - `PLAN.md` — verbose agent-facing source of truth.
-- `PLAN.tressoir.md` — concise human-facing projection.
-- `TASK.md` — optional human-only scratchpad; do not read or edit automatically, only on explicit user request at the relevant point.
-- `interactions.json` — human answers written by the artifact editor.
+- `PLAN.tressoir.md` — concise, complete human-facing projection.
+- `TASK.md` — optional human-only scratchpad; access only when explicitly requested.
+- `<artifact-stem>.interactions.json` — default per-artifact answers written by the extension.
 
-The human is never expected to open `PLAN.md` or any other agent-facing source; every decision, change, caveat, and result they need must appear in `PLAN.tressoir.md`.
+Reuse that broad-task folder for later subplans, explainers, and interactive artifacts. Create a new
+folder only for a genuinely separate workstream or when the user requests it.
 
-Read the `tressoir-artifact-md` skill before authoring the projection.
+## Intent first
 
-The folder belongs to the broad task, not only this plan. Reuse it for explainers, research, interactive artifacts, and later user-requested subplans. Name a later pair for its step, such as `MIGRATION_PLAN.md` + `MIGRATION_PLAN.tressoir.md`, rather than creating a new artifact folder. A surface such as `NEXT_INTERACTIVE.tressoir.md` can be another sibling. Create a new folder only for a genuinely separate workstream or when the user requests it.
-
-## Intent-first when the approach is unclear
-
-Do not force a full milestone plan while the central approach is unresolved. First present the intent, open questions, realistic alternatives, and a recommendation. After the human selects the shape, crystallize it into the full structure below.
+When the central approach is unresolved, present the intent, realistic alternatives, immediate
+tradeoffs, and a recommendation before inventing a detailed milestone plan. Crystallize the full
+plan only after the human selects the shape.
 
 ## Required projection structure
 
-Put these sections first and in this order.
+Start with an H1 and lede, then put these sections first and in order.
 
 ### 1. Executive Summary
 
-Give the mental model in one screen:
+Give the mental model in roughly one screen: the goal, the chosen approach, the architecture or
+workflow, and the important boundaries. A reader should get a good-enough understanding of the
+system from the Executive Summary alone, without needing to open the milestone cards.
 
-- a one- or two-sentence goal;
-- reveal items describing what changes and where;
-- an architecture diagram only when the system shape genuinely needs one.
+Actively use compact tables for comparisons, mappings, ownership, or constraints, and architecture
+or data-flow diagrams for components, boundaries, and sequences when they make the system easier to
+grasp. Prefer comprehension over arbitrary compactness; every visual should explain the system, not
+merely decorate the plan.
 
 ### 2. Requested Decisions
 
-Use one `:::input` per unresolved decision with a unique key. Each question must be understandable without internal shorthand and include:
-
-- realistic options;
-- exactly one recommended option when a recommendation exists;
-- the immediate effect of each choice;
-- room for a pick, tweak, or question.
-
-Show only decisions relevant to the current pass. Do not overwhelm the human with speculative second-order branches.
-
-When all decisions are resolved, replace the inputs with a concise accepted-decisions record.
+Use the exact one-decision HTML component documented by `tressoir-artifact-md`. Each question must
+be self-contained, offer realistic checkbox answers with one clear recommendation when appropriate,
+and include one Free Response field. Show only decisions relevant to the current pass. When a
+decision is integrated, replace the component with a concise accepted-decision record.
 
 ### 3. Milestones
 
-Each milestone is a coherent chunk represented by a card:
+Represent each coherent milestone with the standard optional-section card:
 
-```md
-::::card{title="M2 — Name" oneliner="What this chunk delivers." state="<span class='badge warn'>Planning</span>"}
+````html
+<details class="card" data-tressoir-markdown>
+  <summary>
+    <span class="card-title">M2 — Name</span>
+    <span class="card-oneliner">What this chunk delivers.</span>
+    <span class="card-badge">Planning</span>
+  </summary>
+
 #### Planning Overview
-:::item{oneliner="What changes, and where — name the file or subsystem."}
-Rationale, edge cases, and boundaries.
-:::
+
+Name what changes and where, then explain rationale, boundaries, and edge cases.
 
 #### Planned Changes
-:::item{oneliner="The concrete edit — path/to/file · symbol()."}
+
+`path/to/file · symbol()`
+
 ```diff
 @@ path/to/file — symbol() @@
 - before
 + after
 ```
-:::
-::::
-```
 
-Lifecycle labels:
+</details>
+````
 
-- `TBD` — dependency unresolved; one-line overview only.
-- `Planning` — detailed changes and named snippets are present.
-- `Implementing` — approved work is in progress.
-- `Review` — implementation is complete and awaiting human review.
-- `Completed` — accepted and validated.
+Lifecycle labels are `TBD`, `Planning`, `Implementing`, `Review`, and `Completed`.
 
-A milestone at `Planning` or later must include `#### Planned Changes`. Every proposed code/config edit must appear as a fenced diff or language snippet under an item naming its file and symbol. Do not narrate a code change only in prose, and do not leave orphan snippets.
-
-When a planned edit introduces or changes a public interface or object lifecycle, also show its parameter and return types, who creates it, who owns it for how long, who consumes it, and the end-to-end request/data flow. Do not add this ceremony to an internal edit with no interface consequence.
-
-## Progressive resolution
-
-Detail only the milestones unlocked by current decisions. Leave a dependent milestone `TBD` rather than inventing precise changes before its prerequisite is chosen.
-
-For a high-stakes decision, it is acceptable to show one executive branch per option. Collapse to the accepted branch immediately after the decision.
+- A `TBD` milestone has only its concise overview.
+- `Planning` or later includes `#### Planned Changes`.
+- Put a backticked path or symbol directly before every planned snippet.
+- When changing a public interface or lifecycle, show its types, creator, owner, consumers, and
+  end-to-end data flow. Skip that ceremony for internal edits without interface consequences.
 
 ## Approval and implementation loop
 
-1. Research enough to avoid a naive plan; keep disposable notes in `IB/TMP/`.
-2. Write or update `PLAN.md`.
-3. Project it into `PLAN.tressoir.md`.
-4. Run `node IB/skills/tressoir-artifact-md/scripts/check_md.js <projection>` and then inspect source/projection agreement.
-5. Hand back for human decisions or approval.
-6. Read answers from folder-local `interactions.json` or chat.
-7. Integrate decisions into both files.
-8. Do not implement product code until the relevant milestone is agreed.
-9. Mark the milestone `Implementing`, implement it, and validate it.
-10. Move it to `Review` with a completion report.
+1. Research enough to avoid a naive plan; put disposable evidence in `IB/TMP/`.
+2. Update `PLAN.md` and project every human-relevant fact into `PLAN.tressoir.md`.
+3. Run the Markdown artifact checker and inspect source/projection agreement.
+4. Hand back for decisions or approval.
+5. Integrate answers from chat or the projection's scoped interaction file into both files.
+6. Do not implement product code until the relevant milestone is agreed.
+7. Mark approved work `Implementing`, implement it, and validate it.
+8. Move it to `Review` with the actual completion report.
 
 ## Completion report
 
-At `Review` or `Completed`, lead the milestone with:
+At `Review` or `Completed`, lead each milestone with:
 
-- **What landed** — the actual behavior and files.
+- **What landed** — actual behavior and files.
 - **Drifts, challenges, and unplanned steps** — honest differences from the forward plan.
 - **Focused actual diffs** — the most useful named excerpts.
 - **Validation** — commands and important observed results.
 
-Keep the original planned changes below as reference. Update `IB/STATE.md` at milestone boundaries.
+Keep the original planned changes below as reference and update `IB/STATE.md` at milestone
+boundaries.

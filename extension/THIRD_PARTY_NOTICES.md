@@ -12,16 +12,26 @@ Tressoir Artifacts bundles or redistributes the following third-party software. 
 ## Prism
 
 - Project: https://prismjs.com/
-- Version: 1.29.0
+- Version: 1.30.0
 - License: MIT
-- Use: committed syntax-highlighting runtime in `src/notebook/assets/core/prism.js`.
+- Use: tracked canonical runtime under the HTML starter's `vendor/prism/`, copied byte-for-byte
+  into `dist/assets/linear/` for Markdown and the VSIX.
+
+## KaTeX
+
+- Project: https://katex.org/
+- Version: 0.18.4
+- License: MIT
+- Use: tracked canonical math runtime, CSS, and fonts under the HTML starter's `vendor/katex/`,
+  copied byte-for-byte into `dist/assets/linear/`.
 
 ## CodeMirror
 
 - Project: https://codemirror.net/5/
 - Version: 5.65.16
 - License: MIT
-- Use: committed editor runtime, modes, addons, and CSS under `src/notebook/assets/core/`.
+- Use: tracked canonical Markdown feedback editor under the HTML starter's `vendor/codemirror/`,
+  copied byte-for-byte into `dist/assets/linear/`.
 
 ## js-yaml
 

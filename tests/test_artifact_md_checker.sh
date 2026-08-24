@@ -35,7 +35,7 @@ run_case() {
 case_source_newer_warns() {
   local d="$TMP_ROOT/newer"
   mkdir -p "$d"
-  printf -- '---\ntitle: T\n---\n# T\n' > "$d/PLAN.tressoir.md"
+  printf -- '# T\n\nA concise lede.\n' > "$d/PLAN.tressoir.md"
   sleep 1
   printf 'newer source\n' > "$d/PLAN.md"
   local out
@@ -48,18 +48,18 @@ case_source_newer_warns() {
 case_no_sibling_no_parity_warn() {
   local d="$TMP_ROOT/nosibling"
   mkdir -p "$d"
-  printf -- '---\ntitle: T\n---\n# T\n' > "$d/PLAN.tressoir.md"
+  printf -- '# T\n\nA concise lede.\n' > "$d/PLAN.tressoir.md"
   local out
   out=$(node "$CHECKER" "$d/PLAN.tressoir.md"); local status=$?
   [ "$status" -eq 0 ]
   ! printf '%s\n' "$out" | grep -F 'is newer than this projection' >/dev/null
 }
 
-# 3. A real lint error (an input with no key) still exits 1.
+# 3. A real lint error (a raw control with no key) still exits 1.
 case_lint_error_exits_1() {
   local d="$TMP_ROOT/error"
   mkdir -p "$d"
-  printf -- '---\ntitle: T\n---\n\n:::input\nA question with no key.\n:::\n' > "$d/PLAN.tressoir.md"
+  printf -- '# T\n\nA concise lede.\n\n<input data-tressoir-input="">\n' > "$d/PLAN.tressoir.md"
   set +e
   node "$CHECKER" "$d/PLAN.tressoir.md" >/dev/null 2>&1
   local status=$?
@@ -67,14 +67,14 @@ case_lint_error_exits_1() {
   [ "$status" -eq 1 ]
 }
 
-# 4. Advisory warnings alone (duplicate keys, lifecycle, orphan snippet) keep exit 0.
+# 4. Advisory compatibility/lifecycle/named-snippet warnings alone keep exit 0.
 case_advisory_warnings_exit_0() {
   local d="$TMP_ROOT/advisory"
   mkdir -p "$d"
   cat > "$d/PLAN.tressoir.md" <<'MD'
----
-title: T
----
+# T
+
+A concise lede.
 
 ::::card{title="M1" oneliner="x" state="<span class='badge warn'>Planning</span>"}
 #### Planning Overview
@@ -90,7 +90,7 @@ MD
   local out
   out=$(node "$CHECKER" "$d/PLAN.tressoir.md"); local status=$?
   [ "$status" -eq 0 ]
-  printf '%s\n' "$out" | grep -F 'orphan snippet' >/dev/null
+  printf '%s\n' "$out" | grep -F 'file or symbol name' >/dev/null
   printf '%s\n' "$out" | grep -F 'has no `#### Planned Changes`' >/dev/null
 }
 
@@ -99,9 +99,9 @@ case_extension_portable_parity() {
   local d="$TMP_ROOT/parity"
   mkdir -p "$d"
   cat > "$d/PLAN.tressoir.md" <<'MD'
----
-title: T
----
+# T
+
+A concise lede.
 
 ::::card{title="M1" oneliner="x" state="<span class='badge warn'>Planning</span>"}
 #### Planning Overview
@@ -125,7 +125,7 @@ MD
 
 run_case "source newer than projection warns with exit 0" case_source_newer_warns
 run_case "no same-stem source produces no parity warning" case_no_sibling_no_parity_warn
-run_case "a real lint error still exits 1" case_lint_error_exits_1
+run_case "a raw control with no key still exits 1" case_lint_error_exits_1
 run_case "advisory warnings alone keep exit 0" case_advisory_warnings_exit_0
 run_case "extension and portable runtimes agree on findings" case_extension_portable_parity
 

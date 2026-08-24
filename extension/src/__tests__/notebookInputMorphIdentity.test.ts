@@ -4,9 +4,9 @@ import { existsSync, readFileSync } from 'fs'
 import { resolve } from 'path'
 import morphdom from 'morphdom'
 
-// Proves the REAL update sequence, not just markup: the committed projector emits a stable
-// `data-morph-key` on each explicit `:::input` row, and morphdom (configured exactly as
-// webview/main.ts::morphPreview) matches rows by that key so typed answers follow their key
+// Proves the REAL update sequence, not just markup: the compatibility projector emits a stable
+// `data-morph-key` on each legacy `:::input` decision, and morphdom (configured exactly as
+// webview/main.ts::morphPreview) matches decisions by that key so typed answers follow their key
 // through reorder / insert / remove / replace instead of binding by DOM position.
 const assetsDir = resolve(__dirname, '../notebook/assets')
 const remarkPath = resolve(assetsDir, 'core/tressoir-remark.umd.js')
@@ -26,11 +26,20 @@ function loadScript(p: string): void {
 const morphOptions = {
   getNodeKey(node: Node) {
     const el = node.nodeType === 1 ? (node as Element) : null
-    return el?.getAttribute('data-morph-key') || el?.id || undefined
+    const inputKey = el?.getAttribute('data-tressoir-input')
+    return el?.getAttribute('data-morph-key') || (inputKey ? `tressoir-control:${inputKey}` : '') || el?.id || undefined
   },
-  onBeforeElUpdated(fromEl: HTMLElement) {
+  onBeforeElUpdated(fromEl: HTMLElement, toEl: HTMLElement) {
     if (fromEl.tagName === 'SCRIPT') return false
     if (fromEl.hasAttribute('data-morph-skip')) return false
+    if (fromEl instanceof HTMLInputElement && toEl instanceof HTMLInputElement) {
+      if (fromEl.type === 'radio' || fromEl.type === 'checkbox') toEl.checked = fromEl.checked
+      else toEl.value = fromEl.value
+    }
+    if (fromEl instanceof HTMLTextAreaElement && toEl instanceof HTMLTextAreaElement) {
+      toEl.value = fromEl.value
+      toEl.textContent = fromEl.value
+    }
     return true
   },
   onBeforeNodeDiscarded(node: Node) {
@@ -38,7 +47,7 @@ const morphOptions = {
       const element = node as Element
       if (
         element.hasAttribute('data-morph-skip') &&
-        !element.closest('.m-input[data-morph-key]')
+        !element.closest('[data-morph-key]')
       ) {
         return false
       }
@@ -77,7 +86,7 @@ describe.skipIf(!corePresent)('explicit input identity during live re-projection
     morphdom(host.firstElementChild as HTMLElement, target.firstElementChild as HTMLElement, morphOptions)
   }
   function box(host: HTMLElement, key: string): HTMLTextAreaElement | null {
-    return host.querySelector(`textarea[data-input-key="${key}"]`)
+    return host.querySelector(`textarea[data-tressoir-input="${key}"]`)
   }
 
   it('keeps typed values attached to their keys after reordering', () => {
@@ -106,7 +115,7 @@ describe.skipIf(!corePresent)('explicit input identity during live re-projection
     morphTo(host, decisions([['a', 'Question A?']]))
     expect(box(host, 'a')!.value).toBe('answer-A')
     expect(box(host, 'b')).toBeNull()
-    expect(host.querySelector('.m-input[data-morph-key="tressoir-input:b"]')).toBeNull()
+    expect(host.querySelector('.decision[data-morph-key="tressoir-input:b"]')).toBeNull()
   })
 
   it('replaces a key without inheriting the old answer', () => {
