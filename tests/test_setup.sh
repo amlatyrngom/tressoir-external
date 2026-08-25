@@ -93,7 +93,10 @@ case "${1:-}" in
       exit 1
     fi
     [ -f "${2:-}" ] || exit 3
-    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.4' > "$MOCK_CODE_STATE"
+    if [ -n "${MOCK_CODE_INSTALL_LOG:-}" ]; then
+      printf '%s\n' "$*" >> "$MOCK_CODE_INSTALL_LOG"
+    fi
+    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.5' > "$MOCK_CODE_STATE"
     printf '%s\n' 'mock installation succeeded'
     ;;
   *)
@@ -149,7 +152,8 @@ case_fresh_all_with_extension() (
 
   for skill in \
     tressoir-artifact-md tressoir-artifact-html tressoir-plan \
-    tressoir-working-area tressoir-canon tressoir-structured-review; do
+    tressoir-working-area tressoir-canon tressoir-structured-review \
+    tressoir-isolation; do
     assert_file "$project/IB/skills/$skill/SKILL.md"
     assert_link "$project/.claude/skills/$skill" "../../IB/skills/$skill"
     assert_link "$project/.agents/skills/$skill" "../../IB/skills/$skill"
@@ -157,6 +161,12 @@ case_fresh_all_with_extension() (
   assert_absent "$project/IB/skills/tressoir-memory"
   assert_absent "$project/.claude/skills/tressoir-memory"
   assert_absent "$project/.agents/skills/tressoir-memory"
+
+  assert_file "$project/IB/isolation/README.md"
+  assert_file "$project/IB/isolation/user.devcontainer.json"
+  assert_file "$project/IB/isolation/agent.devcontainer.json"
+  assert_file "$project/IB/isolation/agent-setup.sh"
+  [ "$(find "$project/IB/isolation" -type f | wc -l | tr -d ' ')" -eq 4 ]
 
   assert_file "$project/IB/skills/tressoir-artifact-md/scripts/check_md.js"
   assert_file "$project/IB/skills/tressoir-artifact-md/user_artifact_md_template/PLAN.tressoir.md"
@@ -174,7 +184,7 @@ case_fresh_all_with_extension() (
   assert_absent "$project/AGENTS.md"
   assert_absent "$project/.claude/rules"
   assert_absent "$project/.pi"
-  grep -Fx 'tressoir.tressoir-artifacts@0.1.4' "$state" >/dev/null
+  grep -Fx 'tressoir.tressoir-artifacts@0.1.5' "$state" >/dev/null
 
   digest_tree "$project" > "$TMP_ROOT/fresh-before.txt"
   MOCK_CODE_STATE="$state" "$SETUP" setup \
@@ -184,7 +194,7 @@ case_fresh_all_with_extension() (
   digest_tree "$project" > "$TMP_ROOT/fresh-after.txt"
   diff -u "$TMP_ROOT/fresh-before.txt" "$TMP_ROOT/fresh-after.txt"
   grep 'already linked' "$TMP_ROOT/fresh-rerun.log" >/dev/null
-  grep 'already installed: tressoir.tressoir-artifacts@0.1.4' \
+  grep 'already installed: tressoir.tressoir-artifacts@0.1.5' \
     "$TMP_ROOT/fresh-rerun.log" >/dev/null
 )
 
@@ -230,8 +240,8 @@ case_extension_upgrade() (
     --root "$project" --vsix "$vsix" --vscode-bin "$mock" \
     > "$TMP_ROOT/extension-upgrade.log"
 
-  [ "$(cat "$state")" = 'tressoir.tressoir-artifacts@0.1.4' ]
-  grep 'installed: tressoir.tressoir-artifacts@0.1.4' \
+  [ "$(cat "$state")" = 'tressoir.tressoir-artifacts@0.1.5' ]
+  grep 'installed: tressoir.tressoir-artifacts@0.1.5' \
     "$TMP_ROOT/extension-upgrade.log" >/dev/null
   grep 'reload the VS Code window or close and reopen affected artifact tabs' \
     "$TMP_ROOT/extension-upgrade.log" >/dev/null
@@ -433,6 +443,7 @@ case_preserve_user_files_and_collisions() (
     "$project/IB/CANON/CANON_ARTIFACTS" \
     "$project/IB/skills/tressoir-plan" \
     "$project/IB/skills/user-skill" \
+    "$project/IB/isolation" \
     "$project/.claude/skills" \
     "$project/.claude/rules" \
     "$project/.agents/skills" \
@@ -447,6 +458,7 @@ case_preserve_user_files_and_collisions() (
   printf '%s\n' '---' 'name: tressoir-plan' 'description: User plan skill.' '---' \
     > "$project/IB/skills/tressoir-plan/SKILL.md"
   printf 'USER CANONICAL SKILL\n' > "$project/IB/skills/user-skill/SKILL.md"
+  printf 'USER ISOLATION\n' > "$project/IB/isolation/user-owned.txt"
   printf 'USER CLAUDE\n' > "$project/CLAUDE.md"
   printf 'USER NESTED CLAUDE\n' > "$project/.claude/CLAUDE.md"
   printf 'USER CLAUDE RULE\n' > "$project/.claude/rules/existing.md"
@@ -468,6 +480,7 @@ case_preserve_user_files_and_collisions() (
     "$project/IB/.gitignore" \
     "$project/IB/skills/tressoir-plan/SKILL.md" \
     "$project/IB/skills/user-skill/SKILL.md" \
+    "$project/IB/isolation/user-owned.txt" \
     "$project/CLAUDE.md" "$project/.claude/CLAUDE.md" \
     "$project/.claude/rules/existing.md" \
     "$project/AGENTS.md" "$project/AGENTS.override.md" \
@@ -493,6 +506,7 @@ case_preserve_user_files_and_collisions() (
     "$project/IB/.gitignore" \
     "$project/IB/skills/tressoir-plan/SKILL.md" \
     "$project/IB/skills/user-skill/SKILL.md" \
+    "$project/IB/isolation/user-owned.txt" \
     "$project/CLAUDE.md" "$project/.claude/CLAUDE.md" \
     "$project/.claude/rules/existing.md" \
     "$project/AGENTS.md" "$project/AGENTS.override.md" \
@@ -507,8 +521,152 @@ case_preserve_user_files_and_collisions() (
 
   assert_file "$project/.claude/rules/existing.md"
   grep 'preserved:' "$TMP_ROOT/collision.log" >/dev/null
+  grep 'existing isolation tree differs; preserving it as a whole' \
+    "$TMP_ROOT/collision.log" >/dev/null
+  assert_absent "$project/IB/isolation/README.md"
   grep 'Setup never edits nested Claude, override, rules, global, or Pi SYSTEM.md files' \
     "$TMP_ROOT/collision.log" >/dev/null
+)
+
+case_override_refreshes_only_managed_payload() (
+  set -e
+  project="$TMP_ROOT/override"
+  mkdir -p "$project"
+  "$SETUP" setup --root "$project" --claude --codex --pi --no-vscode >/dev/null
+
+  mkdir -p \
+    "$project/IB/ARTIFACTS/KEEP" \
+    "$project/IB/TMP/KEEP" \
+    "$project/IB/custom" \
+    "$project/IB/CANON/subsystem" \
+    "$project/IB/skills/tressoir-plan/local" \
+    "$project/IB/isolation/local"
+
+  printf 'USER TASK\n' > "$project/IB/TASK.md"
+  printf 'USER STATE\n' > "$project/IB/STATE.md"
+  printf 'USER ROOT CANON\n' > "$project/IB/CANON/ROOT_CANON.md"
+  printf 'USER SUBSYSTEM CANON\n' > "$project/IB/CANON/subsystem/EDITOR_CANON.md"
+  printf 'USER SKILL CANON\n' \
+    > "$project/IB/skills/tressoir-plan/local/LOCAL_CANON.md"
+  printf 'USER GUIDE\n' > "$project/IB/TRESSOIR-target.md"
+  rm "$project/IB/TRESSOIR.md"
+  ln -s TRESSOIR-target.md "$project/IB/TRESSOIR.md"
+  printf 'USER IGNORE\n' > "$project/IB/.gitignore"
+  printf 'USER CANON ARTIFACTS GUIDE\n' \
+    > "$project/IB/CANON/CANON_ARTIFACTS/README.md"
+  printf 'EDITED SKILL\n' > "$project/IB/skills/tressoir-plan/SKILL.md"
+  printf 'STALE SKILL FILE\n' > "$project/IB/skills/tressoir-plan/stale.txt"
+  printf 'EDITED ISOLATION\n' > "$project/IB/isolation/README.md"
+  printf 'USER ISOLATION EXTRA\n' > "$project/IB/isolation/local/user.txt"
+  printf 'KEEP ARTIFACT\n' > "$project/IB/ARTIFACTS/KEEP/result.md"
+  printf 'KEEP TMP\n' > "$project/IB/TMP/KEEP/log.txt"
+  printf 'KEEP UNKNOWN\n' > "$project/IB/custom/user.txt"
+  printf 'KEEP ROOT GUIDANCE\n' > "$project/AGENTS.md"
+
+  rm "$project/.claude/skills/tressoir-plan"
+  mkdir "$project/.claude/skills/tressoir-plan"
+  printf 'OCCUPIED ADAPTER\n' > "$project/.claude/skills/tressoir-plan/user.txt"
+  rm "$project/.agents/skills/tressoir-plan"
+  ln -s /tmp/foreign-target "$project/.agents/skills/tressoir-plan"
+
+  for file in \
+    "$project/IB/STATE.md" \
+    "$project/IB/CANON/ROOT_CANON.md" \
+    "$project/IB/CANON/subsystem/EDITOR_CANON.md" \
+    "$project/IB/skills/tressoir-plan/local/LOCAL_CANON.md" \
+    "$project/IB/isolation/local/user.txt" \
+    "$project/IB/ARTIFACTS/KEEP/result.md" \
+    "$project/IB/TMP/KEEP/log.txt" \
+    "$project/IB/custom/user.txt" \
+    "$project/IB/TRESSOIR-target.md" \
+    "$project/AGENTS.md"; do
+    shasum -a 256 "$file"
+  done > "$TMP_ROOT/override-protected-before.txt"
+
+  digest_tree "$project" > "$TMP_ROOT/override-dry-before.txt"
+  "$SETUP" setup --root "$project" --claude --codex --pi \
+    --override --no-vscode --dry-run > "$TMP_ROOT/override-dry.log"
+  digest_tree "$project" > "$TMP_ROOT/override-dry-after.txt"
+  diff -u "$TMP_ROOT/override-dry-before.txt" "$TMP_ROOT/override-dry-after.txt"
+  grep 'would override canonical skill tree: IB/skills/tressoir-plan' \
+    "$TMP_ROOT/override-dry.log" >/dev/null
+  grep 'would override adapter: .claude/skills/tressoir-plan' \
+    "$TMP_ROOT/override-dry.log" >/dev/null
+
+  "$SETUP" setup --root "$project" --claude --codex --pi \
+    --override --no-vscode > "$TMP_ROOT/override.log"
+
+  cmp "$REPO/share/tressoir-external/seeds/TASK.md" "$project/IB/TASK.md"
+  cmp "$REPO/share/tressoir-external/instructions/TRESSOIR.md" \
+    "$project/IB/TRESSOIR.md"
+  [ ! -L "$project/IB/TRESSOIR.md" ]
+  cmp "$REPO/share/tressoir-external/seeds/IB.gitignore" "$project/IB/.gitignore"
+  cmp "$REPO/share/tressoir-external/seeds/CANON_ARTIFACTS_README.md" \
+    "$project/IB/CANON/CANON_ARTIFACTS/README.md"
+  cmp "$REPO/share/tressoir-external/skills/tressoir-plan/SKILL.md" \
+    "$project/IB/skills/tressoir-plan/SKILL.md"
+  assert_absent "$project/IB/skills/tressoir-plan/stale.txt"
+  grep -Fx 'USER SKILL CANON' \
+    "$project/IB/skills/tressoir-plan/local/LOCAL_CANON.md" >/dev/null
+  for file in README.md user.devcontainer.json agent.devcontainer.json agent-setup.sh; do
+    cmp "$REPO/share/tressoir-external/isolation/$file" \
+      "$project/IB/isolation/$file"
+  done
+  grep -Fx 'USER ISOLATION EXTRA' "$project/IB/isolation/local/user.txt" >/dev/null
+  assert_link "$project/.claude/skills/tressoir-plan" "../../IB/skills/tressoir-plan"
+  assert_link "$project/.agents/skills/tressoir-plan" "../../IB/skills/tressoir-plan"
+
+  for file in \
+    "$project/IB/STATE.md" \
+    "$project/IB/CANON/ROOT_CANON.md" \
+    "$project/IB/CANON/subsystem/EDITOR_CANON.md" \
+    "$project/IB/skills/tressoir-plan/local/LOCAL_CANON.md" \
+    "$project/IB/isolation/local/user.txt" \
+    "$project/IB/ARTIFACTS/KEEP/result.md" \
+    "$project/IB/TMP/KEEP/log.txt" \
+    "$project/IB/custom/user.txt" \
+    "$project/IB/TRESSOIR-target.md" \
+    "$project/AGENTS.md"; do
+    shasum -a 256 "$file"
+  done > "$TMP_ROOT/override-protected-after.txt"
+  diff -u "$TMP_ROOT/override-protected-before.txt" \
+    "$TMP_ROOT/override-protected-after.txt"
+
+  mock="$TMP_ROOT/mock-code-override"
+  state="$TMP_ROOT/mock-code-override.state"
+  install_log="$TMP_ROOT/mock-code-override-install.log"
+  vsix="$TMP_ROOT/mock-override.vsix"
+  make_mock_code "$mock"
+  make_mock_vsix "$vsix"
+  printf 'tressoir.tressoir-artifacts@0.1.5\n' > "$state"
+  MOCK_CODE_STATE="$state" MOCK_CODE_INSTALL_LOG="$install_log" \
+    "$SETUP" setup --root "$project" --codex --override \
+      --vsix "$vsix" --vscode-bin "$mock" > "$TMP_ROOT/override-extension.log"
+  grep -E '^--install-extension .*mock-override\.vsix --force$' \
+    "$install_log" >/dev/null
+  grep 'installed: tressoir.tressoir-artifacts@0.1.5' \
+    "$TMP_ROOT/override-extension.log" >/dev/null
+  grep 'manual action: reload the VS Code window' \
+    "$TMP_ROOT/override-extension.log" >/dev/null
+
+  blocked="$TMP_ROOT/override-blocked"
+  mkdir "$blocked"
+  "$SETUP" setup --root "$blocked" --codex --no-vscode >/dev/null
+  printf 'DO NOT RESET\n' > "$blocked/IB/TASK.md"
+  rm "$blocked/IB/TRESSOIR.md"
+  mkdir "$blocked/IB/TRESSOIR.md"
+  printf 'INCOMPATIBLE TARGET\n' > "$blocked/IB/TRESSOIR.md/user.txt"
+  digest_tree "$blocked" > "$TMP_ROOT/override-blocked-before.txt"
+  set +e
+  "$SETUP" setup --root "$blocked" --codex --override --no-vscode \
+    > "$TMP_ROOT/override-blocked.log" 2>&1
+  status=$?
+  set -e
+  [ "$status" -eq 1 ]
+  digest_tree "$blocked" > "$TMP_ROOT/override-blocked-after.txt"
+  diff -u "$TMP_ROOT/override-blocked-before.txt" \
+    "$TMP_ROOT/override-blocked-after.txt"
+  grep 'IB/TRESSOIR.md is a directory' "$TMP_ROOT/override-blocked.log" >/dev/null
 )
 
 case_extension_failure_is_honest() (
@@ -844,6 +1002,8 @@ run_case "known misplaced .agent adapter warns and survives; unrelated content i
   case_misplaced_agent_adapter
 run_case "user files and occupied adapter paths are preserved" \
   case_preserve_user_files_and_collisions
+run_case "override refreshes only managed payload and reinstalls the VSIX" \
+  case_override_refreshes_only_managed_payload
 run_case "extension failure reports committed project setup honestly" \
   case_extension_failure_is_honest
 run_case "symlinked managed ancestor is rejected" \

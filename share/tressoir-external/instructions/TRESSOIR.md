@@ -32,6 +32,7 @@ All portable skills live under `IB/skills/`:
 - **`tressoir-plan`** — create the `PLAN.md` + `PLAN.tressoir.md` pair, collect decisions, and maintain milestone completion reports.
 - **`tressoir-canon`** — promote durable lessons into `CANON/`, curate known-good reusable examples in `CANON/CANON_ARTIFACTS/`, split and realign growing canon, and reconcile canon after merges.
 - **`tressoir-structured-review`** — review non-trivial plans or changes with the Tressoir verdict and finding classifications.
+- **`tressoir-isolation`** — choose, adapt, create, or verify direct, shared Dev Container, and dedicated Agent Container boundaries.
 
 The Markdown artifact resources are:
 

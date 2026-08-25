@@ -1,0 +1,15 @@
+{
+  "name": "Tressoir Agent (isolated)",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu26.04",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/source,type=bind,readonly",
+  "workspaceFolder": "/workspace",
+  "mounts": [
+    "source=${localWorkspaceFolder}/IB,target=/workspace/IB,type=bind"
+  ],
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": true,
+  "postCreateCommand": [
+    "bash",
+    "/workspace/IB/isolation/agent-setup.sh"
+  ]
+}

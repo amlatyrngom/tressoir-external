@@ -45,6 +45,13 @@ Open a terminal in the project you want to configure, then run:
 curl -fsSL https://raw.githubusercontent.com/amlatyrngom/tressoir-external/main/install.sh | bash
 ```
 
+To refresh a prior installation's managed payload as well as the VSIX:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/amlatyrngom/tressoir-external/main/install.sh | \
+  bash -s -- --override
+```
+
 The installer asks separately whether to:
 
 - install the Tressoir Artifacts VS Code extension;
@@ -115,7 +122,7 @@ npm run package:vsix
 ../bin/tressoir-external setup \
   --root /path/to/project \
   --claude --codex --pi --register-guidance \
-  --vsix "$PWD/dist/tressoir-artifacts-0.1.4.vsix"
+  --vsix "$PWD/dist/tressoir-artifacts-0.1.5.vsix"
 ```
 
 Ordinary `.html` files remain text by default. Use **Reopen With → Tressoir Artifact Preview
@@ -136,12 +143,24 @@ Useful setup options:
 --vsix PATH        Install the supplied Tressoir Artifacts VSIX
 --vscode-bin PATH  Use code-insiders or an absolute VS Code CLI path
 --no-vscode        Skip extension installation
+--override         Refresh installer-owned IB payload, selected skill adapters,
+                   and the supplied VSIX while preserving state and canon
 --dry-run          Print the plan without changing the project or VS Code
 ```
 
 Setup verifies the source payload checksums before writing. It creates only
 absent canonical files and collision-checked relative skill links. A second
-identical run is a no-op.
+identical run is a no-op unless `--override` is supplied.
+
+`--override` is deliberately bounded. It resets `IB/TASK.md`, `IB/TRESSOIR.md`,
+`IB/.gitignore`, the canon-artifacts guide, every bundled skill tree, the four
+managed `IB/isolation/` files, and selected `.claude/skills/` or
+`.agents/skills/` adapters. It also force-installs the supplied VSIX even when
+the same version is already installed. It preserves `IB/STATE.md`, every
+`*CANON.md`, `IB/ARTIFACTS/`, `IB/TMP/`, extra isolation files, unknown IB
+paths, and root harness guidance outside its normal managed-section behavior.
+Skill replacement carries forward any `*CANON.md` stored inside a bundled skill
+tree. Use `--override --dry-run` to inspect this refresh without writing.
 
 The older `tressoir.bridge` extension owns the same artifact editor view types
 and cannot be enabled alongside this standalone extension. The VS Code CLI
@@ -172,10 +191,38 @@ IB/
     ├── tressoir-plan/
     ├── tressoir-working-area/
     ├── tressoir-canon/
-    └── tressoir-structured-review/
+    ├── tressoir-structured-review/
+    └── tressoir-isolation/
+```
+
+Setup also creates the small, adaptable isolation starter:
+
+```text
+IB/isolation/
+├── README.md
+├── user.devcontainer.json
+├── agent.devcontainer.json
+└── agent-setup.sh
 ```
 
 Claude receives per-skill relative links under `.claude/skills/`. Codex and Pi share per-skill links under `.agents/skills/`.
+
+## Isolation starters
+
+The `tressoir-isolation` skill helps an agent inspect the project's existing toolchain and Dev
+Container setup, then adapt one of the two templates without replacing mature configuration.
+Copy the selected template to `.devcontainer/user/devcontainer.json` or
+`.devcontainer/agent/devcontainer.json` and select it with **Dev Containers: Reopen in Container**.
+
+The user template keeps the normal read-write, host-backed project workspace. The dedicated Agent
+Container mounts host source read-only at `/source`, works in disposable `/workspace`, and mounts
+the host's `IB/` read-write at `/workspace/IB`. Any copied root `AGENTS.md` or `CLAUDE.md` receives
+the isolation notice; absent guidance files remain absent. A user container and agent container can
+be opened independently in two VS Code windows; this does not require Compose, Docker-in-Docker, or
+a host Docker socket.
+
+The four-file starter is create-only by default. With `--override`, setup refreshes those four
+managed files while preserving any additional project-specific files in `IB/isolation/`.
 
 ## Optional root guidance registration
 
@@ -262,7 +309,7 @@ Existing instruction precedence remains under user control.
 
 The installed `TRESSOIR.md` points to the exact skill to use for planning, artifacts, canon/upkeep, and structured review.
 
-Setup also seeds `IB/.gitignore` on a create-only basis. Its narrow defaults ignore disposable `TMP/` contents, artifact-local `vendor/` caches, `.env`, and `.DS_Store`; it does not hide `TASK.md`, `STATE.md`, prose canon, `CANON_ARTIFACTS/`, skills, task artifacts, or interaction records. An existing `IB/.gitignore` is always preserved.
+Setup also seeds `IB/.gitignore` on a create-only basis. Its narrow defaults ignore disposable `TMP/` contents, artifact-local `vendor/` caches, `.env`, and `.DS_Store`; it does not hide `TASK.md`, `STATE.md`, prose canon, `CANON_ARTIFACTS/`, skills, task artifacts, or interaction records. An existing `IB/.gitignore` is preserved unless the user explicitly passes `--override`.
 
 ## Artifact template folder and checker
 
@@ -321,13 +368,19 @@ Only open artifacts from authors and workspaces you trust. The MVP has no saniti
 
 ## Collision behavior and result codes
 
-The command never force-replaces an existing file, directory, or symlink.
+Without `--override`, the command never force-replaces an existing file,
+directory, or symlink. Override mode replaces only the exact managed paths
+listed above, using staged same-directory swaps; unsafe ancestors are still
+rejected.
 
 - `0` — requested setup is complete or already correct.
 - `2` — setup completed safely but preserved one or more adapter/canonical-skill collisions; manual work may remain.
 - `1` — validation or extension installation failed.
 
-Seed files and canonical guidance are create-only. Existing user versions are preserved. Existing canonical skill trees are preserved when they differ from the payload.
+Seed files and canonical guidance are create-only by default. Existing user
+versions and differing skill trees are preserved. `--override` refreshes the
+managed subset while retaining state, canon, artifacts, temporary work, and
+unknown paths.
 
 VS Code installation happens after project setup. If it fails, project setup remains in place and a rerun retries the extension phase.
 
@@ -361,22 +414,22 @@ for non-clobbering, all-harness setup, and an idempotent rerun.
 
 The release gate:
 
-- runs 85 focused extension tests;
+- runs 112 focused extension tests;
 - builds from a clean `dist/`;
 - inspects the packaged manifest and archive;
 - requires both artifact editors and all runtime assets;
 - rejects source, tests, source maps, `node_modules`, and nested VSIX files;
-- validates all six Agent Skills;
+- validates all seven Agent Skills;
 - checks both distributed Markdown templates with the bundled checker;
 - regenerates payload checksums; and
 - runs filesystem setup fixtures for combinations, idempotence, dry-run,
   collisions, root-guidance creation/append/upgrade/preservation, Claude
   settings-defaults merge, misplaced
   `.agent` adapter detection, path spaces, extension failure, extension upgrade,
-  legacy-bridge conflict, and symlink containment;
+  legacy-bridge conflict, symlink containment, and bounded override behavior;
 - runs an offline piped-bootstrap fixture that builds in temporary storage,
-  installs all selected integrations, registers opt-in root guidance, and
-  cleans up; and
+  installs all selected integrations, forwards `--override`, registers opt-in
+  root guidance, and cleans up; and
 - rejects generated VSIX files in the public source payload.
 
 `extension/dist/`, `extension/node_modules/`, and npm debug logs are ignored.
@@ -385,7 +438,7 @@ Release checks build transient output locally; no npm package is published.
 For a final desktop smoke, install the built VSIX into isolated VS Code directories and confirm:
 
 ```text
-tressoir.tressoir-artifacts@0.1.4
+tressoir.tressoir-artifacts@0.1.5
 ```
 
 ## Licensing

@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 
 # Tressoir External MVP setup for macOS/Linux and Bash 3.2+.
-# Canonical project writes are create-only. Optional root-guidance registration
-# may append one contained section to selected harness instruction files.
+# Canonical project writes are create-only unless the user explicitly passes
+# --override. Override refreshes only installer-owned payload and preserves
+# STATE.md, every *CANON.md, ARTIFACTS, TMP, and unknown IB paths. Optional
+# root-guidance registration may append one contained section to selected
+# harness instruction files.
 
 set -u
 
 PAYLOAD_VERSION_EXPECTED="0.1.0"
 EXTENSION_ID="tressoir.tressoir-artifacts"
-EXTENSION_VERSION="0.1.4"
+EXTENSION_VERSION="0.1.5"
 LEGACY_EXTENSION_ID="tressoir.bridge"
 
 CLAUDE=0
@@ -16,6 +19,7 @@ CODEX=0
 PI=0
 REGISTER_GUIDANCE=0
 DRY_RUN=0
+OVERRIDE=0
 NO_VSCODE=0
 ROOT_INPUT=""
 VSCODE_BIN="code"
@@ -26,6 +30,9 @@ VSIX_PATH=""
 INSTALLED_EXTENSION_VERSION=""
 INSTALLED_LEGACY_EXTENSION_VERSION=""
 CLAUDE_SETTINGS_TMP=""
+OVERRIDE_ACTIVE_STAGE=""
+OVERRIDE_ACTIVE_BACKUP=""
+OVERRIDE_ACTIVE_DESTINATION=""
 
 SKILLS=(
   "tressoir-artifact-md"
@@ -34,6 +41,7 @@ SKILLS=(
   "tressoir-working-area"
   "tressoir-canon"
   "tressoir-structured-review"
+  "tressoir-isolation"
 )
 
 cleanup_claude_settings_tmp() {
@@ -43,12 +51,37 @@ cleanup_claude_settings_tmp() {
   fi
 }
 
+cleanup_override_swap() {
+  if [ -n "$OVERRIDE_ACTIVE_BACKUP" ] &&
+     [ -e "$OVERRIDE_ACTIVE_BACKUP" -o -L "$OVERRIDE_ACTIVE_BACKUP" ]; then
+    if [ -n "$OVERRIDE_ACTIVE_DESTINATION" ] &&
+       [ ! -e "$OVERRIDE_ACTIVE_DESTINATION" ] &&
+       [ ! -L "$OVERRIDE_ACTIVE_DESTINATION" ]; then
+      mv "$OVERRIDE_ACTIVE_BACKUP" "$OVERRIDE_ACTIVE_DESTINATION" 2>/dev/null || true
+    else
+      rm -rf "$OVERRIDE_ACTIVE_BACKUP" 2>/dev/null || true
+    fi
+  fi
+  if [ -n "$OVERRIDE_ACTIVE_STAGE" ] &&
+     [ -e "$OVERRIDE_ACTIVE_STAGE" -o -L "$OVERRIDE_ACTIVE_STAGE" ]; then
+    rm -rf "$OVERRIDE_ACTIVE_STAGE" 2>/dev/null || true
+  fi
+  OVERRIDE_ACTIVE_STAGE=""
+  OVERRIDE_ACTIVE_BACKUP=""
+  OVERRIDE_ACTIVE_DESTINATION=""
+}
+
+cleanup_runtime_tmp() {
+  cleanup_override_swap
+  cleanup_claude_settings_tmp
+}
+
 # A Claude settings temp file can contain copied environment values. Remove it
 # on normal exit and interruption; successful replacement clears the path.
-trap cleanup_claude_settings_tmp EXIT
-trap 'cleanup_claude_settings_tmp; exit 129' HUP
-trap 'cleanup_claude_settings_tmp; exit 130' INT
-trap 'cleanup_claude_settings_tmp; exit 143' TERM
+trap cleanup_runtime_tmp EXIT
+trap 'cleanup_runtime_tmp; exit 129' HUP
+trap 'cleanup_runtime_tmp; exit 130' INT
+trap 'cleanup_runtime_tmp; exit 143' TERM
 
 usage() {
   cat <<'EOF'
@@ -56,7 +89,7 @@ Usage:
   tressoir-external setup [--claude] [--codex] [--pi]
       [--register-guidance]
       [--root PATH] [--vsix PATH] [--vscode-bin PATH]
-      [--no-vscode] [--dry-run]
+      [--no-vscode] [--override] [--dry-run]
 
 Creates a project-local IB scaffold and collision-checked harness skill links.
 Installs a supplied Tressoir Artifacts VSIX into regular VS Code by default.
@@ -81,6 +114,9 @@ Options:
   --vsix PATH        Tressoir Artifacts VSIX to install
   --vscode-bin PATH  VS Code CLI name or path; defaults to code
   --no-vscode        Do not install a VSIX
+  --override         Refresh installer-owned IB files, bundled skills, isolation
+                     templates, selected adapters, and the supplied VSIX. Preserve
+                     STATE.md, every *CANON.md, ARTIFACTS, TMP, and unknown IB paths.
   --dry-run          Print actions without mutating the project or VS Code
   -h, --help         Show this help
 EOF
@@ -240,6 +276,10 @@ preflight_project() {
     fatal "payload is missing seeds/ROOT_CANON.md"
   [ -f "$PAYLOAD/seeds/CANON_ARTIFACTS_README.md" ] ||
     fatal "payload is missing seeds/CANON_ARTIFACTS_README.md"
+  for rel in README.md user.devcontainer.json agent.devcontainer.json agent-setup.sh; do
+    [ -f "$PAYLOAD/isolation/$rel" ] && [ ! -L "$PAYLOAD/isolation/$rel" ] ||
+      fatal "payload isolation starter is missing a regular file: $rel"
+  done
 
   if [ "$NO_VSCODE" -eq 0 ]; then
     [ -n "$VSIX_INPUT" ] ||
@@ -266,6 +306,50 @@ preflight_project() {
     esac
     inspect_installed_extension ||
       fatal "failed to query extensions through: $VSCODE_RESOLVED"
+  fi
+}
+
+preflight_override_targets() {
+  local relative destination skill unsafe file
+  [ "$OVERRIDE" -eq 1 ] || return 0
+
+  for relative in \
+    IB/TASK.md \
+    IB/CANON/CANON_ARTIFACTS/README.md \
+    IB/TRESSOIR.md \
+    IB/.gitignore; do
+    destination="$ROOT/$relative"
+    if [ -d "$destination" ] && [ ! -L "$destination" ]; then
+      fatal "$relative is a directory; refusing to replace it with a managed file"
+    fi
+  done
+
+  destination="$ROOT/IB/isolation"
+  if [ -d "$destination" ] && [ ! -L "$destination" ]; then
+    for file in README.md user.devcontainer.json agent.devcontainer.json agent-setup.sh; do
+      if [ -d "$destination/$file" ] && [ ! -L "$destination/$file" ]; then
+        fatal "IB/isolation/$file is a directory; refusing to replace it with a managed file"
+      fi
+    done
+  fi
+
+  for skill in "${SKILLS[@]}"; do
+    destination="$ROOT/IB/skills/$skill"
+    if [ -d "$destination" ] && [ ! -L "$destination" ]; then
+      unsafe=$(find "$destination" -type l -name '*CANON.md' -print -quit 2>/dev/null) ||
+        fatal "failed to inspect protected canon in IB/skills/$skill"
+      [ -z "$unsafe" ] ||
+        fatal "protected canon must be a regular file, not a symlink: ${unsafe#"$ROOT/"}"
+    fi
+  done
+
+  if [ "$CLAUDE" -eq 1 ]; then
+    validate_existing_dir_chain ".claude/skills" ||
+      fatal "unsafe or incompatible Claude skill adapter path"
+  fi
+  if [ "$CODEX" -eq 1 ] || [ "$PI" -eq 1 ]; then
+    validate_existing_dir_chain ".agents/skills" ||
+      fatal "unsafe or incompatible Codex/Pi skill adapter path"
   fi
 }
 
@@ -345,12 +429,128 @@ copy_file_if_absent() {
   fi
 }
 
+replace_staged_path() {
+  local stage relative destination label parent backup
+  stage="$1"
+  relative="$2"
+  label="$3"
+  destination="$ROOT/$relative"
+  parent=$(dirname -- "$destination")
+  backup=""
+
+  OVERRIDE_ACTIVE_STAGE="$stage"
+  OVERRIDE_ACTIVE_DESTINATION="$destination"
+
+  if occupied "$destination"; then
+    backup=$(mktemp -d "$parent/.tressoir-override-backup.XXXXXX") ||
+      fatal "failed to stage backup for $relative"
+    rmdir "$backup" || fatal "failed to prepare backup path for $relative"
+    OVERRIDE_ACTIVE_BACKUP="$backup"
+    mv "$destination" "$backup" ||
+      fatal "failed to move existing $label aside: $relative"
+  fi
+
+  if ! mv "$stage" "$destination"; then
+    cleanup_override_swap
+    fatal "failed to install overridden $label: $relative"
+  fi
+  OVERRIDE_ACTIVE_STAGE=""
+
+  if [ -n "$backup" ]; then
+    rm -rf "$backup" || fatal "failed to remove replaced $label backup: $relative"
+    OVERRIDE_ACTIVE_BACKUP=""
+  fi
+  OVERRIDE_ACTIVE_DESTINATION=""
+  say "overrode $label: $relative"
+}
+
+override_managed_file() {
+  local source relative label destination parent stage
+  source="$1"
+  relative="$2"
+  label="$3"
+  destination="$ROOT/$relative"
+  parent=$(dirname -- "$destination")
+
+  if [ -d "$destination" ] && [ ! -L "$destination" ]; then
+    fatal "$relative is a directory; refusing to replace it with the managed $label"
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "would override $label: $relative"
+    return 0
+  fi
+
+  stage=$(mktemp "$parent/.tressoir-override-file.XXXXXX") ||
+    fatal "failed to stage overridden $label: $relative"
+  OVERRIDE_ACTIVE_STAGE="$stage"
+  cp -p "$source" "$stage" || fatal "failed to copy overridden $label: $relative"
+  replace_staged_path "$stage" "$relative" "$label"
+}
+
+install_managed_file() {
+  if [ "$OVERRIDE" -eq 1 ]; then
+    override_managed_file "$1" "$2" "$3"
+  else
+    copy_file_if_absent "$1" "$2" "$3"
+  fi
+}
+
+override_skill_tree() {
+  local skill source relative destination parent stage canon_list canon canon_relative canon_parent unsafe
+  skill="$1"
+  source="$PAYLOAD/skills/$skill"
+  relative="IB/skills/$skill"
+  destination="$ROOT/$relative"
+  parent=$(dirname -- "$destination")
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "would override canonical skill tree: $relative"
+    return 0
+  fi
+
+  stage=$(mktemp -d "$parent/.tressoir-override-skill.XXXXXX") ||
+    fatal "failed to stage canonical skill tree: $relative"
+  rmdir "$stage" || fatal "failed to prepare canonical skill stage: $relative"
+  OVERRIDE_ACTIVE_STAGE="$stage"
+  cp -R "$source" "$stage" || fatal "failed to stage canonical skill tree: $relative"
+
+  if [ -d "$destination" ] && [ ! -L "$destination" ]; then
+    unsafe=$(find "$destination" -type l -name '*CANON.md' -print -quit 2>/dev/null) ||
+      fatal "failed to inspect protected canon in $relative"
+    [ -z "$unsafe" ] ||
+      fatal "protected canon must be a regular file, not a symlink: ${unsafe#"$ROOT/"}"
+
+    canon_list="$stage/.tressoir-protected-canon-list"
+    find "$destination" -type f -name '*CANON.md' -print > "$canon_list" ||
+      fatal "failed to inventory protected canon in $relative"
+    while IFS= read -r canon || [ -n "$canon" ]; do
+      [ -n "$canon" ] || continue
+      canon_relative=${canon#"$destination/"}
+      [ "$canon_relative" != "$canon" ] ||
+        fatal "protected canon escaped managed skill tree: $canon"
+      canon_parent=$(dirname -- "$stage/$canon_relative")
+      mkdir -p "$canon_parent" ||
+        fatal "failed to stage protected canon: $canon_relative"
+      cp -p "$canon" "$stage/$canon_relative" ||
+        fatal "failed to preserve protected canon: $canon_relative"
+    done < "$canon_list"
+    rm -f "$canon_list" || fatal "failed to finish protected canon staging: $relative"
+  fi
+
+  replace_staged_path "$stage" "$relative" "canonical skill tree"
+}
+
 install_skill_if_absent() {
   local skill source relative destination
   skill="$1"
   source="$PAYLOAD/skills/$skill"
   relative="IB/skills/$skill"
   destination="$ROOT/$relative"
+
+  if [ "$OVERRIDE" -eq 1 ]; then
+    override_skill_tree "$skill"
+    return 0
+  fi
 
   if occupied "$destination"; then
     if [ -d "$destination" ] && [ ! -L "$destination" ] &&
@@ -379,6 +579,67 @@ install_skill_if_absent() {
   fatal "failed to copy canonical skill tree: $relative"
 }
 
+install_isolation_if_absent() {
+  local source relative destination file stage
+  source="$PAYLOAD/isolation"
+  relative="IB/isolation"
+  destination="$ROOT/$relative"
+
+  if [ "$OVERRIDE" -eq 1 ]; then
+    if occupied "$destination" &&
+       { [ ! -d "$destination" ] || [ -L "$destination" ]; }; then
+      if [ "$DRY_RUN" -eq 1 ]; then
+        say "would override isolation starter: $relative"
+        return 0
+      fi
+      stage=$(mktemp -d "$ROOT/IB/.tressoir-override-isolation.XXXXXX") ||
+        fatal "failed to stage isolation starter: $relative"
+      rmdir "$stage" || fatal "failed to prepare isolation starter stage: $relative"
+      OVERRIDE_ACTIVE_STAGE="$stage"
+      cp -R "$source" "$stage" || fatal "failed to stage isolation starter: $relative"
+      replace_staged_path "$stage" "$relative" "isolation starter"
+      return 0
+    fi
+
+    if [ ! -d "$destination" ]; then
+      if [ "$DRY_RUN" -eq 1 ]; then
+        say "would create isolation starter: $relative"
+        return 0
+      fi
+      mkdir "$destination" || fatal "failed to create isolation starter directory: $relative"
+    fi
+    for file in README.md user.devcontainer.json agent.devcontainer.json agent-setup.sh; do
+      override_managed_file "$source/$file" "$relative/$file" "isolation starter file"
+    done
+    return 0
+  fi
+
+  if occupied "$destination"; then
+    if [ -d "$destination" ] && [ ! -L "$destination" ]; then
+      if diff -qr "$source" "$destination" >/dev/null 2>&1; then
+        say "already installed isolation starter: $relative"
+      else
+        degrade "$relative (existing isolation tree differs; preserving it as a whole)"
+      fi
+      return 0
+    fi
+    degrade "$relative (expected a real directory for the isolation starter)"
+    return 0
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "would create isolation starter: $relative"
+    return 0
+  fi
+
+  mkdir "$destination" || fatal "failed to create isolation starter directory: $relative"
+  if cp -R "$source/." "$destination/"; then
+    say "created isolation starter: $relative"
+    return 0
+  fi
+  fatal "failed to copy isolation starter: $relative"
+}
+
 skill_is_usable() {
   local skill path
   skill="$1"
@@ -391,7 +652,7 @@ skill_is_usable() {
 }
 
 link_checked() {
-  local relative target destination current
+  local relative target destination current parent stage
   relative="$1"
   target="$2"
   destination="$ROOT/$relative"
@@ -402,11 +663,37 @@ link_checked() {
       say "already linked: $relative -> $target"
       return 0
     fi
+    if [ "$OVERRIDE" -eq 1 ]; then
+      if [ "$DRY_RUN" -eq 1 ]; then
+        say "would override adapter: $relative -> $target"
+        return 0
+      fi
+      parent=$(dirname -- "$destination")
+      stage=$(mktemp "$parent/.tressoir-override-link.XXXXXX") ||
+        fatal "failed to stage adapter: $relative"
+      rm -f "$stage" || fatal "failed to prepare adapter stage: $relative"
+      ln -s "$target" "$stage" || fatal "failed to stage adapter: $relative"
+      replace_staged_path "$stage" "$relative" "adapter"
+      return 0
+    fi
     degrade "$relative (existing symlink target is '$current', expected '$target')"
     return 1
   fi
 
   if [ -e "$destination" ]; then
+    if [ "$OVERRIDE" -eq 1 ]; then
+      if [ "$DRY_RUN" -eq 1 ]; then
+        say "would override adapter: $relative -> $target"
+        return 0
+      fi
+      parent=$(dirname -- "$destination")
+      stage=$(mktemp "$parent/.tressoir-override-link.XXXXXX") ||
+        fatal "failed to stage adapter: $relative"
+      rm -f "$stage" || fatal "failed to prepare adapter stage: $relative"
+      ln -s "$target" "$stage" || fatal "failed to stage adapter: $relative"
+      replace_staged_path "$stage" "$relative" "adapter"
+      return 0
+    fi
     degrade "$relative (occupied; expected symlink to '$target')"
     return 1
   fi
@@ -818,7 +1105,8 @@ install_vscode_extension() {
     return
   fi
 
-  if [ "$INSTALLED_EXTENSION_VERSION" = "$EXTENSION_VERSION" ]; then
+  if [ "$INSTALLED_EXTENSION_VERSION" = "$EXTENSION_VERSION" ] &&
+     [ "$OVERRIDE" -eq 0 ]; then
     say "already installed: $EXTENSION_ID@$EXTENSION_VERSION"
     return
   fi
@@ -950,6 +1238,10 @@ while [ "$#" -gt 0 ]; do
       NO_VSCODE=1
       shift
       ;;
+    --override)
+      OVERRIDE=1
+      shift
+      ;;
     --dry-run)
       DRY_RUN=1
       shift
@@ -990,9 +1282,13 @@ say "  payload: $PAYLOAD"
 if [ "$DRY_RUN" -eq 1 ]; then
   say "  mode: dry-run"
 fi
+if [ "$OVERRIDE" -eq 1 ]; then
+  say "  managed payload: override"
+fi
 
 verify_payload
 preflight_project
+preflight_override_targets
 
 say ""
 say "Canonical IB:"
@@ -1003,19 +1299,20 @@ ensure_dir "IB/CANON/CANON_ARTIFACTS" ||
   fatal "canonical IB/CANON/CANON_ARTIFACTS path is unsafe"
 ensure_dir "IB/skills" || fatal "canonical IB/skills path is unsafe"
 
-copy_file_if_absent "$PAYLOAD/seeds/TASK.md" "IB/TASK.md" "user task seed"
+install_managed_file "$PAYLOAD/seeds/TASK.md" "IB/TASK.md" "user task seed"
 copy_file_if_absent "$PAYLOAD/seeds/STATE.md" "IB/STATE.md" "project state seed"
 copy_file_if_absent "$PAYLOAD/seeds/ROOT_CANON.md" "IB/CANON/ROOT_CANON.md" "root canon seed"
-copy_file_if_absent \
+install_managed_file \
   "$PAYLOAD/seeds/CANON_ARTIFACTS_README.md" \
   "IB/CANON/CANON_ARTIFACTS/README.md" \
   "canon artifacts guide"
-copy_file_if_absent "$PAYLOAD/instructions/TRESSOIR.md" "IB/TRESSOIR.md" "canonical instructions"
-copy_file_if_absent "$PAYLOAD/seeds/IB.gitignore" "IB/.gitignore" "IB ignore rules"
+install_managed_file "$PAYLOAD/instructions/TRESSOIR.md" "IB/TRESSOIR.md" "canonical instructions"
+install_managed_file "$PAYLOAD/seeds/IB.gitignore" "IB/.gitignore" "IB ignore rules"
 
 for skill in "${SKILLS[@]}"; do
   install_skill_if_absent "$skill" || true
 done
+install_isolation_if_absent
 
 if [ "$CLAUDE" -eq 1 ]; then
   setup_claude_skills

@@ -3,6 +3,9 @@
 # Interactive source bootstrap for Tressoir External.
 # Designed for: curl -fsSL <raw-url> | bash
 # Prompts use /dev/tty because standard input contains this script.
+# Pass --override (including with `curl ... | bash -s -- --override`) to refresh
+# installer-owned IB payload while preserving STATE.md, every *CANON.md,
+# ARTIFACTS, TMP, and unknown IB paths.
 
 set -euo pipefail
 
@@ -12,10 +15,28 @@ ARCHIVE_URL_DEFAULT="https://codeload.github.com/$REPOSITORY/tar.gz/refs/heads/$
 ARCHIVE_URL="${TRESSOIR_EXTERNAL_ARCHIVE_URL:-$ARCHIVE_URL_DEFAULT}"
 TARGET_INPUT="${TRESSOIR_EXTERNAL_ROOT:-$PWD}"
 VSCODE_BIN="${TRESSOIR_EXTERNAL_VSCODE_BIN:-code}"
-EXTENSION_VERSION="0.1.4"
+EXTENSION_VERSION="0.1.5"
 TEMP_ROOT=""
 PROMPT_FD_OPEN=0
 CHOICE_RESULT=0
+OVERRIDE=0
+
+usage() {
+  cat <<'EOF'
+Usage: install.sh [--override]
+
+Downloads Tressoir External, asks which integrations to install, and removes
+the temporary source/build tree afterward.
+
+  --override  Refresh installer-owned IB files, bundled skills, isolation
+              templates, selected adapters, and the supplied VSIX. Preserve
+              STATE.md, every *CANON.md, ARTIFACTS, TMP, and unknown IB paths.
+  -h, --help  Show this help.
+
+Piped form:
+  curl -fsSL <install-url> | bash -s -- --override
+EOF
+}
 
 say() {
   printf '%s\n' "$*"
@@ -25,6 +46,22 @@ fatal() {
   printf 'fatal: %s\n' "$*" >&2
   exit 1
 }
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --override)
+      OVERRIDE=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      fatal "unknown option: $1"
+      ;;
+  esac
+done
 
 cleanup() {
   if [ -n "$TEMP_ROOT" ] && [ -d "$TEMP_ROOT" ]; then
@@ -204,6 +241,9 @@ if [ "$INSTALL_VSCODE" -eq 1 ]; then
 fi
 
 SETUP_ARGS=(setup --root "$TARGET_ROOT")
+if [ "$OVERRIDE" -eq 1 ]; then
+  SETUP_ARGS+=(--override)
+fi
 if [ "$INSTALL_CLAUDE" -eq 1 ]; then
   SETUP_ARGS+=(--claude)
 fi

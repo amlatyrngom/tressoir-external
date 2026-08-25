@@ -78,7 +78,7 @@ case "$*" in
     ;;
   "run package:vsix")
     mkdir -p dist
-    printf '%s\n' 'mock VSIX' > dist/tressoir-artifacts-0.1.4.vsix
+    printf '%s\n' 'mock VSIX' > dist/tressoir-artifacts-0.1.5.vsix
     printf '%s\n' 'mock package complete'
     ;;
   *)
@@ -102,7 +102,7 @@ case "${1:-}" in
   --install-extension)
     [ -f "${2:-}" ] || exit 3
     printf '%s\n' "$2" > "$MOCK_CODE_INSTALL_LOG"
-    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.4' > "$MOCK_CODE_STATE"
+    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.5' > "$MOCK_CODE_STATE"
     printf '%s\n' 'mock installation succeeded'
     ;;
   *)
@@ -143,10 +143,15 @@ case_piped_source_install() (
 
   assert_file "$project/IB/TRESSOIR.md"
   assert_file "$project/IB/skills/tressoir-artifact-md/SKILL.md"
+  assert_file "$project/IB/isolation/README.md"
+  assert_file "$project/IB/isolation/user.devcontainer.json"
+  assert_file "$project/IB/isolation/agent.devcontainer.json"
+  assert_file "$project/IB/isolation/agent-setup.sh"
   assert_file "$project/IB/CANON/CANON_ARTIFACTS/README.md"
   for skill in \
     tressoir-artifact-md tressoir-artifact-html tressoir-plan \
-    tressoir-working-area tressoir-canon tressoir-structured-review; do
+    tressoir-working-area tressoir-canon tressoir-structured-review \
+    tressoir-isolation; do
     assert_link "$project/.claude/skills/$skill" "../../IB/skills/$skill"
     assert_link "$project/.agents/skills/$skill" "../../IB/skills/$skill"
   done
@@ -173,10 +178,10 @@ case_piped_source_install() (
     "$project/AGENTS.md" >/dev/null
   assert_absent "$project/.pi"
 
-  grep -Fx 'tressoir.tressoir-artifacts@0.1.4' "$state" >/dev/null
+  grep -Fx 'tressoir.tressoir-artifacts@0.1.5' "$state" >/dev/null
   built_vsix=$(sed -n '1p' "$install_log")
   case "$built_vsix" in
-    "$ephemeral"/*/source/tressoir-external-main/extension/dist/tressoir-artifacts-0.1.4.vsix)
+    "$ephemeral"/*/source/tressoir-external-main/extension/dist/tressoir-artifacts-0.1.5.vsix)
       ;;
     *)
       printf 'VSIX was not installed from temporary storage: %s\n' "$built_vsix" >&2
@@ -198,6 +203,39 @@ case_piped_source_install() (
   grep 'Setup never edits nested Claude, override, rules, global, or Pi SYSTEM.md files.' \
     "$output" >/dev/null
   grep 'Temporary source and build files will now be removed.' "$output" >/dev/null
+
+  printf 'EDITED TASK\n' > "$project/IB/TASK.md"
+  printf 'PROTECTED STATE\n' > "$project/IB/STATE.md"
+  printf 'PROTECTED ROOT CANON\n' > "$project/IB/CANON/ROOT_CANON.md"
+  printf 'EDITED SKILL\n' > "$project/IB/skills/tressoir-isolation/SKILL.md"
+  shasum -a 256 "$project/IB/STATE.md" "$project/IB/CANON/ROOT_CANON.md" \
+    > "$TMP_ROOT/bootstrap-override-protected-before.txt"
+
+  override_output="$TMP_ROOT/bootstrap-override.log"
+  cat "$REPO/install.sh" | env \
+    PATH="$TMP_ROOT/mock-tools:$PATH" \
+    TMPDIR="$ephemeral" \
+    MOCK_CODE_STATE="$state" \
+    MOCK_CODE_INSTALL_LOG="$install_log" \
+    TRESSOIR_EXTERNAL_ARCHIVE_URL="file://$TMP_ROOT/source.tar.gz" \
+    TRESSOIR_EXTERNAL_ROOT="$project" \
+    TRESSOIR_EXTERNAL_VSCODE=yes \
+    TRESSOIR_EXTERNAL_CLAUDE=yes \
+    TRESSOIR_EXTERNAL_CODEX=yes \
+    TRESSOIR_EXTERNAL_PI=yes \
+    TRESSOIR_EXTERNAL_GUIDANCE=yes \
+    bash -s -- --override > "$override_output"
+
+  cmp "$REPO/share/tressoir-external/seeds/TASK.md" "$project/IB/TASK.md"
+  cmp "$REPO/share/tressoir-external/skills/tressoir-isolation/SKILL.md" \
+    "$project/IB/skills/tressoir-isolation/SKILL.md"
+  shasum -a 256 "$project/IB/STATE.md" "$project/IB/CANON/ROOT_CANON.md" \
+    > "$TMP_ROOT/bootstrap-override-protected-after.txt"
+  diff -u "$TMP_ROOT/bootstrap-override-protected-before.txt" \
+    "$TMP_ROOT/bootstrap-override-protected-after.txt"
+  grep 'managed payload: override' "$override_output" >/dev/null
+  grep 'installed: tressoir.tressoir-artifacts@0.1.5' "$override_output" >/dev/null
+  [ -z "$(find "$ephemeral" -mindepth 1 -print -quit)" ]
 )
 
 case_nothing_selected() (
@@ -222,7 +260,7 @@ case_nothing_selected() (
 case_piped_source_install
 status=$?
 if [ "$status" -eq 0 ]; then
-  pass "piped bootstrap builds in temporary storage and installs all selections"
+  pass "piped bootstrap installs selections and forwards override safely"
 else
   fail "piped bootstrap builds in temporary storage and installs all selections"
 fi

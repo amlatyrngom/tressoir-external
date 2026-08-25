@@ -8,8 +8,12 @@ This extension renders two trusted, text-backed artifact formats in regular desk
 
 It is the artifact-editor portion of Tressoir, extracted into a self-contained extension. It does not connect to the Tressoir daemon and does not include editor automation, the plugin host, code-server management, a Python runtime, or an SDK backend.
 
-## Notable in this release (0.1.4)
+## Notable in this release (0.1.5)
 
+- Markdown and HTML now share the accepted linear light/dark theme, card and single-decision
+  components, floating feedback form, local math and syntax highlighting, and contained overflow.
+- This version bump deliberately distinguishes that runtime from the earlier `0.1.4` package;
+  reusing the old version number allowed VS Code setup to mistake changed bytes for an installed build.
 - Ordinary HTML can opt into the same trusted preview while the normal text editor remains the default.
 - Raw HTML no longer sits inside an extension-owned padded rounded sheet or inherits a serif host font; authored pages render full-bleed with a restrained system fallback.
 - Inert script data blocks such as `type="application/json"` remain untouched while following executable renderers run with the webview nonce, covering full-document data-plus-renderer artifacts such as generated briefings.
@@ -94,7 +98,7 @@ npm test
 npm run package:vsix
 ```
 
-The versioned package is written to `dist/tressoir-artifacts-0.1.4.vsix`. Always inspect the newly produced archive and packaged manifest before release; do not reuse an older bridge VSIX.
+The versioned package is written to `dist/tressoir-artifacts-0.1.5.vsix`. Always inspect the newly produced archive and packaged manifest before release; do not reuse an older bridge VSIX.
 
 ## Source provenance
 

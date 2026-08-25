@@ -6,7 +6,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 EXTENSION="$ROOT/extension"
 PAYLOAD="$ROOT/share/tressoir-external"
 LINEAR_SOURCE="$PAYLOAD/skills/tressoir-artifact-html/html_artifact_template"
-VERSION="0.1.4"
+VERSION="0.1.5"
 VSIX="$EXTENSION/dist/tressoir-artifacts-$VERSION.vsix"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/tressoir-release-check.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
@@ -65,7 +65,7 @@ node - "$TMP/package.json" <<'NODE'
 const fs = require('fs')
 const manifest = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
 const identity = `${manifest.publisher}.${manifest.name}@${manifest.version}`
-if (identity !== 'tressoir.tressoir-artifacts@0.1.4') {
+if (identity !== 'tressoir.tressoir-artifacts@0.1.5') {
   throw new Error(`unexpected packaged identity: ${identity}`)
 }
 if (manifest.license !== 'MIT') {
@@ -116,6 +116,58 @@ cd "$ROOT"
 for skill in "$PAYLOAD"/skills/*; do
   npx --yes skills-ref@0.1.5 validate "$skill"
 done
+
+node - "$PAYLOAD/isolation/user.devcontainer.json" \
+  "$PAYLOAD/isolation/agent.devcontainer.json" \
+  "$PAYLOAD/isolation/agent-setup.sh" <<'NODE'
+const fs = require('fs')
+const { spawnSync } = require('child_process')
+const [userPath, agentPath, setupPath] = process.argv.slice(2)
+const user = JSON.parse(fs.readFileSync(userPath, 'utf8'))
+const agent = JSON.parse(fs.readFileSync(agentPath, 'utf8'))
+const setup = fs.readFileSync(setupPath, 'utf8')
+const expectedImage = 'mcr.microsoft.com/devcontainers/base:ubuntu26.04'
+if (user.image !== expectedImage || agent.image !== expectedImage) {
+  throw new Error('isolation templates must share the validated baseline image')
+}
+if (user.remoteUser !== 'vscode' || user.updateRemoteUserUID !== true) {
+  throw new Error('user template must use the UID-aligned non-root baseline')
+}
+if ('workspaceMount' in user) {
+  throw new Error('user template must retain the normal read-write workspace mount')
+}
+if (agent.remoteUser !== 'vscode' || agent.updateRemoteUserUID !== true) {
+  throw new Error('agent template must use the UID-aligned non-root baseline')
+}
+if (agent.workspaceFolder !== '/workspace' || !agent.workspaceMount.includes('target=/source') ||
+    !agent.workspaceMount.includes('readonly')) {
+  throw new Error('agent template must expose read-only source and writable scratch')
+}
+if (!agent.mounts.some((mount) => mount.includes('target=/workspace/IB') &&
+    !mount.includes('readonly'))) {
+  throw new Error('agent template must expose read-write IB')
+}
+const expectedLifecycle = ['bash', '/workspace/IB/isolation/agent-setup.sh']
+if (JSON.stringify(agent.postCreateCommand) !== JSON.stringify(expectedLifecycle)) {
+  throw new Error('agent lifecycle must call the mounted readable setup helper')
+}
+for (const invariant of ["--exclude='./IB'", '/workspace/AGENTS.md',
+  '/workspace/CLAUDE.md', 'TRESSOIR ISOLATION: BEGIN', 'findmnt', '/workspace/IB']) {
+  if (!setup.includes(invariant)) throw new Error(`missing agent setup invariant: ${invariant}`)
+}
+for (const guarded of ['/workspace/AGENTS.md', '/workspace/CLAUDE.md']) {
+  if (!setup.includes(`if [ -f ${guarded} ]; then`)) {
+    throw new Error(`guidance append must be guarded by -f: ${guarded}`)
+  }
+}
+for (const forbidden of ['docker.sock', 'privileged', 'chmod -R 777']) {
+  if (`${JSON.stringify(agent)}\n${setup}`.includes(forbidden)) {
+    throw new Error(`forbidden agent baseline: ${forbidden}`)
+  }
+}
+const syntax = spawnSync('bash', ['-n', setupPath], { encoding: 'utf8' })
+if (syntax.status !== 0) throw new Error(`invalid agent lifecycle shell: ${syntax.stderr}`)
+NODE
 
 cd "$PAYLOAD"
 find . -type f ! -name SHA256SUMS -print | LC_ALL=C sort | while IFS= read -r file; do
