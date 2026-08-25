@@ -60,6 +60,44 @@ assert_absent() {
   }
 }
 
+assert_isolation_selection() {
+  local project targets extensions
+  project="$1"
+  targets="$2"
+  extensions="$3"
+  node - \
+    "$project/IB/isolation/user.devcontainer.json" \
+    "$project/IB/isolation/agent.devcontainer.json" \
+    "$targets" "$extensions" <<'NODE'
+const fs = require('fs')
+const [userPath, agentPath, targets, extensionList] = process.argv.slice(2)
+const expectedExtensions = extensionList ? extensionList.split(',') : []
+const expected = [
+  [JSON.parse(fs.readFileSync(userPath, 'utf8')), 'User Workspace', '--user'],
+  [JSON.parse(fs.readFileSync(agentPath, 'utf8')), 'Agent Workspace', '--agent'],
+]
+for (const [config, name, mode] of expected) {
+  if (config.name !== name) throw new Error(`wrong configuration name: ${config.name}`)
+  if (config.features?.['ghcr.io/devcontainers/features/node:2']?.version !== '24') {
+    throw new Error(`${name} does not select Node 24 LTS`)
+  }
+  if (config.containerEnv?.TRESSOIR_AGENT_TARGETS !== targets) {
+    throw new Error(`${name} targets ${config.containerEnv?.TRESSOIR_AGENT_TARGETS}, expected ${targets}`)
+  }
+  const actualExtensions = config.customizations?.vscode?.extensions || []
+  if (JSON.stringify(actualExtensions) !== JSON.stringify(expectedExtensions)) {
+    throw new Error(`${name} extensions ${actualExtensions}, expected ${expectedExtensions}`)
+  }
+  if (config.postCreateCommand?.at(-1) !== mode) {
+    throw new Error(`${name} does not invoke helper mode ${mode}`)
+  }
+  if (!config.customizations?.vscode?.settings?.['window.title']?.includes('${localWorkspaceFolderBasename}')) {
+    throw new Error(`${name} does not retain the repository basename in its title`)
+  }
+}
+NODE
+}
+
 digest_tree() {
   local directory
   directory="$1"
@@ -167,6 +205,12 @@ case_fresh_all_with_extension() (
   assert_file "$project/IB/isolation/agent.devcontainer.json"
   assert_file "$project/IB/isolation/agent-setup.sh"
   [ "$(find "$project/IB/isolation" -type f | wc -l | tr -d ' ')" -eq 4 ]
+  assert_isolation_selection \
+    "$project" "claude,codex,pi" "anthropic.claude-code,openai.chatgpt"
+  assert_link "$project/.devcontainer/user/devcontainer.json" \
+    "../../IB/isolation/user.devcontainer.json"
+  assert_link "$project/.devcontainer/agent/devcontainer.json" \
+    "../../IB/isolation/agent.devcontainer.json"
 
   assert_file "$project/IB/skills/tressoir-artifact-md/scripts/check_md.js"
   assert_file "$project/IB/skills/tressoir-artifact-md/user_artifact_md_template/PLAN.tressoir.md"
@@ -259,10 +303,17 @@ case_each_harness() (
       claude)
         assert_dir "$project/.claude/skills"
         assert_absent "$project/.agents"
+        assert_isolation_selection "$project" "claude" "anthropic.claude-code"
         ;;
-      codex|pi)
+      codex)
         assert_dir "$project/.agents/skills"
         assert_absent "$project/.claude"
+        assert_isolation_selection "$project" "codex" "openai.chatgpt"
+        ;;
+      pi)
+        assert_dir "$project/.agents/skills"
+        assert_absent "$project/.claude"
+        assert_isolation_selection "$project" "pi" ""
         ;;
     esac
     assert_absent "$project/CLAUDE.md"
@@ -447,6 +498,8 @@ case_preserve_user_files_and_collisions() (
     "$project/.claude/skills" \
     "$project/.claude/rules" \
     "$project/.agents/skills" \
+    "$project/.devcontainer/user" \
+    "$project/.devcontainer/agent" \
     "$project/.pi"
   printf 'USER TASK\n' > "$project/IB/TASK.md"
   printf 'USER STATE\n' > "$project/IB/STATE.md"
@@ -470,6 +523,9 @@ case_preserve_user_files_and_collisions() (
   printf 'USER CLAUDE EXTRA SKILL\n' > "$project/.claude/skills/user-skill"
   ln -s /tmp/foreign-target "$project/.agents/skills/tressoir-plan"
   printf 'USER AGENTS EXTRA SKILL\n' > "$project/.agents/skills/user-skill"
+  printf 'USER DEV CONTAINER\n' > "$project/.devcontainer/user/devcontainer.json"
+  ln -s /tmp/foreign-devcontainer \
+    "$project/.devcontainer/agent/devcontainer.json"
 
   # Guidance registration is omitted in this case, so all prompt files remain
   # byte-identical even though root CLAUDE.md and AGENTS.md lack TRESSOIR.md.
@@ -487,10 +543,12 @@ case_preserve_user_files_and_collisions() (
     "$project/.pi/APPEND_SYSTEM.md" "$project/.pi/SYSTEM.md" \
     "$project/.claude/skills/tressoir-plan" \
     "$project/.claude/skills/user-skill" \
-    "$project/.agents/skills/user-skill"; do
+    "$project/.agents/skills/user-skill" \
+    "$project/.devcontainer/user/devcontainer.json"; do
     shasum -a 256 "$file"
   done > "$TMP_ROOT/collision-before.txt"
   foreign_before=$(readlink "$project/.agents/skills/tressoir-plan")
+  devcontainer_before=$(readlink "$project/.devcontainer/agent/devcontainer.json")
 
   set +e
   "$SETUP" setup --root "$project" --claude --codex --pi --no-vscode \
@@ -513,11 +571,13 @@ case_preserve_user_files_and_collisions() (
     "$project/.pi/APPEND_SYSTEM.md" "$project/.pi/SYSTEM.md" \
     "$project/.claude/skills/tressoir-plan" \
     "$project/.claude/skills/user-skill" \
-    "$project/.agents/skills/user-skill"; do
+    "$project/.agents/skills/user-skill" \
+    "$project/.devcontainer/user/devcontainer.json"; do
     shasum -a 256 "$file"
   done > "$TMP_ROOT/collision-after.txt"
   diff -u "$TMP_ROOT/collision-before.txt" "$TMP_ROOT/collision-after.txt"
   [ "$(readlink "$project/.agents/skills/tressoir-plan")" = "$foreign_before" ]
+  [ "$(readlink "$project/.devcontainer/agent/devcontainer.json")" = "$devcontainer_before" ]
 
   assert_file "$project/.claude/rules/existing.md"
   grep 'preserved:' "$TMP_ROOT/collision.log" >/dev/null
@@ -608,10 +668,12 @@ case_override_refreshes_only_managed_payload() (
   assert_absent "$project/IB/skills/tressoir-plan/stale.txt"
   grep -Fx 'USER SKILL CANON' \
     "$project/IB/skills/tressoir-plan/local/LOCAL_CANON.md" >/dev/null
-  for file in README.md user.devcontainer.json agent.devcontainer.json agent-setup.sh; do
-    cmp "$REPO/share/tressoir-external/isolation/$file" \
-      "$project/IB/isolation/$file"
-  done
+  cmp "$REPO/share/tressoir-external/isolation/README.md" \
+    "$project/IB/isolation/README.md"
+  cmp "$REPO/share/tressoir-external/isolation/agent-setup.sh" \
+    "$project/IB/isolation/agent-setup.sh"
+  assert_isolation_selection \
+    "$project" "claude,codex,pi" "anthropic.claude-code,openai.chatgpt"
   grep -Fx 'USER ISOLATION EXTRA' "$project/IB/isolation/local/user.txt" >/dev/null
   assert_link "$project/.claude/skills/tressoir-plan" "../../IB/skills/tressoir-plan"
   assert_link "$project/.agents/skills/tressoir-plan" "../../IB/skills/tressoir-plan"
@@ -648,6 +710,7 @@ case_override_refreshes_only_managed_payload() (
     "$TMP_ROOT/override-extension.log" >/dev/null
   grep 'manual action: reload the VS Code window' \
     "$TMP_ROOT/override-extension.log" >/dev/null
+  assert_isolation_selection "$project" "codex" "openai.chatgpt"
 
   blocked="$TMP_ROOT/override-blocked"
   mkdir "$blocked"

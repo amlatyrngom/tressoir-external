@@ -205,14 +205,20 @@ IB/isolation/
 └── agent-setup.sh
 ```
 
+When their destinations are free, setup exposes the two canonical templates through live relative
+links at `.devcontainer/user/devcontainer.json` and
+`.devcontainer/agent/devcontainer.json`. Existing Dev Container paths are always preserved,
+including under `--override`.
+
 Claude receives per-skill relative links under `.claude/skills/`. Codex and Pi share per-skill links under `.agents/skills/`.
 
 ## Isolation starters
 
 The `tressoir-isolation` skill helps an agent inspect the project's existing toolchain and Dev
 Container setup, then adapt one of the two templates without replacing mature configuration.
-Copy the selected template to `.devcontainer/user/devcontainer.json` or
-`.devcontainer/agent/devcontainer.json` and select it with **Dev Containers: Reopen in Container**.
+Prefer the setup-created symlink and edit its canonical target under `IB/isolation/`; copy only
+where symlinks are unsuitable. Select the configuration with **Dev Containers: Reopen in
+Container**.
 
 The user template keeps the normal read-write, host-backed project workspace. The dedicated Agent
 Container mounts host source read-only at `/source`, works in disposable `/workspace`, and mounts
@@ -220,6 +226,14 @@ the host's `IB/` read-write at `/workspace/IB`. Any copied root `AGENTS.md` or `
 the isolation notice; absent guidance files remain absent. A user container and agent container can
 be opened independently in two VS Code windows; this does not require Compose, Docker-in-Docker, or
 a host Docker socket.
+
+Both templates use the official Node Dev Container Feature with Node 24 LTS. The selected harness
+flags render the matching official CLIs into both configurations. Codex and Claude also declare
+their official VS Code extensions (`openai.chatgpt` and `anthropic.claude-code`). Pi has no official
+VS Code extension and therefore receives only its official `@earendil-works/pi-coding-agent` CLI.
+The host-aligned non-root `vscode` user has passwordless `sudo`; startup repairs its container-local
+home and cache ownership so ordinary tool output remains user-owned while system administration is
+unrestricted.
 
 The four-file starter is create-only by default. With `--override`, setup refreshes those four
 managed files while preserving any additional project-specific files in `IB/isolation/`.
@@ -427,6 +441,8 @@ The release gate:
   settings-defaults merge, misplaced
   `.agent` adapter detection, path spaces, extension failure, extension upgrade,
   legacy-bridge conflict, symlink containment, and bounded override behavior;
+- exercises the shared container helper with mocked administration and npm boundaries, including
+  home/cache ownership repair and target-specific CLI selection;
 - runs an offline piped-bootstrap fixture that builds in temporary storage,
   installs all selected integrations, forwards `--override`, registers opt-in
   root guidance, and cleans up; and

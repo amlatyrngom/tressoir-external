@@ -145,13 +145,13 @@ say ""
 choose "Install the Tressoir Artifacts VS Code extension?" 1 \
   "${TRESSOIR_EXTERNAL_VSCODE:-}"
 INSTALL_VSCODE="$CHOICE_RESULT"
-choose "Register skills for Claude Code?" 0 \
+choose "Set up Claude Code skills and Dev Container tools?" 0 \
   "${TRESSOIR_EXTERNAL_CLAUDE:-}"
 INSTALL_CLAUDE="$CHOICE_RESULT"
-choose "Register skills for OpenAI Codex CLI?" 0 \
+choose "Set up OpenAI Codex skills and Dev Container tools?" 0 \
   "${TRESSOIR_EXTERNAL_CODEX:-}"
 INSTALL_CODEX="$CHOICE_RESULT"
-choose "Register skills for the TypeScript Pi coding agent?" 0 \
+choose "Set up Pi skills and Dev Container tools?" 0 \
   "${TRESSOIR_EXTERNAL_PI:-}"
 INSTALL_PI="$CHOICE_RESULT"
 

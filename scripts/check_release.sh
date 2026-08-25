@@ -133,8 +133,33 @@ if (user.image !== expectedImage || agent.image !== expectedImage) {
 if (user.remoteUser !== 'vscode' || user.updateRemoteUserUID !== true) {
   throw new Error('user template must use the UID-aligned non-root baseline')
 }
+for (const config of [user, agent]) {
+  if (config.features?.['ghcr.io/devcontainers/features/node:2']?.version !== '24') {
+    throw new Error('both isolation templates must use Node 24 LTS')
+  }
+  if (config.containerEnv?.TRESSOIR_AGENT_TARGETS !== '__TRESSOIR_AGENT_TARGETS__') {
+    throw new Error('payload templates must retain the target-rendering marker')
+  }
+  if (JSON.stringify(config.customizations?.vscode?.extensions) !==
+      JSON.stringify(['__TRESSOIR_VSCODE_EXTENSIONS__'])) {
+    throw new Error('payload templates must retain the extension-rendering marker')
+  }
+  if (!config.customizations?.vscode?.settings?.['window.title']
+      ?.includes('${localWorkspaceFolderBasename}')) {
+    throw new Error('both isolation templates must retain the repository name in the window title')
+  }
+  for (const variable of ['XDG_CACHE_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME']) {
+    if (!config.containerEnv?.[variable]?.startsWith('/home/vscode/')) {
+      throw new Error(`missing development-user environment: ${variable}`)
+    }
+  }
+}
 if ('workspaceMount' in user) {
   throw new Error('user template must retain the normal read-write workspace mount')
+}
+const expectedUserLifecycle = ['bash', 'IB/isolation/agent-setup.sh', '--user']
+if (JSON.stringify(user.postCreateCommand) !== JSON.stringify(expectedUserLifecycle)) {
+  throw new Error('user lifecycle must call the readable helper in user mode')
 }
 if (agent.remoteUser !== 'vscode' || agent.updateRemoteUserUID !== true) {
   throw new Error('agent template must use the UID-aligned non-root baseline')
@@ -147,12 +172,15 @@ if (!agent.mounts.some((mount) => mount.includes('target=/workspace/IB') &&
     !mount.includes('readonly'))) {
   throw new Error('agent template must expose read-write IB')
 }
-const expectedLifecycle = ['bash', '/workspace/IB/isolation/agent-setup.sh']
+const expectedLifecycle = ['bash', '/workspace/IB/isolation/agent-setup.sh', '--agent']
 if (JSON.stringify(agent.postCreateCommand) !== JSON.stringify(expectedLifecycle)) {
   throw new Error('agent lifecycle must call the mounted readable setup helper')
 }
 for (const invariant of ["--exclude='./IB'", '/workspace/AGENTS.md',
-  '/workspace/CLAUDE.md', 'TRESSOIR ISOLATION: BEGIN', 'findmnt', '/workspace/IB']) {
+  '/workspace/CLAUDE.md', 'TRESSOIR ISOLATION: BEGIN', 'findmnt', '/workspace/IB',
+  'sudo -n true', 'sudo chown -R', '@openai/codex@latest',
+  '@anthropic-ai/claude-code@latest', '@earendil-works/pi-coding-agent@latest',
+  'npm install --global', 'XDG_CACHE_HOME']) {
   if (!setup.includes(invariant)) throw new Error(`missing agent setup invariant: ${invariant}`)
 }
 for (const guarded of ['/workspace/AGENTS.md', '/workspace/CLAUDE.md']) {
@@ -189,6 +217,7 @@ node "$PAYLOAD/skills/tressoir-artifact-md/scripts/check_md.js" \
   "$PAYLOAD/skills/tressoir-artifact-md/user_artifact_md_template/PLAN.tressoir.md" \
   "$PAYLOAD/skills/tressoir-artifact-md/user_artifact_md_template/INTERACTIVE.tressoir.md"
 tests/test_artifact_md_checker.sh
+tests/test_isolation.sh
 tests/test_setup.sh
 tests/test_install.sh
 

@@ -22,6 +22,18 @@ Prefer doing work directly and synchronously. Use subagents only for reviewers a
 - Use clear, user-friendly language in artifacts, code comments, and chat. Prefer plain, intuitive wording; expand uncommon acronyms and avoid unexplained internal shorthand.
 - For MVP work, avoid needless complexity. Prefer the smallest intuitive, interpretable solution that fully meets every requirement and preserves important constraints.
 
+## Proportional validation
+
+Use the smallest check that can disprove the current change. During implementation, prefer focused
+syntax checks, unit tests, and deterministic fixtures. Run an expensive browser, container, or
+external-service check only when the change can affect that boundary. A still-relevant earlier
+result remains evidence; do not repeat it merely because an unrelated file changed.
+
+Before publication, run the complete release gate once. If a later fix follows, rerun the layers it
+could affect and the final integration gate only when the risk warrants it. Cover configuration
+matrices statically where possible, then use one representative end-to-end environment to prove
+shared runtime behavior. Report what was run, what was reused, and what remains manual.
+
 ## Skills — read the matching one before the work
 
 All portable skills live under `IB/skills/`:

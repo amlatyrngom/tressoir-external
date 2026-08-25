@@ -147,6 +147,21 @@ case_piped_source_install() (
   assert_file "$project/IB/isolation/user.devcontainer.json"
   assert_file "$project/IB/isolation/agent.devcontainer.json"
   assert_file "$project/IB/isolation/agent-setup.sh"
+  assert_link "$project/.devcontainer/user/devcontainer.json" \
+    "../../IB/isolation/user.devcontainer.json"
+  assert_link "$project/.devcontainer/agent/devcontainer.json" \
+    "../../IB/isolation/agent.devcontainer.json"
+  node - \
+    "$project/IB/isolation/user.devcontainer.json" \
+    "$project/IB/isolation/agent.devcontainer.json" <<'NODE'
+const fs = require('fs')
+for (const path of process.argv.slice(2)) {
+  const config = JSON.parse(fs.readFileSync(path, 'utf8'))
+  if (config.containerEnv.TRESSOIR_AGENT_TARGETS !== 'claude,codex,pi') process.exit(1)
+  if (JSON.stringify(config.customizations.vscode.extensions) !==
+      JSON.stringify(['anthropic.claude-code', 'openai.chatgpt'])) process.exit(1)
+}
+NODE
   assert_file "$project/IB/CANON/CANON_ARTIFACTS/README.md"
   for skill in \
     tressoir-artifact-md tressoir-artifact-html tressoir-plan \

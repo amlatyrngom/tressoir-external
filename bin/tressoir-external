@@ -33,6 +33,7 @@ CLAUDE_SETTINGS_TMP=""
 OVERRIDE_ACTIVE_STAGE=""
 OVERRIDE_ACTIVE_BACKUP=""
 OVERRIDE_ACTIVE_DESTINATION=""
+ISOLATION_RENDER_TMP=""
 
 SKILLS=(
   "tressoir-artifact-md"
@@ -71,8 +72,16 @@ cleanup_override_swap() {
   OVERRIDE_ACTIVE_DESTINATION=""
 }
 
+cleanup_isolation_render_tmp() {
+  if [ -n "$ISOLATION_RENDER_TMP" ]; then
+    rm -rf "$ISOLATION_RENDER_TMP" 2>/dev/null || true
+    ISOLATION_RENDER_TMP=""
+  fi
+}
+
 cleanup_runtime_tmp() {
   cleanup_override_swap
+  cleanup_isolation_render_tmp
   cleanup_claude_settings_tmp
 }
 
@@ -104,9 +113,9 @@ When Claude is selected, it also writes Tressoir defaults into .claude/settings.
 into any existing file with jq or python3 and preserving other settings.
 
 Options:
-  --claude           Link portable skills into .claude/skills/
-  --codex            Link portable skills into .agents/skills/
-  --pi               Link portable skills into .agents/skills/
+  --claude           Link Claude skills and select its container CLI/extension
+  --codex            Link Codex skills and select its container CLI/extension
+  --pi               Link Pi skills and select its container CLI
   --register-guidance
                      Register IB/TRESSOIR.md, IB/STATE.md, and
                      IB/CANON/ROOT_CANON.md in selected harness prompt files
@@ -579,6 +588,73 @@ install_skill_if_absent() {
   fatal "failed to copy canonical skill tree: $relative"
 }
 
+selected_harness_targets() {
+  local result
+  result=""
+  if [ "$CLAUDE" -eq 1 ]; then
+    result="claude"
+  fi
+  if [ "$CODEX" -eq 1 ]; then
+    if [ -n "$result" ]; then result="$result,codex"; else result="codex"; fi
+  fi
+  if [ "$PI" -eq 1 ]; then
+    if [ -n "$result" ]; then result="$result,pi"; else result="pi"; fi
+  fi
+  printf '%s\n' "$result"
+}
+
+selected_vscode_extensions() {
+  local result
+  result=""
+  if [ "$CLAUDE" -eq 1 ]; then
+    result='"anthropic.claude-code"'
+  fi
+  if [ "$CODEX" -eq 1 ]; then
+    if [ -n "$result" ]; then
+      result="$result, \"openai.chatgpt\""
+    else
+      result='"openai.chatgpt"'
+    fi
+  fi
+  printf '%s\n' "$result"
+}
+
+render_isolation_file() {
+  local source destination targets extensions
+  source="$1"
+  destination="$2"
+  targets=$(selected_harness_targets)
+  extensions=$(selected_vscode_extensions)
+
+  case "$(basename -- "$source")" in
+    *.devcontainer.json)
+      sed \
+        -e "s|__TRESSOIR_AGENT_TARGETS__|$targets|g" \
+        -e "s|\"__TRESSOIR_VSCODE_EXTENSIONS__\"|$extensions|g" \
+        "$source" > "$destination" ||
+        fatal "failed to render isolation configuration: $(basename -- "$source")"
+      if grep -F '__TRESSOIR_' "$destination" >/dev/null 2>&1; then
+        fatal "unresolved isolation configuration marker: $(basename -- "$source")"
+      fi
+      ;;
+    *)
+      cp -p "$source" "$destination" ||
+        fatal "failed to stage isolation file: $(basename -- "$source")"
+      ;;
+  esac
+}
+
+stage_isolation_starter() {
+  local parent stage file
+  parent="$1"
+  stage=$(mktemp -d "$parent/.tressoir-isolation-render.XXXXXX") ||
+    fatal "failed to stage the rendered isolation starter"
+  ISOLATION_RENDER_TMP="$stage"
+  for file in README.md user.devcontainer.json agent.devcontainer.json agent-setup.sh; do
+    render_isolation_file "$PAYLOAD/isolation/$file" "$stage/$file"
+  done
+}
+
 install_isolation_if_absent() {
   local source relative destination file stage
   source="$PAYLOAD/isolation"
@@ -592,11 +668,10 @@ install_isolation_if_absent() {
         say "would override isolation starter: $relative"
         return 0
       fi
-      stage=$(mktemp -d "$ROOT/IB/.tressoir-override-isolation.XXXXXX") ||
-        fatal "failed to stage isolation starter: $relative"
-      rmdir "$stage" || fatal "failed to prepare isolation starter stage: $relative"
+      stage_isolation_starter "$ROOT/IB"
+      stage="$ISOLATION_RENDER_TMP"
+      ISOLATION_RENDER_TMP=""
       OVERRIDE_ACTIVE_STAGE="$stage"
-      cp -R "$source" "$stage" || fatal "failed to stage isolation starter: $relative"
       replace_staged_path "$stage" "$relative" "isolation starter"
       return 0
     fi
@@ -608,19 +683,25 @@ install_isolation_if_absent() {
       fi
       mkdir "$destination" || fatal "failed to create isolation starter directory: $relative"
     fi
+    stage_isolation_starter "$ROOT/IB"
+    stage="$ISOLATION_RENDER_TMP"
     for file in README.md user.devcontainer.json agent.devcontainer.json agent-setup.sh; do
-      override_managed_file "$source/$file" "$relative/$file" "isolation starter file"
+      override_managed_file "$stage/$file" "$relative/$file" "isolation starter file"
     done
+    cleanup_isolation_render_tmp
     return 0
   fi
 
   if occupied "$destination"; then
     if [ -d "$destination" ] && [ ! -L "$destination" ]; then
-      if diff -qr "$source" "$destination" >/dev/null 2>&1; then
+      stage_isolation_starter "$ROOT/IB"
+      stage="$ISOLATION_RENDER_TMP"
+      if diff -qr "$stage" "$destination" >/dev/null 2>&1; then
         say "already installed isolation starter: $relative"
       else
         degrade "$relative (existing isolation tree differs; preserving it as a whole)"
       fi
+      cleanup_isolation_render_tmp
       return 0
     fi
     degrade "$relative (expected a real directory for the isolation starter)"
@@ -632,12 +713,74 @@ install_isolation_if_absent() {
     return 0
   fi
 
-  mkdir "$destination" || fatal "failed to create isolation starter directory: $relative"
-  if cp -R "$source/." "$destination/"; then
+  stage_isolation_starter "$ROOT/IB"
+  stage="$ISOLATION_RENDER_TMP"
+  if mv "$stage" "$destination"; then
+    ISOLATION_RENDER_TMP=""
     say "created isolation starter: $relative"
     return 0
   fi
   fatal "failed to copy isolation starter: $relative"
+}
+
+isolation_config_is_usable() {
+  local relative path
+  relative="$1"
+  path="$ROOT/IB/isolation/$relative"
+  if [ "$DRY_RUN" -eq 1 ] && ! occupied "$path"; then
+    return 0
+  fi
+  [ -f "$path" ] && [ ! -L "$path" ]
+}
+
+link_devcontainer_config() {
+  local relative target destination current
+  relative="$1"
+  target="$2"
+  destination="$ROOT/$relative"
+
+  if [ -L "$destination" ]; then
+    current=$(readlink "$destination" 2>/dev/null || true)
+    if [ "$current" = "$target" ]; then
+      say "already linked: $relative -> $target"
+      return 0
+    fi
+    degrade "$relative (existing symlink target is '$current'; preserving it)"
+  elif [ -e "$destination" ]; then
+    degrade "$relative (occupied by a user-owned Dev Container configuration)"
+  elif [ "$DRY_RUN" -eq 1 ]; then
+    say "would link: $relative -> $target"
+    return 0
+  elif ln -s "$target" "$destination" 2>/dev/null; then
+    say "linked: $relative -> $target"
+    return 0
+  elif occupied "$destination"; then
+    degrade "$relative (appeared while creating the Dev Container link)"
+  else
+    fatal "failed to create Dev Container link: $relative"
+  fi
+
+  say "manual action: keep $relative synchronized with IB/isolation/$(basename -- "$target")"
+  return 1
+}
+
+setup_devcontainer_links() {
+  local mode relative target
+  say ""
+  say "Dev Container configurations:"
+  for mode in user agent; do
+    if ! isolation_config_is_usable "$mode.devcontainer.json"; then
+      degrade "IB/isolation/$mode.devcontainer.json (not safely usable for a Dev Container link)"
+      continue
+    fi
+    if ! ensure_dir ".devcontainer/$mode"; then
+      say "manual action: expose IB/isolation/$mode.devcontainer.json through .devcontainer/$mode/devcontainer.json"
+      continue
+    fi
+    relative=".devcontainer/$mode/devcontainer.json"
+    target="../../IB/isolation/$mode.devcontainer.json"
+    link_devcontainer_config "$relative" "$target" || true
+  done
 }
 
 skill_is_usable() {
@@ -1313,6 +1456,7 @@ for skill in "${SKILLS[@]}"; do
   install_skill_if_absent "$skill" || true
 done
 install_isolation_if_absent
+setup_devcontainer_links
 
 if [ "$CLAUDE" -eq 1 ]; then
   setup_claude_skills
