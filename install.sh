@@ -4,8 +4,8 @@
 # Designed for: curl -fsSL <raw-url> | bash
 # Prompts use /dev/tty because standard input contains this script.
 # Pass --override (including with `curl ... | bash -s -- --override`) to refresh
-# installer-owned IB payload while preserving STATE.md, every *CANON.md,
-# ARTIFACTS, TMP, and unknown IB paths.
+# installer-owned IB payload while preserving adapted IB/isolation, STATE.md,
+# every *CANON.md, ARTIFACTS, TMP, and unknown IB paths.
 
 set -euo pipefail
 
@@ -28,9 +28,10 @@ Usage: install.sh [--override]
 Downloads Tressoir External, asks which integrations to install, and removes
 the temporary source/build tree afterward.
 
-  --override  Refresh installer-owned IB files, bundled skills, isolation
-              templates, selected adapters, and the supplied VSIX. Preserve
-              STATE.md, every *CANON.md, ARTIFACTS, TMP, and unknown IB paths.
+  --override  Refresh installer-owned IB files, bundled skills and isolation
+              reference templates, selected adapters, and the supplied VSIX.
+              Preserve adapted IB/isolation, STATE.md, every *CANON.md,
+              ARTIFACTS, TMP, and unknown IB paths.
   -h, --help  Show this help.
 
 Piped form:
@@ -97,10 +98,9 @@ open_prompt_tty() {
 }
 
 choose() {
-  local label default supplied answer suffix
+  local label supplied answer
   label="$1"
-  default="$2"
-  supplied="$3"
+  supplied="$2"
 
   if [ -n "$supplied" ]; then
     choice_from_value "$supplied" ||
@@ -109,27 +109,14 @@ choose() {
   fi
 
   open_prompt_tty
-  if [ "$default" -eq 1 ]; then
-    suffix="[Y/n]"
-  else
-    suffix="[y/N]"
-  fi
 
   while :; do
-    printf '%s %s ' "$label" "$suffix" >&3
+    printf '%s [y/n] ' "$label" >&3
     IFS= read -r answer <&3 || fatal "could not read an interactive choice"
-    case "$answer" in
-      "")
-        CHOICE_RESULT="$default"
-        return
-        ;;
-      *)
-        if choice_from_value "$answer"; then
-          return
-        fi
-        printf '%s\n' "Please answer yes or no." >&3
-        ;;
-    esac
+    if choice_from_value "$answer"; then
+      return
+    fi
+    printf '%s\n' "Please answer yes or no." >&3
   done
 }
 
@@ -142,16 +129,16 @@ say "Tressoir External"
 say "  target project: $TARGET_INPUT"
 say ""
 
-choose "Install the Tressoir Artifacts VS Code extension?" 1 \
+choose "Install the Tressoir Artifacts VS Code extension?" \
   "${TRESSOIR_EXTERNAL_VSCODE:-}"
 INSTALL_VSCODE="$CHOICE_RESULT"
-choose "Set up Claude Code skills and Dev Container tools?" 0 \
+choose "Set up Claude Code skills and Dev Container tools?" \
   "${TRESSOIR_EXTERNAL_CLAUDE:-}"
 INSTALL_CLAUDE="$CHOICE_RESULT"
-choose "Set up OpenAI Codex skills and Dev Container tools?" 0 \
+choose "Set up OpenAI Codex skills and Dev Container tools?" \
   "${TRESSOIR_EXTERNAL_CODEX:-}"
 INSTALL_CODEX="$CHOICE_RESULT"
-choose "Set up Pi skills and Dev Container tools?" 0 \
+choose "Set up Pi skills and Dev Container tools?" \
   "${TRESSOIR_EXTERNAL_PI:-}"
 INSTALL_PI="$CHOICE_RESULT"
 
@@ -159,7 +146,7 @@ INSTALL_GUIDANCE=0
 if [ "$INSTALL_CLAUDE" -eq 1 ] ||
    [ "$INSTALL_CODEX" -eq 1 ] ||
    [ "$INSTALL_PI" -eq 1 ]; then
-  choose "Register root guidance in system prompts?" 0 \
+  choose "Register root guidance in system prompts?" \
     "${TRESSOIR_EXTERNAL_GUIDANCE:-}"
   INSTALL_GUIDANCE="$CHOICE_RESULT"
 fi

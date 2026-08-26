@@ -52,6 +52,20 @@ assert_absent() {
   }
 }
 
+digest_tree() {
+  local directory
+  directory="$1"
+  (
+    cd "$directory" || exit 1
+    find . -type f -print | LC_ALL=C sort | while IFS= read -r file; do
+      shasum -a 256 "$file"
+    done
+    find . -type l -print | LC_ALL=C sort | while IFS= read -r link; do
+      printf 'link %s -> %s\n' "$link" "$(readlink "$link")"
+    done
+  )
+}
+
 make_source_archive() {
   local tree top archive
   tree="$TMP_ROOT/archive-tree"
@@ -147,6 +161,10 @@ case_piped_source_install() (
   assert_file "$project/IB/isolation/user.devcontainer.json"
   assert_file "$project/IB/isolation/agent.devcontainer.json"
   assert_file "$project/IB/isolation/agent-setup.sh"
+  assert_file "$project/IB/skills/tressoir-isolation/templates/README.template.md"
+  assert_file "$project/IB/skills/tressoir-isolation/templates/user.devcontainer.template.json"
+  assert_file "$project/IB/skills/tressoir-isolation/templates/agent.devcontainer.template.json"
+  assert_file "$project/IB/skills/tressoir-isolation/templates/agent-setup.template.sh"
   assert_link "$project/.devcontainer/user/devcontainer.json" \
     "../../IB/isolation/user.devcontainer.json"
   assert_link "$project/.devcontainer/agent/devcontainer.json" \
@@ -223,8 +241,13 @@ NODE
   printf 'PROTECTED STATE\n' > "$project/IB/STATE.md"
   printf 'PROTECTED ROOT CANON\n' > "$project/IB/CANON/ROOT_CANON.md"
   printf 'EDITED SKILL\n' > "$project/IB/skills/tressoir-isolation/SKILL.md"
+  printf 'EDITED ADAPTED ISOLATION\n' > "$project/IB/isolation/README.md"
+  printf 'STALE REFERENCE\n' \
+    > "$project/IB/skills/tressoir-isolation/templates/README.template.md"
   shasum -a 256 "$project/IB/STATE.md" "$project/IB/CANON/ROOT_CANON.md" \
     > "$TMP_ROOT/bootstrap-override-protected-before.txt"
+  digest_tree "$project/IB/isolation" \
+    > "$TMP_ROOT/bootstrap-override-isolation-before.txt"
 
   override_output="$TMP_ROOT/bootstrap-override.log"
   cat "$REPO/install.sh" | env \
@@ -244,11 +267,19 @@ NODE
   cmp "$REPO/share/tressoir-external/seeds/TASK.md" "$project/IB/TASK.md"
   cmp "$REPO/share/tressoir-external/skills/tressoir-isolation/SKILL.md" \
     "$project/IB/skills/tressoir-isolation/SKILL.md"
+  cmp "$REPO/share/tressoir-external/skills/tressoir-isolation/templates/README.template.md" \
+    "$project/IB/skills/tressoir-isolation/templates/README.template.md"
+  digest_tree "$project/IB/isolation" \
+    > "$TMP_ROOT/bootstrap-override-isolation-after.txt"
+  diff -u "$TMP_ROOT/bootstrap-override-isolation-before.txt" \
+    "$TMP_ROOT/bootstrap-override-isolation-after.txt"
   shasum -a 256 "$project/IB/STATE.md" "$project/IB/CANON/ROOT_CANON.md" \
     > "$TMP_ROOT/bootstrap-override-protected-after.txt"
   diff -u "$TMP_ROOT/bootstrap-override-protected-before.txt" \
     "$TMP_ROOT/bootstrap-override-protected-after.txt"
   grep 'managed payload: override' "$override_output" >/dev/null
+  grep 'reference templates refreshed under IB/skills/tressoir-isolation/templates' \
+    "$override_output" >/dev/null
   grep 'installed: tressoir.tressoir-artifacts@0.1.5' "$override_output" >/dev/null
   [ -z "$(find "$ephemeral" -mindepth 1 -print -quit)" ]
 )
@@ -272,6 +303,15 @@ case_nothing_selected() (
   grep 'Nothing selected; no files were changed.' "$output" >/dev/null
 )
 
+case_consistent_interactive_choices() (
+  set -e
+  grep -F "printf '%s [y/n] '" "$REPO/install.sh" >/dev/null
+  if grep -E '\[(Y/n|y/N)\]' "$REPO/install.sh" "$REPO/README.md"; then
+    return 1
+  fi
+  grep -F 'Please answer yes or no.' "$REPO/install.sh" >/dev/null
+)
+
 case_piped_source_install
 status=$?
 if [ "$status" -eq 0 ]; then
@@ -286,6 +326,14 @@ if [ "$status" -eq 0 ]; then
   pass "noninteractive no-selection path makes no changes"
 else
   fail "noninteractive no-selection path makes no changes"
+fi
+
+case_consistent_interactive_choices
+status=$?
+if [ "$status" -eq 0 ]; then
+  pass "interactive choices use one explicit y/n contract"
+else
+  fail "interactive choices use one explicit y/n contract"
 fi
 
 printf '\nResult: %s passed, %s failed\n' "$PASS" "$FAIL"

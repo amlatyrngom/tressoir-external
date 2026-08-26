@@ -4,6 +4,11 @@ These are adaptable starting points. Ask an agent to inspect your project and ta
 configuration's image, features, extensions, ports, environment, and lifecycle commands to your
 actual stack while preserving the boundary described below.
 
+The files in `IB/isolation/` are the project's adapted copies. Tressoir upgrades preserve them.
+Fresh installer-owned references live under `IB/skills/tressoir-isolation/templates/`; after an
+upgrade, ask an agent to compare those `.template` files with these adapted copies and port only
+the relevant upstream changes without losing project-specific choices.
+
 | What you want | Start from | Result |
 |---|---|---|
 | You and the agent share one Dev Container | `user.devcontainer.json` | The project stays mounted read-write from the host. |

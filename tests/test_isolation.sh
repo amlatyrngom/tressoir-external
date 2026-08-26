@@ -3,7 +3,7 @@
 set -u
 
 REPO=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P) || exit 1
-HELPER="$REPO/share/tressoir-external/isolation/agent-setup.sh"
+HELPER="$REPO/share/tressoir-external/skills/tressoir-isolation/templates/agent-setup.template.sh"
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/tressoir-isolation-tests.XXXXXX") || exit 1
 PASS=0
 FAIL=0

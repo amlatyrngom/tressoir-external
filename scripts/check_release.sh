@@ -117,9 +117,9 @@ for skill in "$PAYLOAD"/skills/*; do
   npx --yes skills-ref@0.1.5 validate "$skill"
 done
 
-node - "$PAYLOAD/isolation/user.devcontainer.json" \
-  "$PAYLOAD/isolation/agent.devcontainer.json" \
-  "$PAYLOAD/isolation/agent-setup.sh" <<'NODE'
+node - "$PAYLOAD/skills/tressoir-isolation/templates/user.devcontainer.template.json" \
+  "$PAYLOAD/skills/tressoir-isolation/templates/agent.devcontainer.template.json" \
+  "$PAYLOAD/skills/tressoir-isolation/templates/agent-setup.template.sh" <<'NODE'
 const fs = require('fs')
 const { spawnSync } = require('child_process')
 const [userPath, agentPath, setupPath] = process.argv.slice(2)

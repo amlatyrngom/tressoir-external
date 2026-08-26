@@ -62,7 +62,7 @@ The installer asks separately whether to:
 When at least one agent harness is selected, it also asks:
 
 ```text
-Register root guidance in system prompts? [y/N]
+Register root guidance in system prompts? [y/n]
 ```
 
 If accepted, the managed `# Tressoir Guidance` section directly names
@@ -98,6 +98,17 @@ TRESSOIR_EXTERNAL_CODEX=yes \
 TRESSOIR_EXTERNAL_PI=yes \
 TRESSOIR_EXTERNAL_GUIDANCE=yes \
   bash -c 'curl -fsSL https://raw.githubusercontent.com/amlatyrngom/tressoir-external/main/install.sh | bash'
+```
+
+To install only the VS Code extension from the current project directory:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/amlatyrngom/tressoir-external/main/install.sh | \
+  env TRESSOIR_EXTERNAL_VSCODE=yes \
+      TRESSOIR_EXTERNAL_CLAUDE=no \
+      TRESSOIR_EXTERNAL_CODEX=no \
+      TRESSOIR_EXTERNAL_PI=no \
+  bash
 ```
 
 Accepted choice values are `yes`/`no`, `y`/`n`, `true`/`false`, or `1`/`0`.
@@ -143,8 +154,9 @@ Useful setup options:
 --vsix PATH        Install the supplied Tressoir Artifacts VSIX
 --vscode-bin PATH  Use code-insiders or an absolute VS Code CLI path
 --no-vscode        Skip extension installation
---override         Refresh installer-owned IB payload, selected skill adapters,
-                   and the supplied VSIX while preserving state and canon
+--override         Refresh installer-owned IB payload, skill-owned isolation
+                   references, selected adapters, and the supplied VSIX while
+                   preserving adapted isolation, state, and canon
 --dry-run          Print the plan without changing the project or VS Code
 ```
 
@@ -153,14 +165,17 @@ absent canonical files and collision-checked relative skill links. A second
 identical run is a no-op unless `--override` is supplied.
 
 `--override` is deliberately bounded. It resets `IB/TASK.md`, `IB/TRESSOIR.md`,
-`IB/.gitignore`, the canon-artifacts guide, every bundled skill tree, the four
-managed `IB/isolation/` files, and selected `.claude/skills/` or
+`IB/.gitignore`, the canon-artifacts guide, every bundled skill tree (including
+the isolation reference templates), and selected `.claude/skills/` or
 `.agents/skills/` adapters. It also force-installs the supplied VSIX even when
-the same version is already installed. It preserves `IB/STATE.md`, every
-`*CANON.md`, `IB/ARTIFACTS/`, `IB/TMP/`, extra isolation files, unknown IB
-paths, and root harness guidance outside its normal managed-section behavior.
+the same version is already installed. It preserves the complete adapted
+`IB/isolation/` tree, `IB/STATE.md`, every `*CANON.md`, `IB/ARTIFACTS/`, `IB/TMP/`,
+unknown IB paths, and root harness guidance outside its normal managed-section behavior.
 Skill replacement carries forward any `*CANON.md` stored inside a bundled skill
-tree. Use `--override --dry-run` to inspect this refresh without writing.
+tree. After an override, ask an agent to compare the refreshed references under
+`IB/skills/tressoir-isolation/templates/` with the adapted files and port only
+the relevant upstream changes. Use `--override --dry-run` to inspect this refresh without
+writing.
 
 The older `tressoir.bridge` extension owns the same artifact editor view types
 and cannot be enabled alongside this standalone extension. The VS Code CLI
@@ -235,8 +250,11 @@ The host-aligned non-root `vscode` user has passwordless `sudo`; startup repairs
 home and cache ownership so ordinary tool output remains user-owned while system administration is
 unrestricted.
 
-The four-file starter is create-only by default. With `--override`, setup refreshes those four
-managed files while preserving any additional project-specific files in `IB/isolation/`.
+The adapted four-file starter is always create-only. Installer-owned bases live under
+`IB/skills/tressoir-isolation/templates/` with `.template` names. `--override` refreshes those
+references but leaves every byte under `IB/isolation/` untouched. Ask an agent to reconcile a new
+reference into the adapted files while preserving project-specific image, features, mounts,
+extensions, lifecycle commands, and selected harnesses.
 
 ## Optional root guidance registration
 
@@ -244,7 +262,7 @@ Canonical guidance is installed as `IB/TRESSOIR.md`. The interactive installer
 can register it in root harness instruction files when you answer yes to:
 
 ```text
-Register root guidance in system prompts? [y/N]
+Register root guidance in system prompts? [y/n]
 ```
 
 The equivalent direct setup option is `--register-guidance`.

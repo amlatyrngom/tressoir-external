@@ -3,7 +3,8 @@
 # Tressoir External MVP setup for macOS/Linux and Bash 3.2+.
 # Canonical project writes are create-only unless the user explicitly passes
 # --override. Override refreshes only installer-owned payload and preserves
-# STATE.md, every *CANON.md, ARTIFACTS, TMP, and unknown IB paths. Optional
+# adapted IB/isolation, STATE.md, every *CANON.md, ARTIFACTS, TMP, and unknown
+# IB paths. Optional
 # root-guidance registration may append one contained section to selected
 # harness instruction files.
 
@@ -123,9 +124,10 @@ Options:
   --vsix PATH        Tressoir Artifacts VSIX to install
   --vscode-bin PATH  VS Code CLI name or path; defaults to code
   --no-vscode        Do not install a VSIX
-  --override         Refresh installer-owned IB files, bundled skills, isolation
-                     templates, selected adapters, and the supplied VSIX. Preserve
-                     STATE.md, every *CANON.md, ARTIFACTS, TMP, and unknown IB paths.
+  --override         Refresh installer-owned IB files, bundled skills and isolation
+                     reference templates, selected adapters, and the supplied VSIX.
+                     Preserve adapted IB/isolation, STATE.md, every *CANON.md,
+                     ARTIFACTS, TMP, and unknown IB paths.
   --dry-run          Print actions without mutating the project or VS Code
   -h, --help         Show this help
 EOF
@@ -285,9 +287,10 @@ preflight_project() {
     fatal "payload is missing seeds/ROOT_CANON.md"
   [ -f "$PAYLOAD/seeds/CANON_ARTIFACTS_README.md" ] ||
     fatal "payload is missing seeds/CANON_ARTIFACTS_README.md"
-  for rel in README.md user.devcontainer.json agent.devcontainer.json agent-setup.sh; do
-    [ -f "$PAYLOAD/isolation/$rel" ] && [ ! -L "$PAYLOAD/isolation/$rel" ] ||
-      fatal "payload isolation starter is missing a regular file: $rel"
+  for rel in README.template.md user.devcontainer.template.json agent.devcontainer.template.json agent-setup.template.sh; do
+    [ -f "$PAYLOAD/skills/tressoir-isolation/templates/$rel" ] &&
+      [ ! -L "$PAYLOAD/skills/tressoir-isolation/templates/$rel" ] ||
+      fatal "payload isolation reference is missing a regular file: $rel"
   done
 
   if [ "$NO_VSCODE" -eq 0 ]; then
@@ -332,15 +335,6 @@ preflight_override_targets() {
       fatal "$relative is a directory; refusing to replace it with a managed file"
     fi
   done
-
-  destination="$ROOT/IB/isolation"
-  if [ -d "$destination" ] && [ ! -L "$destination" ]; then
-    for file in README.md user.devcontainer.json agent.devcontainer.json agent-setup.sh; do
-      if [ -d "$destination/$file" ] && [ ! -L "$destination/$file" ]; then
-        fatal "IB/isolation/$file is a directory; refusing to replace it with a managed file"
-      fi
-    done
-  fi
 
   for skill in "${SKILLS[@]}"; do
     destination="$ROOT/IB/skills/$skill"
@@ -627,7 +621,7 @@ render_isolation_file() {
   extensions=$(selected_vscode_extensions)
 
   case "$(basename -- "$source")" in
-    *.devcontainer.json)
+    *.devcontainer.template.json)
       sed \
         -e "s|__TRESSOIR_AGENT_TARGETS__|$targets|g" \
         -e "s|\"__TRESSOIR_VSCODE_EXTENSIONS__\"|$extensions|g" \
@@ -645,66 +639,44 @@ render_isolation_file() {
 }
 
 stage_isolation_starter() {
-  local parent stage file
+  local parent stage source_name destination_name
   parent="$1"
   stage=$(mktemp -d "$parent/.tressoir-isolation-render.XXXXXX") ||
     fatal "failed to stage the rendered isolation starter"
   ISOLATION_RENDER_TMP="$stage"
-  for file in README.md user.devcontainer.json agent.devcontainer.json agent-setup.sh; do
-    render_isolation_file "$PAYLOAD/isolation/$file" "$stage/$file"
-  done
+  while read -r source_name destination_name; do
+    render_isolation_file \
+      "$PAYLOAD/skills/tressoir-isolation/templates/$source_name" \
+      "$stage/$destination_name"
+  done <<'EOF'
+README.template.md README.md
+user.devcontainer.template.json user.devcontainer.json
+agent.devcontainer.template.json agent.devcontainer.json
+agent-setup.template.sh agent-setup.sh
+EOF
+}
+
+preserve_isolation_message() {
+  if [ "$OVERRIDE" -eq 1 ] && [ "$DRY_RUN" -eq 1 ]; then
+    say "would preserve adapted isolation tree: IB/isolation (reference templates would refresh under IB/skills/tressoir-isolation/templates; ask an agent to reconcile)"
+  elif [ "$OVERRIDE" -eq 1 ]; then
+    say "preserved adapted isolation tree: IB/isolation (reference templates refreshed under IB/skills/tressoir-isolation/templates; ask an agent to reconcile)"
+  else
+    say "preserved adapted isolation tree: IB/isolation"
+  fi
 }
 
 install_isolation_if_absent() {
-  local source relative destination file stage
-  source="$PAYLOAD/isolation"
+  local relative destination stage
   relative="IB/isolation"
   destination="$ROOT/$relative"
 
-  if [ "$OVERRIDE" -eq 1 ]; then
-    if occupied "$destination" &&
-       { [ ! -d "$destination" ] || [ -L "$destination" ]; }; then
-      if [ "$DRY_RUN" -eq 1 ]; then
-        say "would override isolation starter: $relative"
-        return 0
-      fi
-      stage_isolation_starter "$ROOT/IB"
-      stage="$ISOLATION_RENDER_TMP"
-      ISOLATION_RENDER_TMP=""
-      OVERRIDE_ACTIVE_STAGE="$stage"
-      replace_staged_path "$stage" "$relative" "isolation starter"
-      return 0
-    fi
-
-    if [ ! -d "$destination" ]; then
-      if [ "$DRY_RUN" -eq 1 ]; then
-        say "would create isolation starter: $relative"
-        return 0
-      fi
-      mkdir "$destination" || fatal "failed to create isolation starter directory: $relative"
-    fi
-    stage_isolation_starter "$ROOT/IB"
-    stage="$ISOLATION_RENDER_TMP"
-    for file in README.md user.devcontainer.json agent.devcontainer.json agent-setup.sh; do
-      override_managed_file "$stage/$file" "$relative/$file" "isolation starter file"
-    done
-    cleanup_isolation_render_tmp
-    return 0
-  fi
-
   if occupied "$destination"; then
     if [ -d "$destination" ] && [ ! -L "$destination" ]; then
-      stage_isolation_starter "$ROOT/IB"
-      stage="$ISOLATION_RENDER_TMP"
-      if diff -qr "$stage" "$destination" >/dev/null 2>&1; then
-        say "already installed isolation starter: $relative"
-      else
-        degrade "$relative (existing isolation tree differs; preserving it as a whole)"
-      fi
-      cleanup_isolation_render_tmp
+      preserve_isolation_message
       return 0
     fi
-    degrade "$relative (expected a real directory for the isolation starter)"
+    degrade "$relative (occupied; preserving it because adapted isolation is user-owned)"
     return 0
   fi
 

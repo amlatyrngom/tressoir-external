@@ -205,6 +205,11 @@ case_fresh_all_with_extension() (
   assert_file "$project/IB/isolation/agent.devcontainer.json"
   assert_file "$project/IB/isolation/agent-setup.sh"
   [ "$(find "$project/IB/isolation" -type f | wc -l | tr -d ' ')" -eq 4 ]
+  for reference in \
+    README.template.md user.devcontainer.template.json \
+    agent.devcontainer.template.json agent-setup.template.sh; do
+    assert_file "$project/IB/skills/tressoir-isolation/templates/$reference"
+  done
   assert_isolation_selection \
     "$project" "claude,codex,pi" "anthropic.claude-code,openai.chatgpt"
   assert_link "$project/.devcontainer/user/devcontainer.json" \
@@ -581,7 +586,7 @@ case_preserve_user_files_and_collisions() (
 
   assert_file "$project/.claude/rules/existing.md"
   grep 'preserved:' "$TMP_ROOT/collision.log" >/dev/null
-  grep 'existing isolation tree differs; preserving it as a whole' \
+  grep 'preserved adapted isolation tree: IB/isolation' \
     "$TMP_ROOT/collision.log" >/dev/null
   assert_absent "$project/IB/isolation/README.md"
   grep 'Setup never edits nested Claude, override, rules, global, or Pi SYSTEM.md files' \
@@ -616,6 +621,10 @@ case_override_refreshes_only_managed_payload() (
     > "$project/IB/CANON/CANON_ARTIFACTS/README.md"
   printf 'EDITED SKILL\n' > "$project/IB/skills/tressoir-plan/SKILL.md"
   printf 'STALE SKILL FILE\n' > "$project/IB/skills/tressoir-plan/stale.txt"
+  printf 'STALE ISOLATION REFERENCE\n' \
+    > "$project/IB/skills/tressoir-isolation/templates/README.template.md"
+  printf 'STALE REFERENCE FILE\n' \
+    > "$project/IB/skills/tressoir-isolation/templates/stale.txt"
   printf 'EDITED ISOLATION\n' > "$project/IB/isolation/README.md"
   printf 'USER ISOLATION EXTRA\n' > "$project/IB/isolation/local/user.txt"
   printf 'KEEP ARTIFACT\n' > "$project/IB/ARTIFACTS/KEEP/result.md"
@@ -642,6 +651,7 @@ case_override_refreshes_only_managed_payload() (
     "$project/AGENTS.md"; do
     shasum -a 256 "$file"
   done > "$TMP_ROOT/override-protected-before.txt"
+  digest_tree "$project/IB/isolation" > "$TMP_ROOT/override-isolation-before.txt"
 
   digest_tree "$project" > "$TMP_ROOT/override-dry-before.txt"
   "$SETUP" setup --root "$project" --claude --codex --pi \
@@ -668,10 +678,19 @@ case_override_refreshes_only_managed_payload() (
   assert_absent "$project/IB/skills/tressoir-plan/stale.txt"
   grep -Fx 'USER SKILL CANON' \
     "$project/IB/skills/tressoir-plan/local/LOCAL_CANON.md" >/dev/null
-  cmp "$REPO/share/tressoir-external/isolation/README.md" \
-    "$project/IB/isolation/README.md"
-  cmp "$REPO/share/tressoir-external/isolation/agent-setup.sh" \
-    "$project/IB/isolation/agent-setup.sh"
+  grep -Fx 'EDITED ISOLATION' "$project/IB/isolation/README.md" >/dev/null
+  digest_tree "$project/IB/isolation" > "$TMP_ROOT/override-isolation-after.txt"
+  diff -u "$TMP_ROOT/override-isolation-before.txt" \
+    "$TMP_ROOT/override-isolation-after.txt"
+  for reference in \
+    README.template.md user.devcontainer.template.json \
+    agent.devcontainer.template.json agent-setup.template.sh; do
+    cmp "$REPO/share/tressoir-external/skills/tressoir-isolation/templates/$reference" \
+      "$project/IB/skills/tressoir-isolation/templates/$reference"
+  done
+  assert_absent "$project/IB/skills/tressoir-isolation/templates/stale.txt"
+  grep 'reference templates refreshed under IB/skills/tressoir-isolation/templates' \
+    "$TMP_ROOT/override.log" >/dev/null
   assert_isolation_selection \
     "$project" "claude,codex,pi" "anthropic.claude-code,openai.chatgpt"
   grep -Fx 'USER ISOLATION EXTRA' "$project/IB/isolation/local/user.txt" >/dev/null
@@ -710,7 +729,11 @@ case_override_refreshes_only_managed_payload() (
     "$TMP_ROOT/override-extension.log" >/dev/null
   grep 'manual action: reload the VS Code window' \
     "$TMP_ROOT/override-extension.log" >/dev/null
-  assert_isolation_selection "$project" "codex" "openai.chatgpt"
+  digest_tree "$project/IB/isolation" > "$TMP_ROOT/override-isolation-extension-after.txt"
+  diff -u "$TMP_ROOT/override-isolation-before.txt" \
+    "$TMP_ROOT/override-isolation-extension-after.txt"
+  assert_isolation_selection \
+    "$project" "claude,codex,pi" "anthropic.claude-code,openai.chatgpt"
 
   blocked="$TMP_ROOT/override-blocked"
   mkdir "$blocked"
