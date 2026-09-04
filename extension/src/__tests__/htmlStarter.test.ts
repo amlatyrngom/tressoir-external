@@ -8,6 +8,7 @@ const starterDir = resolve(
   __dirname,
   '../../../share/tressoir-external/skills/tressoir-artifact-html/html_artifact_template',
 )
+const linearAssetsDir = resolve(__dirname, '../notebook/assets/linear')
 const starterHtml = readFileSync(resolve(starterDir, 'ARTIFACT.tressoir.html'), 'utf8')
 const realms: JSDOM[] = []
 
@@ -15,25 +16,48 @@ afterEach(() => {
   while (realms.length > 0) realms.pop()?.window.close()
 })
 
-function localAssets(attribute: 'href' | 'src'): string[] {
+function resourceUrls(attribute: 'href' | 'src'): string[] {
   const pattern = new RegExp(`${attribute}="([^"]+)"`, 'g')
   return Array.from(starterHtml.matchAll(pattern), (match) => match[1])
 }
 
 function evaluate(dom: JSDOM, path: string): void {
-  dom.window.eval(readFileSync(resolve(starterDir, path), 'utf8'))
+  dom.window.eval(readFileSync(resolve(linearAssetsDir, path), 'utf8'))
+}
+
+function localRuntimePath(url: string): string {
+  const pathname = new URL(url).pathname
+  if (pathname.endsWith('/katex.min.js')) return 'vendor/katex/katex.min.js'
+  if (pathname.endsWith('/auto-render.min.js')) return 'vendor/katex/auto-render.min.js'
+  const prismPart = pathname.match(/\/(components|plugins)\/(.+)$/)
+  if (pathname.includes('/prismjs@') && prismPart) {
+    return `vendor/prism/${prismPart[1]}/${prismPart[2]}`
+  }
+  if (pathname.endsWith('/codemirror.min.js')) return 'vendor/codemirror/codemirror.js'
+  if (pathname.endsWith('/mode/xml/xml.min.js')) return 'vendor/codemirror/mode/xml.js'
+  if (pathname.endsWith('/mode/meta.min.js')) return 'vendor/codemirror/mode/meta.js'
+  if (pathname.endsWith('/mode/markdown/markdown.min.js')) {
+    return 'vendor/codemirror/mode/markdown.js'
+  }
+  if (pathname.endsWith('/tressoir-linear.js')) return 'tressoir-linear.js'
+  throw new Error(`No local test fixture for remote runtime: ${url}`)
 }
 
 describe('portable linear HTML starter', () => {
-  it('references only present local assets and keeps feedback as the final authored block', () => {
-    const assets = [...localAssets('href'), ...localAssets('src')]
+  it('references only pinned HTTPS assets and keeps feedback as the final authored block', () => {
+    const hrefs = resourceUrls('href')
+    const assets = [...hrefs.filter((url) => url !== './SIBLING.md'), ...resourceUrls('src')]
     expect(assets.length).toBeGreaterThan(10)
     for (const asset of assets) {
-      expect(asset).toMatch(/^\.\//)
-      expect(asset).not.toMatch(/^\.\.\//)
-      expect(existsSync(resolve(starterDir, asset))).toBe(true)
+      expect(asset).toMatch(/^https:\/\//)
+      expect(asset).not.toMatch(/(?:@|\/)latest(?:\/|$)/)
+      expect(asset).not.toMatch(/(?:@|\/)main(?:\/|$)/)
     }
-    expect(starterHtml).not.toMatch(/(?:src|href)="https?:\/\//)
+    expect(hrefs.filter((url) => !url.startsWith('https://'))).toEqual(['./SIBLING.md'])
+    expect(resourceUrls('src').every((url) => url.startsWith('https://'))).toBe(true)
+    expect(existsSync(resolve(starterDir, 'vendor'))).toBe(false)
+    expect(existsSync(resolve(starterDir, 'tressoir-linear.css'))).toBe(false)
+    expect(existsSync(resolve(starterDir, 'tressoir-linear.js'))).toBe(false)
 
     const dom = new JSDOM(starterHtml)
     realms.push(dom)
@@ -106,7 +130,7 @@ describe('portable linear HTML starter', () => {
       '<svg id="inline-svg" data-tressoir-inline viewBox="0 0 10 10"></svg>',
     )
 
-    const scripts = localAssets('src').map((path) => path.replace(/^\.\//, ''))
+    const scripts = resourceUrls('src').map(localRuntimePath)
     for (const script of scripts) evaluate(dom, script)
     dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'))
 

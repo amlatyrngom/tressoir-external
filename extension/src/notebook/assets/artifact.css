@@ -1,5 +1,5 @@
 /* Markdown-only adapters. The canonical visual and component contract lives in
-   share/.../html_artifact_template/tressoir-linear.css and is bundled unchanged. */
+   assets/linear/tressoir-linear.css and is bundled unchanged. */
 
 #app { padding: 0 !important; }
 .notebook-shell { gap: 0 !important; }

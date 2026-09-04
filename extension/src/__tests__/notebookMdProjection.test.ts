@@ -13,10 +13,7 @@ const remarkPath = resolve(assetsDir, 'core/tressoir-remark.umd.js')
 const yamlPath = resolve(assetsDir, 'core/js-yaml.min.js')
 const runtimePath = resolve(assetsDir, 'tressoir-md.js')
 const artifactCssPath = resolve(assetsDir, 'artifact.css')
-const linearDir = resolve(
-  __dirname,
-  '../../../share/tressoir-external/skills/tressoir-artifact-html/html_artifact_template',
-)
+const linearDir = resolve(assetsDir, 'linear')
 const corePresent = existsSync(remarkPath) && existsSync(yamlPath) && existsSync(runtimePath)
 
 // Evaluate a classic/UMD script into the current jsdom global. The core bundles attach to

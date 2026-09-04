@@ -5,8 +5,8 @@ set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 EXTENSION="$ROOT/extension"
 PAYLOAD="$ROOT/share/tressoir-external"
-LINEAR_SOURCE="$PAYLOAD/skills/tressoir-artifact-html/html_artifact_template"
-VERSION="0.1.6"
+LINEAR_SOURCE="$EXTENSION/src/notebook/assets/linear"
+VERSION="0.1.7"
 VSIX="$EXTENSION/dist/tressoir-artifacts-$VERSION.vsix"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/tressoir-release-check.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
@@ -28,7 +28,8 @@ cmp "$EXTENSION/src/notebook/assets/tressoir-md.js" \
   "$PAYLOAD/skills/tressoir-artifact-md/references/runtime/tressoir-md.js"
 cmp "$EXTENSION/src/notebook/assets/tressoir-md.js" "$TMP/tressoir-md.js"
 
-# The reviewed HTML starter is the single source for both HTML copies and Markdown's VSIX assets.
+# The extension-owned linear runtime is the source for Markdown's VSIX assets. The HTML starter
+# references a pinned public copy instead of duplicating these bytes into every installed skill.
 for source in "$LINEAR_SOURCE/tressoir-linear.css" "$LINEAR_SOURCE/tressoir-linear.js" \
   $(find "$LINEAR_SOURCE/vendor" -type f | LC_ALL=C sort); do
   rel=${source#"$LINEAR_SOURCE/"}
@@ -48,6 +49,9 @@ done
 grep -F 'KaTeX 0.18.4' "$LINEAR_SOURCE/vendor/README.md" >/dev/null
 grep -F 'PrismJS 1.30.0' "$LINEAR_SOURCE/vendor/README.md" >/dev/null
 grep -F 'CodeMirror 5.65.16' "$LINEAR_SOURCE/vendor/README.md" >/dev/null
+[ ! -e "$PAYLOAD/skills/tressoir-artifact-html/html_artifact_template/vendor" ]
+[ ! -e "$PAYLOAD/skills/tressoir-artifact-html/html_artifact_template/tressoir-linear.css" ]
+[ ! -e "$PAYLOAD/skills/tressoir-artifact-html/html_artifact_template/tressoir-linear.js" ]
 grep -F 'free_form_feedback' "$TMP/extension.js" >/dev/null
 grep -F 'tressoir.bridge' "$TMP/extension.js" >/dev/null
 
@@ -65,7 +69,7 @@ node - "$TMP/package.json" <<'NODE'
 const fs = require('fs')
 const manifest = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
 const identity = `${manifest.publisher}.${manifest.name}@${manifest.version}`
-if (identity !== 'tressoir.tressoir-artifacts@0.1.6') {
+if (identity !== 'tressoir.tressoir-artifacts@0.1.7') {
   throw new Error(`unexpected packaged identity: ${identity}`)
 }
 if (manifest.license !== 'MIT') {

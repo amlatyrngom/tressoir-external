@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as vscode from 'vscode'
 import { JSDOM } from 'jsdom'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
 import { resolve as resolvePath } from 'path'
 import { ColorThemeKind } from './mocks/vscode'
-import { TressoirNotebookEditorProvider, fetchRemote } from '../notebook/provider'
+import {
+  TressoirNotebookEditorProvider,
+  bundledHtmlAssetPath,
+  fetchRemote,
+} from '../notebook/provider'
 import { clearNotebookState } from '../notebook/state'
 function createDocument(text: string, version = 1) {
   return {
@@ -193,6 +199,54 @@ describe('notebook provider JS support (CSP / base / resource roots)', () => {
     expect(html).toContain('data-interactions-file="linear.interactions.json"')
     expect(html).not.toContain('core/prism.js')
     expect(html).not.toContain('core/codemirror.js')
+  })
+
+  it('uses a bundled local asset for a known pinned HTML URL and keeps HTTPS as fallback', () => {
+    const root = mkdtempSync(resolvePath(tmpdir(), 'tressoir-html-assets-'))
+    try {
+      const relative = 'linear/tressoir-linear.css'
+      const local = resolvePath(root, 'dist/assets', relative)
+      mkdirSync(resolvePath(local, '..'), { recursive: true })
+      writeFileSync(local, '/* fixture */')
+      const url =
+        'https://cdn.jsdelivr.net/gh/amlatyrngom/tressoir-external@v0.1.7/extension/src/notebook/assets/linear/tressoir-linear.css'
+      expect(bundledHtmlAssetPath(url)).toBe(relative)
+
+      const provider = new TressoirNotebookEditorProvider({
+        extensionUri: vscode.Uri.file(root),
+      } as unknown as vscode.ExtensionContext)
+      const webview = createPanel().webview
+      const source = `<link rel="stylesheet" href="${url}"><script src="https://example.test/custom.js"></script>`
+      const rewritten = (provider as any).sourceHtmlForWebview(source, webview)
+      expect(rewritten).toContain(local)
+      expect(rewritten).toContain('https://example.test/custom.js')
+
+      rmSync(local)
+      expect((provider as any).sourceHtmlForWebview(source, webview)).toBe(source)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('maps every remote starter dependency to a bundled byte source', () => {
+    const extensionRoot = resolvePath(__dirname, '../..')
+    const template = readFileSync(
+      resolvePath(
+        extensionRoot,
+        '../share/tressoir-external/skills/tressoir-artifact-html/html_artifact_template/ARTIFACT.tressoir.html',
+      ),
+      'utf8',
+    )
+    const urls = Array.from(
+      template.matchAll(/\b(?:src|href)="(https:\/\/[^" ]+)"/g),
+      (match) => match[1],
+    )
+    expect(urls.length).toBeGreaterThan(10)
+    for (const url of urls) {
+      const relative = bundledHtmlAssetPath(url)
+      expect(relative, url).toBeDefined()
+      expect(existsSync(resolvePath(extensionRoot, 'src/notebook/assets', relative!)), url).toBe(true)
+    }
   })
 })
 

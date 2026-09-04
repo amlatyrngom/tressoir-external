@@ -134,7 +134,7 @@ case "${1:-}" in
     if [ -n "${MOCK_CODE_INSTALL_LOG:-}" ]; then
       printf '%s\n' "$*" >> "$MOCK_CODE_INSTALL_LOG"
     fi
-    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.6' > "$MOCK_CODE_STATE"
+    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.7' > "$MOCK_CODE_STATE"
     printf '%s\n' 'mock installation succeeded'
     ;;
   *)
@@ -199,6 +199,12 @@ case_fresh_all_with_extension() (
   assert_absent "$project/IB/skills/tressoir-memory"
   assert_absent "$project/.claude/skills/tressoir-memory"
   assert_absent "$project/.agents/skills/tressoir-memory"
+  assert_absent "$project/IB/skills/tressoir-artifact-html/html_artifact_template/vendor"
+  assert_absent "$project/IB/skills/tressoir-artifact-html/html_artifact_template/tressoir-linear.css"
+  assert_absent "$project/IB/skills/tressoir-artifact-html/html_artifact_template/tressoir-linear.js"
+  grep -F 'https://cdn.jsdelivr.net/npm/katex@0.18.4/' \
+    "$project/IB/skills/tressoir-artifact-html/html_artifact_template/ARTIFACT.tressoir.html" \
+    >/dev/null
 
   assert_file "$project/IB/isolation/README.md"
   assert_file "$project/IB/isolation/user.devcontainer.json"
@@ -233,7 +239,7 @@ case_fresh_all_with_extension() (
   assert_absent "$project/AGENTS.md"
   assert_absent "$project/.claude/rules"
   assert_absent "$project/.pi"
-  grep -Fx 'tressoir.tressoir-artifacts@0.1.6' "$state" >/dev/null
+  grep -Fx 'tressoir.tressoir-artifacts@0.1.7' "$state" >/dev/null
 
   digest_tree "$project" > "$TMP_ROOT/fresh-before.txt"
   MOCK_CODE_STATE="$state" "$SETUP" setup \
@@ -243,7 +249,7 @@ case_fresh_all_with_extension() (
   digest_tree "$project" > "$TMP_ROOT/fresh-after.txt"
   diff -u "$TMP_ROOT/fresh-before.txt" "$TMP_ROOT/fresh-after.txt"
   grep 'already linked' "$TMP_ROOT/fresh-rerun.log" >/dev/null
-  grep 'already installed: tressoir.tressoir-artifacts@0.1.6' \
+  grep 'already installed: tressoir.tressoir-artifacts@0.1.7' \
     "$TMP_ROOT/fresh-rerun.log" >/dev/null
 )
 
@@ -289,8 +295,8 @@ case_extension_upgrade() (
     --root "$project" --vsix "$vsix" --vscode-bin "$mock" \
     > "$TMP_ROOT/extension-upgrade.log"
 
-  [ "$(cat "$state")" = 'tressoir.tressoir-artifacts@0.1.6' ]
-  grep 'installed: tressoir.tressoir-artifacts@0.1.6' \
+  [ "$(cat "$state")" = 'tressoir.tressoir-artifacts@0.1.7' ]
+  grep 'installed: tressoir.tressoir-artifacts@0.1.7' \
     "$TMP_ROOT/extension-upgrade.log" >/dev/null
   grep 'reload the VS Code window or close and reopen affected artifact tabs' \
     "$TMP_ROOT/extension-upgrade.log" >/dev/null
@@ -719,13 +725,13 @@ case_override_refreshes_only_managed_payload() (
   vsix="$TMP_ROOT/mock-override.vsix"
   make_mock_code "$mock"
   make_mock_vsix "$vsix"
-  printf 'tressoir.tressoir-artifacts@0.1.6\n' > "$state"
+  printf 'tressoir.tressoir-artifacts@0.1.7\n' > "$state"
   MOCK_CODE_STATE="$state" MOCK_CODE_INSTALL_LOG="$install_log" \
     "$SETUP" setup --root "$project" --codex --override \
       --vsix "$vsix" --vscode-bin "$mock" > "$TMP_ROOT/override-extension.log"
   grep -E '^--install-extension .*mock-override\.vsix --force$' \
     "$install_log" >/dev/null
-  grep 'installed: tressoir.tressoir-artifacts@0.1.6' \
+  grep 'installed: tressoir.tressoir-artifacts@0.1.7' \
     "$TMP_ROOT/override-extension.log" >/dev/null
   grep 'manual action: reload the VS Code window' \
     "$TMP_ROOT/override-extension.log" >/dev/null

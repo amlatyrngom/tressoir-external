@@ -75,6 +75,46 @@ type NotebookInboundMessage =
       filename?: string
     }
 
+const BUNDLED_HTML_ASSETS = new Map<string, string>([
+  ['https://cdn.jsdelivr.net/npm/katex@0.18.4/dist/katex.min.css', 'linear/vendor/katex/katex.min.css'],
+  ['https://cdn.jsdelivr.net/npm/katex@0.18.4/dist/katex.min.js', 'linear/vendor/katex/katex.min.js'],
+  ['https://cdn.jsdelivr.net/npm/katex@0.18.4/dist/contrib/auto-render.min.js', 'linear/vendor/katex/auto-render.min.js'],
+  ['https://cdn.jsdelivr.net/npm/prismjs@1.30.0/plugins/diff-highlight/prism-diff-highlight.min.css', 'linear/vendor/prism/plugins/diff-highlight/prism-diff-highlight.min.css'],
+  ['https://cdn.jsdelivr.net/npm/prismjs@1.30.0/plugins/diff-highlight/prism-diff-highlight.min.js', 'linear/vendor/prism/plugins/diff-highlight/prism-diff-highlight.min.js'],
+  ['https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css', 'linear/vendor/codemirror/codemirror.css'],
+  ['https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js', 'linear/vendor/codemirror/codemirror.js'],
+  ['https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js', 'linear/vendor/codemirror/mode/xml.js'],
+  ['https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/meta.min.js', 'linear/vendor/codemirror/mode/meta.js'],
+  ['https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js', 'linear/vendor/codemirror/mode/markdown.js'],
+  ['https://cdn.jsdelivr.net/gh/amlatyrngom/tressoir-external@v0.1.7/extension/src/notebook/assets/linear/tressoir-linear.css', 'linear/tressoir-linear.css'],
+  ['https://cdn.jsdelivr.net/gh/amlatyrngom/tressoir-external@v0.1.7/extension/src/notebook/assets/linear/tressoir-linear.js', 'linear/tressoir-linear.js'],
+  ...[
+    'prism-core.min.js',
+    'prism-markup.min.js',
+    'prism-css.min.js',
+    'prism-clike.min.js',
+    'prism-javascript.min.js',
+    'prism-typescript.min.js',
+    'prism-jsx.min.js',
+    'prism-tsx.min.js',
+    'prism-json.min.js',
+    'prism-yaml.min.js',
+    'prism-markdown.min.js',
+    'prism-bash.min.js',
+    'prism-python.min.js',
+    'prism-rust.min.js',
+    'prism-sql.min.js',
+    'prism-diff.min.js',
+  ].map((filename): [string, string] => [
+    `https://cdn.jsdelivr.net/npm/prismjs@1.30.0/components/${filename}`,
+    `linear/vendor/prism/components/${filename}`,
+  ]),
+])
+
+export function bundledHtmlAssetPath(url: string): string | undefined {
+  return BUNDLED_HTML_ASSETS.get(url)
+}
+
 // Contained-basename allowlist. Keep both legacy forms and accept the opt-in
 // `<source>.interactions.json` form. The latter may contain ordinary basename dots but never
 // traversal, separators, or a leading dot.
@@ -240,7 +280,7 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
       postMessage(
         {
           type: 'state',
-          sourceHtml: currentDocument.getText(),
+          sourceHtml: this.sourceHtmlForWebview(currentDocument.getText(), webviewPanel.webview),
           sourceKind: this.sourceKind,
           theme: this.currentTheme(),
           interactions,
@@ -258,7 +298,7 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
       postMessage(
         {
           type: 'update',
-          sourceHtml: currentDocument.getText(),
+          sourceHtml: this.sourceHtmlForWebview(currentDocument.getText(), webviewPanel.webview),
           sourceKind: this.sourceKind,
           interactions,
           baseFontSize: this.currentBaseFontSize(currentDocument),
@@ -760,6 +800,31 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
       .map((rel) => `<script src="${assetUri(rel)}"></script>`)
     const scriptTags = [...coreTags, ...userLinks.scriptTags, ...runtimeTags].join('\n    ')
     return { styles: styleLinks, scripts: scriptTags }
+  }
+
+  // The portable HTML starter names stable public resources so the file works in a normal
+  // browser. Inside Tressoir, substitute the byte-identical assets already shipped in the VSIX.
+  // If a package is incomplete, leave the HTTPS URL untouched as a network fallback rather than
+  // manufacturing a broken local URI. Only exact, version-pinned URLs are eligible.
+  private sourceHtmlForWebview(sourceHtml: string, webview: vscode.Webview): string {
+    if (this.sourceKind !== 'html') {
+      return sourceHtml
+    }
+    const assetsDir = vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'assets')
+    return sourceHtml.replace(
+      /\b(src|href)(\s*=\s*)(["'])(https:\/\/[^"']+)\3/gi,
+      (full, attribute: string, separator: string, quote: string, url: string) => {
+        const relative = bundledHtmlAssetPath(url)
+        if (!relative) {
+          return full
+        }
+        const local = vscode.Uri.joinPath(assetsDir, ...relative.split('/'))
+        if (!fs.existsSync(local.fsPath)) {
+          return full
+        }
+        return `${attribute}${separator}${quote}${webview.asWebviewUri(local)}${quote}`
+      },
+    )
   }
 
   private buildWebviewHtml(

@@ -92,7 +92,7 @@ case "$*" in
     ;;
   "run package:vsix")
     mkdir -p dist
-    printf '%s\n' 'mock VSIX' > dist/tressoir-artifacts-0.1.6.vsix
+    printf '%s\n' 'mock VSIX' > dist/tressoir-artifacts-0.1.7.vsix
     printf '%s\n' 'mock package complete'
     ;;
   *)
@@ -116,7 +116,7 @@ case "${1:-}" in
   --install-extension)
     [ -f "${2:-}" ] || exit 3
     printf '%s\n' "$2" > "$MOCK_CODE_INSTALL_LOG"
-    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.6' > "$MOCK_CODE_STATE"
+    printf '%s\n' 'tressoir.tressoir-artifacts@0.1.7' > "$MOCK_CODE_STATE"
     printf '%s\n' 'mock installation succeeded'
     ;;
   *)
@@ -211,10 +211,10 @@ NODE
     "$project/AGENTS.md" >/dev/null
   assert_absent "$project/.pi"
 
-  grep -Fx 'tressoir.tressoir-artifacts@0.1.6' "$state" >/dev/null
+  grep -Fx 'tressoir.tressoir-artifacts@0.1.7' "$state" >/dev/null
   built_vsix=$(sed -n '1p' "$install_log")
   case "$built_vsix" in
-    "$ephemeral"/*/source/tressoir-external-main/extension/dist/tressoir-artifacts-0.1.6.vsix)
+    "$ephemeral"/*/source/tressoir-external-main/extension/dist/tressoir-artifacts-0.1.7.vsix)
       ;;
     *)
       printf 'VSIX was not installed from temporary storage: %s\n' "$built_vsix" >&2
@@ -280,7 +280,7 @@ NODE
   grep 'managed payload: override' "$override_output" >/dev/null
   grep 'reference templates refreshed under IB/skills/tressoir-isolation/templates' \
     "$override_output" >/dev/null
-  grep 'installed: tressoir.tressoir-artifacts@0.1.6' "$override_output" >/dev/null
+  grep 'installed: tressoir.tressoir-artifacts@0.1.7' "$override_output" >/dev/null
   [ -z "$(find "$ephemeral" -mindepth 1 -print -quit)" ]
 )
 

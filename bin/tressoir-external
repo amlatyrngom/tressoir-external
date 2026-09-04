@@ -12,7 +12,7 @@ set -u
 
 PAYLOAD_VERSION_EXPECTED="0.1.0"
 EXTENSION_ID="tressoir.tressoir-artifacts"
-EXTENSION_VERSION="0.1.6"
+EXTENSION_VERSION="0.1.7"
 LEGACY_EXTENSION_ID="tressoir.bridge"
 
 CLAUDE=0
