@@ -23,6 +23,22 @@ function autoResolveSrcLoads(container: HTMLElement): MutationObserver {
   return observer
 }
 
+function autoRejectSrcLoads(container: HTMLElement): MutationObserver {
+  const observer = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      mutation.addedNodes.forEach((node) => {
+        if (node.nodeName !== 'SCRIPT') return
+        const script = node as HTMLScriptElement
+        if (script.hasAttribute('src')) {
+          queueMicrotask(() => script.onerror?.(new Event('error')))
+        }
+      })
+    }
+  })
+  observer.observe(container, { childList: true })
+  return observer
+}
+
 describe('scriptInjection.recreateScripts', () => {
   it('re-creates inline scripts as fresh nodes and stamps the CSP nonce', async () => {
     const container = document.createElement('div')
@@ -156,6 +172,25 @@ describe('scriptInjection.recreateScripts', () => {
     observer.disconnect()
 
     expect(insertedOrder).toEqual(['src', 'inline'])
+  })
+
+  it('shows a readable error and permits retry when an external script cannot load', async () => {
+    const container = document.createElement('div')
+    container.innerHTML =
+      '<section id="runtime-output"></section>' +
+      '<script src="https://cdn.example.test/library@1.2.3.min.js"></script>'
+    const observer = autoRejectSrcLoads(container)
+
+    await recreateScripts(container, 'N')
+    observer.disconnect()
+
+    const script = container.querySelector('script')!
+    const notice = container.querySelector('[role="alert"]')
+    expect(script.hasAttribute('data-tressoir-script-ran')).toBe(false)
+    expect(notice?.classList.contains('tressoir-resource-error')).toBe(true)
+    expect(notice?.textContent).toBe(
+      'Could not load script: https://cdn.example.test/library@1.2.3.min.js',
+    )
   })
 })
 

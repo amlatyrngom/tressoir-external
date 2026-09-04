@@ -63,7 +63,7 @@ describe('notebook provider JS support (CSP / base / resource roots)', () => {
   it('emits a per-render nonce in the CSP and stamps it on the webview bundle script', async () => {
     const panel = await buildHtml()
     const html = panel.webview.html
-    const nonceMatch = html.match(/script-src https:\/\/test\.csp 'nonce-([A-Za-z0-9]+)'/)
+    const nonceMatch = html.match(/script-src https:\/\/test\.csp https: 'nonce-([A-Za-z0-9]+)'/)
     expect(nonceMatch).not.toBeNull()
     const nonce = nonceMatch![1]
     // The webview's own bundle script must carry the same nonce.
@@ -77,12 +77,14 @@ describe('notebook provider JS support (CSP / base / resource roots)', () => {
     expect(panel.webview.html).toContain('data-source-kind="html"')
   })
 
-  it('uses a hardened CSP: no unsafe-eval, no strict-dynamic, with connect-src for authored fetch', async () => {
+  it('allows direct HTTPS scripts without allowing insecure HTTP, unsafe-eval, or strict-dynamic', async () => {
     const panel = await buildHtml()
     const html = panel.webview.html
     expect(html).not.toContain("'unsafe-eval'")
     expect(html).not.toContain("'strict-dynamic'")
     expect(html).toContain('connect-src https://test.csp')
+    expect(html).toContain("script-src https://test.csp https: 'nonce-")
+    expect(html).not.toMatch(/script-src [^;]*\bhttp:/)
     expect(html).toContain("default-src 'none'")
   })
 

@@ -133,7 +133,7 @@ npm run package:vsix
 ../bin/tressoir-external setup \
   --root /path/to/project \
   --claude --codex --pi --register-guidance \
-  --vsix "$PWD/dist/tressoir-artifacts-0.1.5.vsix"
+  --vsix "$PWD/dist/tressoir-artifacts-0.1.6.vsix"
 ```
 
 Ordinary `.html` files remain text by default. Use **Reopen With → Tressoir Artifact Preview
@@ -391,9 +391,9 @@ It contains no backend bridge, agent editor commands, plugin host, daemon connec
 
 Both artifact formats are executable trusted content, not inert previews.
 
-- Raw HTML and authored inline/relative scripts can execute.
+- Raw HTML and authored inline, relative, or direct HTTPS scripts can execute.
 - Markdown permits raw HTML and scripts.
-- Declared remote resources may cause network access and local caching.
+- Remote HTML resources load from the network; declared Markdown resources may use local caching.
 - Authored code receives a narrow contained interaction/open-file helper.
 
 Only open artifacts from authors and workspaces you trust. The MVP has no sanitized safe-preview mode.
@@ -472,7 +472,7 @@ Release checks build transient output locally; no npm package is published.
 For a final desktop smoke, install the built VSIX into isolated VS Code directories and confirm:
 
 ```text
-tressoir.tressoir-artifacts@0.1.5
+tressoir.tressoir-artifacts@0.1.6
 ```
 
 ## Licensing

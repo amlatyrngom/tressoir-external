@@ -783,7 +783,9 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
     // Per-render CSP nonce. Authored content is rendered into the main webview document, so
     // re-created INLINE authored scripts are stamped with this nonce (see scriptInjection.ts);
     // relative authored `<script src>` and the webview's own bundle stay covered by the
-    // ${webview.cspSource} host-source. No 'unsafe-inline'/'unsafe-eval'/'strict-dynamic'.
+    // ${webview.cspSource} host-source. Direct HTTPS scripts are deliberately allowed for this
+    // trusted-artifact renderer so a compact HTML file can use pinned CDN/GitHub dependencies.
+    // No 'unsafe-inline'/'unsafe-eval'/'strict-dynamic', and insecure HTTP scripts stay blocked.
     // connect-src ${webview.cspSource} is REQUIRED for authored fetch('./...').
     const nonce = getNonce()
     const mdAssets =
@@ -795,7 +797,7 @@ export class TressoirNotebookEditorProvider implements vscode.CustomTextEditorPr
       `img-src ${webview.cspSource} data: https: http: blob:`,
       `style-src ${webview.cspSource} 'unsafe-inline' https:`,
       `font-src ${webview.cspSource} data: https:`,
-      `script-src ${webview.cspSource} 'nonce-${nonce}'`,
+      `script-src ${webview.cspSource} https: 'nonce-${nonce}'`,
       `worker-src ${webview.cspSource} blob:`,
       `connect-src ${webview.cspSource}`,
       `frame-src ${webview.cspSource} blob: data:`,

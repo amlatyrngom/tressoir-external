@@ -8,7 +8,12 @@ This extension renders two trusted, text-backed artifact formats in regular desk
 
 It is the artifact-editor portion of Tressoir, extracted into a self-contained extension. It does not connect to the Tressoir daemon and does not include editor automation, the plugin host, code-server management, a Python runtime, or an SDK backend.
 
-## Notable in this release (0.1.5)
+## Notable in this release (0.1.6)
+
+- Trusted HTML artifacts can load direct HTTPS scripts as well as HTTPS stylesheets, enabling
+  compact single-file artifacts backed by pinned CDN or immutable-commit resources.
+- Failed external scripts now produce a visible resource error instead of silently leaving
+  runtime-built sections blank.
 
 - Markdown and HTML now share the accepted linear light/dark theme, card and single-decision
   components, floating feedback form, local math and syntax highlighting, and contained overflow.
@@ -98,7 +103,7 @@ npm test
 npm run package:vsix
 ```
 
-The versioned package is written to `dist/tressoir-artifacts-0.1.5.vsix`. Always inspect the newly produced archive and packaged manifest before release; do not reuse an older bridge VSIX.
+The versioned package is written to `dist/tressoir-artifacts-0.1.6.vsix`. Always inspect the newly produced archive and packaged manifest before release; do not reuse an older bridge VSIX.
 
 ## Source provenance
 

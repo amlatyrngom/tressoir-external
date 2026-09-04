@@ -7,7 +7,8 @@
 //     each must be re-created as a fresh element to execute (recreateScripts), and
 //   - a per-render CSP nonce must be stamped on re-created INLINE scripts (the nonce-based
 //     policy makes the browser ignore 'unsafe-inline'); relative `<script src>` stay covered
-//     by the CSP host-source (${cspSource}).
+//     by the CSP host-source (${cspSource}), while direct HTTPS scripts use the trusted-artifact
+//     policy's explicit `https:` source.
 
 const BASE_MARKER_ATTR = 'data-tressoir-artifact-base'
 
@@ -33,8 +34,8 @@ export function ensureArtifactBaseHref(href: string): void {
  * Re-create every <script> inside `container` so the browser executes authored scripts,
  * preserving authored DOCUMENT ORDER (like normal parser-inserted scripts).
  * INLINE (no-src) scripts are stamped with the per-render CSP nonce so the nonce-based
- * policy allows them; relative `<script src>` are covered by the CSP host-source and do
- * not need the nonce.
+ * policy allows them; relative `<script src>` are covered by the CSP host-source and direct
+ * HTTPS scripts by the explicit `https:` source. External scripts do not need the nonce.
  *
  * Scripts are processed SEQUENTIALLY: each inline script executes synchronously when its
  * node is inserted, and each external (src) include is forced non-async and AWAITED before
@@ -45,6 +46,19 @@ export function ensureArtifactBaseHref(href: string): void {
  * include-then-use ordering.) Resolves once all authored scripts have run/settled.
  */
 const RAN_MARKER_ATTR = 'data-tressoir-script-ran'
+const RESOURCE_ERROR_CLASS = 'tressoir-resource-error'
+
+function reportScriptLoadFailure(script: HTMLScriptElement, authoredSrc: string): void {
+  const next = script.nextElementSibling
+  if (next?.classList.contains(RESOURCE_ERROR_CLASS)) {
+    next.remove()
+  }
+  const notice = document.createElement('div')
+  notice.className = RESOURCE_ERROR_CLASS
+  notice.setAttribute('role', 'alert')
+  notice.textContent = `Could not load script: ${authoredSrc}`
+  script.insertAdjacentElement('afterend', notice)
+}
 
 // Data blocks such as `<script type="application/json">` are DOM content, not executable
 // JavaScript. Leave them in place so a following renderer can read the exact original node and
@@ -89,11 +103,17 @@ export async function recreateScripts(container: HTMLElement, nonce: string): Pr
       // External include: force ordered (non-async) loading and AWAIT it before moving on,
       // so a following script can read globals this include defines.
       fresh.async = false
+      const authoredSrc = oldScript.getAttribute('src') ?? ''
       const loaded = new Promise<void>((resolve) => {
         fresh.onload = () => resolve()
-        // Resolve on error too: a missing authored global is reported elsewhere, and a
-        // failed include should not wedge the render pipeline.
-        fresh.onerror = () => resolve()
+        // Resolve on error too so one missing dependency cannot wedge the render pipeline, but
+        // make the failure visible instead of leaving script-built sections mysteriously blank.
+        // Removing the marker lets a later morph retry the include after a transient failure.
+        fresh.onerror = () => {
+          fresh.removeAttribute(RAN_MARKER_ATTR)
+          reportScriptLoadFailure(fresh, authoredSrc)
+          resolve()
+        }
       })
       oldScript.replaceWith(fresh)
       await loaded

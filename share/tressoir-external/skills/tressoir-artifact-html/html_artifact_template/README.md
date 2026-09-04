@@ -1,10 +1,17 @@
 # Tressoir linear HTML starter
 
-Copy this entire folder into the existing broad-task folder under `IB/ARTIFACTS/`, then rename
-`ARTIFACT.tressoir.html`. Keep the relative asset paths and the floating feedback dock intact.
+For an offline artifact, copy this entire folder into the existing broad-task folder under
+`IB/ARTIFACTS/`, then rename `ARTIFACT.tressoir.html`. Keep the relative asset paths and the
+floating feedback dock intact.
 
-The bundle is intentionally project-local: the artifact stays faithful in Tressoir, opens as a
-normal offline web page, and records the exact renderer assets used for that task.
+For a smaller network-backed artifact, copy the HTML and its authored sibling/data files, replace
+the standard local `<link>` and `<script>` references with pinned HTTPS release or immutable-commit
+URLs, and omit the copied `vendor/`, `tressoir-linear.css`, and `tressoir-linear.js`. Direct HTTPS
+scripts work in Tressoir and a normal browser. Preserve their order and avoid `latest`, mutable
+branches, and GitHub raw-file URLs that are served with a non-JavaScript MIME type.
+
+The included bundle is the offline option: it stays faithful in Tressoir, opens as a normal offline
+web page, and records the exact renderer assets used for that task.
 
 ## Authoring rules
 

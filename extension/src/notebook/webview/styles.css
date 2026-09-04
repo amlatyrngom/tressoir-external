@@ -100,3 +100,17 @@ body[data-source-kind="html"] .tressoir-preview {
   min-width: 0;
   max-width: 100%;
 }
+
+/* Extension-owned fallback for failed authored dependencies. Keep this visible even when the
+   missing script would otherwise leave a runtime-built section empty. */
+.tressoir-resource-error {
+  margin: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--nb-red, #d73a49);
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--nb-red, #d73a49) 10%, var(--nb-bg) 90%);
+  color: var(--nb-text);
+  font: 0.9rem/1.45 var(--nb-font-sans);
+  overflow-wrap: anywhere;
+}
