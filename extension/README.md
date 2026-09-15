@@ -8,7 +8,19 @@ This extension renders two trusted, text-backed artifact formats in regular desk
 
 It is the artifact-editor portion of Tressoir, extracted into a self-contained extension. It does not connect to the Tressoir daemon and does not include editor automation, the plugin host, code-server management, a Python runtime, or an SDK backend.
 
-## Notable in this release (0.1.7)
+## Notable in this release (0.1.8)
+
+- Live updates preserve a visible keyed element's viewport offset, with scroll coordinates as
+  a fallback, in the page and scrollable panels. Stable `id` or `data-morph-key` values help
+  when a report replaces elements. Sticky/fixed controls are excluded as reading anchors.
+- A 1.2-second observation window repairs transient content shrinkage and late layout changes.
+  Wheel, touch, pointer, or keyboard input cancels corrections immediately; newer updates also
+  invalidate older corrections and render completions. This is not a persistent scroll lock.
+- Reports should update atomically, keep stable identities, and avoid resetting scroll/focus in
+  render hooks. Unkeyed panels that are replaced, layout work after the observation window, and
+  removal of the actual reading target remain best-effort cases.
+
+## Earlier changes
 
 - The installed HTML skill and its starter are now genuinely compact: the template uses pinned
   HTTPS resources by default and no longer ships a duplicate `vendor/` tree or standard CSS/JS.
@@ -108,7 +120,24 @@ npm test
 npm run package:vsix
 ```
 
-The versioned package is written to `dist/tressoir-artifacts-0.1.7.vsix`. Always inspect the newly produced archive and packaged manifest before release; do not reuse an older bridge VSIX.
+The versioned package is written to `dist/tressoir-artifacts-0.1.8.vsix`. Always inspect the newly produced archive and packaged manifest before release; do not reuse an older bridge VSIX.
+
+Install only the extension (without running project/skill setup):
+
+```bash
+code --install-extension dist/tressoir-artifacts-0.1.8.vsix --force
+```
+
+Then run **Developer: Reload Window** in VS Code. For SSH/containers, install the VSIX in the
+extension host where the report is opened, using **Extensions: Install from VSIX…** if needed.
+
+The real-browser scroll regression gate uses the built webview bundle:
+
+```bash
+node ../scripts/test_scroll_browser.mjs
+```
+
+It defaults to macOS Chrome; set `CHROME_BIN` to another Chromium executable as needed.
 
 ## Source provenance
 

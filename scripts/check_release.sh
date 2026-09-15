@@ -6,7 +6,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 EXTENSION="$ROOT/extension"
 PAYLOAD="$ROOT/share/tressoir-external"
 LINEAR_SOURCE="$EXTENSION/src/notebook/assets/linear"
-VERSION="0.1.7"
+VERSION="0.1.8"
 VSIX="$EXTENSION/dist/tressoir-artifacts-$VERSION.vsix"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/tressoir-release-check.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
@@ -69,7 +69,7 @@ node - "$TMP/package.json" <<'NODE'
 const fs = require('fs')
 const manifest = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
 const identity = `${manifest.publisher}.${manifest.name}@${manifest.version}`
-if (identity !== 'tressoir.tressoir-artifacts@0.1.7') {
+if (identity !== 'tressoir.tressoir-artifacts@0.1.8') {
   throw new Error(`unexpected packaged identity: ${identity}`)
 }
 if (manifest.license !== 'MIT') {

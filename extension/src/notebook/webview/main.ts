@@ -12,8 +12,8 @@
 //   - authored <script> nodes are re-created so they execute (recreateScripts), with the
 //     per-render CSP nonce stamped on inline scripts;
 //   - a <base href> resolves authored relative URLs/`fetch` to the artifact folder;
-//   - any authored-content change re-renders into a fresh realm (the provider resets
-//     webview.html); the reader's scroll position is restored from webview state.
+//   - authored-content changes morph in place with bounded reading-position preservation;
+//     genuine realm reloads restore the reader's scroll from webview state.
 import './styles.css'
 import {
   notebookPaletteForTheme,
@@ -24,6 +24,7 @@ import morphdom from 'morphdom'
 import { ensureArtifactBaseHref, recreateScripts } from './scriptInjection'
 import { createArtifactContext } from './artifactContext'
 import { preserveDetailsState } from './morphState'
+import { createScrollPreserver } from './scrollState'
 
 declare function acquireVsCodeApi(): {
   postMessage(message: unknown): void
@@ -196,6 +197,8 @@ if (!app) {
 }
 
 const appRoot: HTMLElement = app
+const scrollPreserver = createScrollPreserver(appRoot, persistScrollSoon)
+let updateGeneration = 0
 const artifactBaseUri = readBodyDatasetValue('artifactBaseUri')
 const cspNonce = readBodyDatasetValue('cspNonce')
 
@@ -221,6 +224,7 @@ function persistScrollSoon(): void {
   }
   scrollPersistTimer = window.setTimeout(() => {
     scrollPersistTimer = null
+    if (scrollPreserver.active) return
     vscodeApi.setState({ ...readPersistedState(), scrollY: window.scrollY })
   }, 150)
 }
@@ -381,6 +385,8 @@ async function morphPreview(message: NotebookUpdateMessage): Promise<void> {
   const target = document.createElement('div')
   target.className = 'tressoir-preview'
   target.innerHTML = projectSource(message.sourceHtml)
+  const generation = ++updateGeneration
+  const restorePosition = scrollPreserver.begin()
   morphdom(previewEl, target, {
     // Match projected decisions and canonical controls by stable identity so live edits do not
     // bind an in-progress answer to a different authored control merely by DOM position.
@@ -419,12 +425,17 @@ async function morphPreview(message: NotebookUpdateMessage): Promise<void> {
       return true
     },
   })
+  restorePosition()
   // Execute only the genuinely-new authored scripts (recreateScripts skips already-run ones).
   await recreateScripts(previewEl, cspNonce)
+  if (generation !== updateGeneration) return
   dispatchRenderEvent('morph')
+  restorePosition()
 }
 
 async function renderNotebook(state: NotebookStateMessage): Promise<void> {
+  ++updateGeneration
+  scrollPreserver.cancel()
   const generation = ++renderGeneration
   previewHost = null
   renderLoadingState()

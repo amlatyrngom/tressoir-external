@@ -133,7 +133,7 @@ npm run package:vsix
 ../bin/tressoir-external setup \
   --root /path/to/project \
   --claude --codex --pi --register-guidance \
-  --vsix "$PWD/dist/tressoir-artifacts-0.1.7.vsix"
+  --vsix "$PWD/dist/tressoir-artifacts-0.1.8.vsix"
 ```
 
 Ordinary `.html` files remain text by default. Use **Reopen With → Tressoir Artifact Preview
@@ -472,7 +472,7 @@ Release checks build transient output locally; no npm package is published.
 For a final desktop smoke, install the built VSIX into isolated VS Code directories and confirm:
 
 ```text
-tressoir.tressoir-artifacts@0.1.7
+tressoir.tressoir-artifacts@0.1.8
 ```
 
 ## Licensing
