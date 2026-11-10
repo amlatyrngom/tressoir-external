@@ -1,273 +1,175 @@
 #!/usr/bin/env bash
 
-# Interactive source bootstrap for Tressoir External.
-# Designed for: curl -fsSL <raw-url> | bash
-# Prompts use /dev/tty because standard input contains this script.
-# Pass --override (including with `curl ... | bash -s -- --override`) to refresh
-# installer-owned IB payload while preserving adapted IB/isolation, STATE.md,
-# every *CANON.md, ARTIFACTS, TMP, and unknown IB paths.
+# Installs the Tressoir starter kit into a project. It asks nothing.
+#
+#   From a checkout:   /path/to/tressoir-external/install.sh [--override]
+#   Without one:       curl -fsSL <raw address of this file> | bash -s -- [--override]
+#
+# The project is the current directory, or TRESSOIR_ROOT when set.
+#
+# It always sets up Claude and the shared agents convention together:
+#   WORK/WORK_AREA_GUIDE.md and WORK/skills/tressoir-*     owned by the kit
+#   WORK/STATE.md, TASK.md, MEMORY/, ARTIFACTS/, TMP/      created once, then never touched
+#   .claude/skills/ and .agents/skills/                    a link for each skill
+#   AGENTS.md (three-line pointer) and CLAUDE.md (@AGENTS.md)
+#
+# --override refreshes what the kit owns: the guide, the kit's skills and their scripts. It never
+# touches STATE.md, TASK.md, anything in MEMORY/ or ARTIFACTS/, or skills the kit did not ship.
 
 set -euo pipefail
 
 REPOSITORY="amlatyrngom/tressoir-external"
-REF="main"
-ARCHIVE_URL_DEFAULT="https://codeload.github.com/$REPOSITORY/tar.gz/refs/heads/$REF"
-ARCHIVE_URL="${TRESSOIR_EXTERNAL_ARCHIVE_URL:-$ARCHIVE_URL_DEFAULT}"
-TARGET_INPUT="${TRESSOIR_EXTERNAL_ROOT:-$PWD}"
-VSCODE_BIN="${TRESSOIR_EXTERNAL_VSCODE_BIN:-code}"
-EXTENSION_VERSION="0.1.8"
-TEMP_ROOT=""
-PROMPT_FD_OPEN=0
-CHOICE_RESULT=0
+ARCHIVE_URL="${TRESSOIR_ARCHIVE_URL:-https://codeload.github.com/$REPOSITORY/tar.gz/refs/heads/main}"
+CORE_SKILLS="tressoir-memory tressoir-plan tressoir-present tressoir-migrate"
+EXTRA_SKILLS="tressoir-structured-review tressoir-isolation"
+# Skills of the first kit. --override removes them; they stay in the project's git history.
+RETIRED_SKILLS="tressoir-working-area tressoir-canon tressoir-artifact-md tressoir-artifact-html"
 OVERRIDE=0
+TEMP=""
+CHANGED=0
 
-usage() {
-  cat <<'EOF'
-Usage: install.sh [--override]
+say() { printf '%s\n' "$*"; }
+did() { CHANGED=$((CHANGED + 1)); printf '  %s\n' "$*"; }
+fatal() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
+cleanup() { if [ -n "$TEMP" ]; then rm -rf "$TEMP"; fi; }
+trap cleanup EXIT
 
-Downloads Tressoir External, asks which integrations to install, and removes
-the temporary source/build tree afterward.
-
-  --override  Refresh installer-owned IB files, bundled skills and isolation
-              reference templates, selected adapters, and the supplied VSIX.
-              Preserve adapted IB/isolation, STATE.md, every *CANON.md,
-              ARTIFACTS, TMP, and unknown IB paths.
-  -h, --help  Show this help.
-
-Piped form:
-  curl -fsSL <install-url> | bash -s -- --override
-EOF
-}
-
-say() {
-  printf '%s\n' "$*"
-}
-
-fatal() {
-  printf 'fatal: %s\n' "$*" >&2
-  exit 1
-}
-
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --override)
-      OVERRIDE=1
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      fatal "unknown option: $1"
-      ;;
+for arg in "$@"; do
+  case "$arg" in
+    --override) OVERRIDE=1 ;;
+    -h|--help) sed -n '3,17p' "${BASH_SOURCE[0]:-/dev/null}" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) fatal "unknown option: $arg (the only option is --override)" ;;
   esac
 done
 
-cleanup() {
-  if [ -n "$TEMP_ROOT" ] && [ -d "$TEMP_ROOT" ]; then
-    rm -rf "$TEMP_ROOT"
-  fi
-}
-trap cleanup EXIT HUP INT TERM
+ROOT="${TRESSOIR_ROOT:-$PWD}"
+[ -d "$ROOT" ] || fatal "the project folder does not exist: $ROOT"
+ROOT=$(cd "$ROOT" && pwd -P)
 
-choice_from_value() {
-  case "$1" in
-    1|y|Y|yes|YES|Yes|true|TRUE|True)
-      CHOICE_RESULT=1
-      return 0
-      ;;
-    0|n|N|no|NO|No|false|FALSE|False)
-      CHOICE_RESULT=0
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-open_prompt_tty() {
-  if [ "$PROMPT_FD_OPEN" -eq 1 ]; then
-    return
-  fi
-  if ! exec 3<> /dev/tty; then
-    fatal "interactive choices need a controlling terminal; run this command in a terminal or export TRESSOIR_EXTERNAL_VSCODE, TRESSOIR_EXTERNAL_CLAUDE, TRESSOIR_EXTERNAL_CODEX, TRESSOIR_EXTERNAL_PI, and TRESSOIR_EXTERNAL_GUIDANCE as yes/no"
-  fi
-  PROMPT_FD_OPEN=1
-}
-
-choose() {
-  local label supplied answer
-  label="$1"
-  supplied="$2"
-
-  if [ -n "$supplied" ]; then
-    choice_from_value "$supplied" ||
-      fatal "invalid yes/no choice '$supplied' for $label"
-    return
-  fi
-
-  open_prompt_tty
-
-  while :; do
-    printf '%s [y/n] ' "$label" >&3
-    IFS= read -r answer <&3 || fatal "could not read an interactive choice"
-    if choice_from_value "$answer"; then
-      return
-    fi
-    printf '%s\n' "Please answer yes or no." >&3
+# The kit: the checkout this script sits in, or a download when it is piped in.
+KIT=""
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+  HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+  if [ -f "$HERE/guide/WORK_AREA_GUIDE.md" ] && [ -d "$HERE/skills" ]; then KIT="$HERE"; fi
+fi
+if [ -z "$KIT" ]; then
+  for tool in curl tar; do
+    command -v "$tool" >/dev/null 2>&1 || fatal "$tool is needed to download the kit"
   done
+  TEMP=$(mktemp -d "${TMPDIR:-/tmp}/tressoir-kit.XXXXXX")
+  curl -fsSL "$ARCHIVE_URL" | tar -xz -C "$TEMP" || fatal "could not download $ARCHIVE_URL"
+  KIT=$(find "$TEMP" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+  [ -f "$KIT/guide/WORK_AREA_GUIDE.md" ] || fatal "the download does not look like the kit"
+fi
+[ "$KIT" != "$ROOT" ] || fatal "run this from the project to set up, not from the kit itself"
+
+if [ ! -e "$ROOT/WORK" ] && [ -d "$ROOT/IB" ]; then
+  fatal "this project still has the first kit's IB/ folder. Migrate it first: follow $KIT/skills/tressoir-migrate/SKILL.md"
+fi
+
+say "Tressoir starter kit -> $ROOT"
+cd "$ROOT"
+
+# Created once. A file or folder that already exists is the project's and is left alone.
+seed() {  # seed <kit file> <project path>
+  if [ ! -e "$2" ] && [ ! -L "$2" ]; then
+    mkdir -p "$(dirname "$2")"; cp "$KIT/$1" "$2"; did "created $2"
+  fi
 }
+mkdir -p WORK/skills WORK/ARTIFACTS WORK/TMP
+seed seeds/STATE.md WORK/STATE.md
+seed seeds/TASK.md WORK/TASK.md
+seed seeds/WORK.gitignore WORK/.gitignore
+if [ ! -e WORK/MEMORY ]; then
+  seed seeds/ROOT_MEMORY.md WORK/MEMORY/ROOT_MEMORY.md
+  seed seeds/EXAMPLES_README.md WORK/MEMORY/EXAMPLES/README.md
+fi
 
-command_required() {
-  command -v "$1" >/dev/null 2>&1 ||
-    fatal "required command not found: $1"
+# Owned by the kit: installed when missing, refreshed only with --override.
+same() { diff -rq "$1" "$2" >/dev/null 2>&1; }
+own() {  # own <kit path> <project path>, for a file or a folder
+  if [ ! -e "$2" ]; then
+    cp -R "$KIT/$1" "$2"; did "installed $2"
+  elif same "$KIT/$1" "$2"; then
+    :
+  elif [ "$OVERRIDE" -eq 1 ]; then
+    rm -rf "$2.incoming"; cp -R "$KIT/$1" "$2.incoming"; rm -rf "$2"; mv "$2.incoming" "$2"; did "refreshed $2"
+  else
+    say "  kept $2 (it differs from the kit; --override refreshes it)"
+  fi
 }
-
-say "Tressoir External"
-say "  target project: $TARGET_INPUT"
-say ""
-
-choose "Install the Tressoir Artifacts VS Code extension?" \
-  "${TRESSOIR_EXTERNAL_VSCODE:-}"
-INSTALL_VSCODE="$CHOICE_RESULT"
-choose "Set up Claude Code skills and Dev Container tools?" \
-  "${TRESSOIR_EXTERNAL_CLAUDE:-}"
-INSTALL_CLAUDE="$CHOICE_RESULT"
-choose "Set up OpenAI Codex skills and Dev Container tools?" \
-  "${TRESSOIR_EXTERNAL_CODEX:-}"
-INSTALL_CODEX="$CHOICE_RESULT"
-choose "Set up Pi skills and Dev Container tools?" \
-  "${TRESSOIR_EXTERNAL_PI:-}"
-INSTALL_PI="$CHOICE_RESULT"
-
-INSTALL_GUIDANCE=0
-if [ "$INSTALL_CLAUDE" -eq 1 ] ||
-   [ "$INSTALL_CODEX" -eq 1 ] ||
-   [ "$INSTALL_PI" -eq 1 ]; then
-  choose "Register root guidance in system prompts?" \
-    "${TRESSOIR_EXTERNAL_GUIDANCE:-}"
-  INSTALL_GUIDANCE="$CHOICE_RESULT"
-fi
-
-if [ "$INSTALL_VSCODE" -eq 0 ] &&
-   [ "$INSTALL_CLAUDE" -eq 0 ] &&
-   [ "$INSTALL_CODEX" -eq 0 ] &&
-   [ "$INSTALL_PI" -eq 0 ]; then
-  say ""
-  say "Nothing selected; no files were changed."
-  exit 0
-fi
-
-[ -d "$TARGET_INPUT" ] || fatal "target project is not a directory: $TARGET_INPUT"
-TARGET_ROOT=$(CDPATH= cd -- "$TARGET_INPUT" 2>/dev/null && pwd -P) ||
-  fatal "cannot resolve target project: $TARGET_INPUT"
-
-case "$(uname -s 2>/dev/null || true)" in
-  Darwin|Linux) ;;
-  *) fatal "this release supports macOS and mainstream Linux only" ;;
-esac
-
-command_required curl
-command_required tar
-command_required mktemp
-
-if [ "$INSTALL_VSCODE" -eq 1 ]; then
-  command_required node
-  command_required npm
-  NODE_MAJOR=$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null) ||
-    fatal "could not determine the Node.js version"
-  case "$NODE_MAJOR" in
-    ""|*[!0-9]*) fatal "could not determine the Node.js major version" ;;
-  esac
-  [ "$NODE_MAJOR" -ge 22 ] ||
-    fatal "building the VS Code extension requires Node.js 22 or newer"
-  command -v "$VSCODE_BIN" >/dev/null 2>&1 ||
-    fatal "VS Code CLI '$VSCODE_BIN' was not found; set TRESSOIR_EXTERNAL_VSCODE_BIN or choose no"
-fi
-
-TEMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/tressoir-external-install.XXXXXX") ||
-  fatal "could not create a temporary directory"
-ARCHIVE="$TEMP_ROOT/source.tar.gz"
-EXTRACTED="$TEMP_ROOT/source"
-mkdir "$EXTRACTED"
-
-say ""
-say "Downloading public source into temporary storage..."
-curl -fsSL "$ARCHIVE_URL" -o "$ARCHIVE" ||
-  fatal "could not download $ARCHIVE_URL"
-tar -xzf "$ARCHIVE" -C "$EXTRACTED" ||
-  fatal "could not extract the downloaded source"
-
-SOURCE_ROOT=""
-for candidate in "$EXTRACTED"/*; do
-  [ -d "$candidate" ] || continue
-  [ -z "$SOURCE_ROOT" ] ||
-    fatal "downloaded archive contains more than one top-level directory"
-  SOURCE_ROOT="$candidate"
+own guide/WORK_AREA_GUIDE.md WORK/WORK_AREA_GUIDE.md
+for skill in $CORE_SKILLS; do own "skills/$skill" "WORK/skills/$skill"; done
+# Optional extras are refreshed where a project already has them, never added.
+for skill in $EXTRA_SKILLS; do
+  if [ -d "WORK/skills/$skill" ]; then own "extras/$skill" "WORK/skills/$skill"; fi
 done
-[ -n "$SOURCE_ROOT" ] ||
-  fatal "downloaded archive does not contain a source directory"
-[ -x "$SOURCE_ROOT/bin/tressoir-external" ] ||
-  fatal "downloaded source is missing bin/tressoir-external"
 
-VSIX_PATH=""
-if [ "$INSTALL_VSCODE" -eq 1 ]; then
-  [ -f "$SOURCE_ROOT/extension/package-lock.json" ] ||
-    fatal "downloaded source is missing the extension lockfile"
-  say "Building the VS Code extension in temporary storage..."
-  (
-    cd "$SOURCE_ROOT/extension"
-    npm ci --ignore-scripts --no-audit --no-fund
-    npm run package:vsix
-  )
-  VSIX_PATH="$SOURCE_ROOT/extension/dist/tressoir-artifacts-$EXTENSION_VERSION.vsix"
-  [ -f "$VSIX_PATH" ] ||
-    fatal "extension build did not produce $(basename -- "$VSIX_PATH")"
-fi
-
-SETUP_ARGS=(setup --root "$TARGET_ROOT")
+# What the first kit left behind. Part of migrating; delete this block with tressoir-migrate.
 if [ "$OVERRIDE" -eq 1 ]; then
-  SETUP_ARGS+=(--override)
-fi
-if [ "$INSTALL_CLAUDE" -eq 1 ]; then
-  SETUP_ARGS+=(--claude)
-fi
-if [ "$INSTALL_CODEX" -eq 1 ]; then
-  SETUP_ARGS+=(--codex)
-fi
-if [ "$INSTALL_PI" -eq 1 ]; then
-  SETUP_ARGS+=(--pi)
-fi
-if [ "$INSTALL_GUIDANCE" -eq 1 ]; then
-  SETUP_ARGS+=(--register-guidance)
-fi
-if [ "$INSTALL_VSCODE" -eq 1 ]; then
-  SETUP_ARGS+=(--vsix "$VSIX_PATH" --vscode-bin "$VSCODE_BIN")
-else
-  SETUP_ARGS+=(--no-vscode)
+  for skill in $RETIRED_SKILLS; do
+    if [ -d "WORK/skills/$skill" ]; then rm -rf "WORK/skills/$skill"; did "removed retired skill WORK/skills/$skill"; fi
+    for links in .claude/skills .agents/skills; do
+      if [ -L "$links/$skill" ]; then rm "$links/$skill"; did "removed link $links/$skill"; fi
+    done
+  done
+  OLD_POINTER='# Tressoir Guidance
+
+Before substantial work, read and follow `IB/TRESSOIR.md`.
+Read current status and open decisions in `IB/STATE.md`.
+Read durable project decisions in `IB/CANON/ROOT_CANON.md`.'
+  for file in AGENTS.md CLAUDE.md; do
+    if [ -f "$file" ] && [ ! -L "$file" ]; then
+      text=$(cat "$file")
+      case "$text" in *"$OLD_POINTER"*)
+        text=${text/"$OLD_POINTER"/}
+        printf '%s\n' "$text" | sed -e '/./,$!d' > "$file.incoming"; mv "$file.incoming" "$file"
+        did "removed the first kit's pointer from $file" ;;
+      esac
+    fi
+  done
 fi
 
-say ""
-set +e
-"$SOURCE_ROOT/bin/tressoir-external" "${SETUP_ARGS[@]}"
-SETUP_STATUS=$?
-set -e
+# A link for every skill in WORK/skills/, in both places harnesses look.
+for links in .claude/skills .agents/skills; do
+  mkdir -p "$links"
+  for folder in WORK/skills/*/; do
+    [ -f "${folder}SKILL.md" ] || continue
+    name=$(basename "$folder"); target="../../WORK/skills/$name"
+    if [ -L "$links/$name" ]; then
+      [ "$(readlink "$links/$name")" = "$target" ] && continue
+      case " $CORE_SKILLS $EXTRA_SKILLS " in
+        *" $name "*) rm "$links/$name"; ln -s "$target" "$links/$name"; did "re-pointed $links/$name" ;;
+        *) say "  kept $links/$name (it points to $(readlink "$links/$name"))" ;;
+      esac
+    elif [ -e "$links/$name" ]; then
+      say "  kept $links/$name (not a link)"
+    else
+      ln -s "$target" "$links/$name"; did "linked $links/$name"
+    fi
+  done
+done
 
-case "$SETUP_STATUS" in
-  0)
-    say ""
-    say "Temporary source and build files will now be removed."
-    ;;
-  2)
-    say ""
-    say "Temporary source and build files will now be removed."
-    say "Review the preserved collisions or manual adapter work reported above."
-    ;;
-  *)
-    fatal "project setup failed"
-    ;;
-esac
+# Root guidance: add the pointer, leave everything else in the file.
+if [ ! -e AGENTS.md ] || [ ! -s AGENTS.md ]; then
+  cp "$KIT/seeds/AGENTS.md" AGENTS.md; did "created AGENTS.md"
+elif ! grep -qF 'WORK/WORK_AREA_GUIDE.md' AGENTS.md; then
+  { printf '\n'; cat "$KIT/seeds/AGENTS.md"; } >> AGENTS.md; did "added the pointer to AGENTS.md"
+fi
+if [ -L CLAUDE.md ]; then
+  say "  kept CLAUDE.md (it is a link)"
+elif [ ! -e CLAUDE.md ] || [ ! -s CLAUDE.md ]; then
+  printf '@AGENTS.md\n' > CLAUDE.md; did "created CLAUDE.md"
+elif ! grep -qxF '@AGENTS.md' CLAUDE.md; then
+  printf '\n@AGENTS.md\n' >> CLAUDE.md; did "added @AGENTS.md to CLAUDE.md"
+fi
 
-exit "$SETUP_STATUS"
+# The files are the only memory, so Claude's private memory is switched off.
+if [ ! -e .claude/settings.json ]; then
+  printf '{\n  "autoMemoryEnabled": false\n}\n' > .claude/settings.json; did "created .claude/settings.json"
+elif ! grep -q '"autoMemoryEnabled"' .claude/settings.json; then
+  say "  note: add \"autoMemoryEnabled\": false to .claude/settings.json to keep Claude's private memory off"
+fi
+
+if [ "$CHANGED" -eq 0 ]; then say "  nothing to do"; fi
+say "Done. Agents start from AGENTS.md; the guide is WORK/WORK_AREA_GUIDE.md."

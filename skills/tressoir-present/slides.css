@@ -1,0 +1,33 @@
+/* Shared slide styles. present.py puts this file into every built page.
+   A slide is drawn on a fixed 960 x 540 canvas and scaled to fit, so sizes below are in that space.
+
+   Deliberately bare: colours, type sizes, and the decision slide. There are no layout building
+   blocks here. Lay each slide out as its content needs, with a <style> block in the slides file. */
+
+/* Colours: light by default, dark when the system or the viewer asks for it. Use these variables. */
+:root { --bg:#f6f6f4; --panel:#ffffff; --fg:#1b1c1f; --muted:#666a73; --line:#dadbdf; --soft:#eeeff2; --accent:#2457c5; --accent-soft:#e3ebfb; --ok:#1d7a46; --ok-soft:#e2f3e9; --warn:#9a5b00; --warn-soft:#fbefd9; --old:#9b2c2c; --old-soft:#f9e6e6; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#131417; --panel:#1c1e22; --fg:#e8e8eb; --muted:#9fa3ac; --line:#34373e; --soft:#25282e; --accent:#8fb0ff; --accent-soft:#22304f; --ok:#6fd39b; --ok-soft:#18362a; --warn:#e8b25a; --warn-soft:#3a2e15; --old:#f0a0a0; --old-soft:#3b2020; } }
+:root[data-theme="dark"] { --bg:#131417; --panel:#1c1e22; --fg:#e8e8eb; --muted:#9fa3ac; --line:#34373e; --soft:#25282e; --accent:#8fb0ff; --accent-soft:#22304f; --ok:#6fd39b; --ok-soft:#18362a; --warn:#e8b25a; --warn-soft:#3a2e15; --old:#f0a0a0; --old-soft:#3b2020; }
+:root { color-scheme:light dark; } :root[data-theme="light"] { color-scheme:light; } :root[data-theme="dark"] { color-scheme:dark; }
+
+/* Type */
+.slide h2 { font-size:33px; line-height:1.15; margin:0 0 6px; letter-spacing:-.01em; }
+.slide p, .slide li { font-size:20px; line-height:1.4; }
+.slide ul { margin:6px 0; padding-left:1.1em; }
+.slide li { margin:5px 0; }
+.slide pre { font-size:15.5px; line-height:1.42; margin:8px 0 0; background:var(--soft); border-radius:8px; padding:14px 18px; }
+.slide code { font-size:.92em; background:var(--soft); padding:.05em .3em; border-radius:4px; }
+.slide pre code { background:none; padding:0; }
+
+/* Decision slides: one recognisable shape wherever a decision appears.
+   <span class="ask">Decision · Name</span>, a question in <h2>, option cards in .options,
+   .opt.rec for the recommended one, and a .default line. .recap is the closing table. */
+.ask { display:inline-block; color:var(--warn); font-size:14px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; margin-bottom:8px; }
+.options { display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:18px; margin-top:18px; }
+.opt { border:1px solid var(--line); border-radius:12px; padding:16px 18px 18px; }
+.opt h3 { margin:0 0 6px; font-size:22px; display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+.opt p { margin:0; font-size:18px; line-height:1.4; color:var(--muted); }
+.opt.rec { background:var(--soft); }
+.recmark { font-size:13px; font-weight:600; color:var(--ok); white-space:nowrap; }
+.default { margin-top:18px; font-size:18px; color:var(--muted); } .default b { color:var(--fg); }
+.recap { width:100%; border-collapse:collapse; margin-top:18px; font-size:21px; } .recap td { padding:12px 10px; border-bottom:1px solid var(--line); } .recap td:first-child { color:var(--muted); width:38%; }

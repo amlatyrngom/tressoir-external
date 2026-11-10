@@ -1,0 +1,6 @@
+# Disposable working data
+TMP/
+
+# Local secrets and operating-system metadata
+.env
+.DS_Store

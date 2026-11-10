@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Starter kit: three choices before building</title>
+<style>
+/* Layout used only by this deck. */
+.slide .kicker { font-size:15px; color:var(--accent); font-weight:600; text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px; }
+.slide .lead { font-size:22px; color:var(--muted); margin:0 0 18px; }
+.cols { display:grid; grid-template-columns:1fr 1fr; gap:22px; }
+.box { border:1px solid var(--line); border-radius:10px; padding:14px 18px; }
+.box h3 { margin:0 0 6px; font-size:15px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+.diagram { display:flex; gap:14px; align-items:center; margin-top:14px; font-size:16px; }
+.diagram .node { border:1px solid var(--line); border-radius:9px; padding:10px 12px; background:var(--soft); line-height:1.35; }
+.diagram .arrow { color:var(--muted); font-size:22px; }
+</style>
+</head>
+<body>
+
+<section class="slide" data-title="Where this stands">
+<div class="kicker">Update · starter kit</div><h2>The design is settled. Three choices before I build.</h2>
+<div class="cols" style="margin-top:20px"><div class="box"><h3>Settled tonight</h3><ul style="margin:0"><li>George is the default voice</li><li>Briefings live in the task folder</li><li>The plan skill stays, small</li><li>Decisions are named in words, never numbered</li></ul></div>
+<div class="box"><h3>Waiting on you</h3><ul style="margin:0"><li>Code check</li><li>Build order</li><li>First project</li></ul></div></div>
+</section>
+<aside class="say">The design is settled, and three choices are left before I build. Settled tonight: George is the default voice, briefings live in the task folder, the plan skill stays as a small separate skill, and decisions are named in words, never numbered. The three things waiting on you are the code check, the build order, and the first project. I will take them one at a time.</aside>
+
+<section class="slide" data-title="Decision: code check" data-decision>
+<span class="ask">Decision · Code check</span><h2>Should the build step catch invented codes?</h2>
+<div class="options"><div class="opt rec"><h3>Warn<span class="recmark">Recommended</span></h3><p>The build step lists anything that looks like a made-up label, a few letters and a number, so the agent rewrites it in plain words before you see it.</p></div><div class="opt"><h3>No check</h3><p>Rely on the written rule alone, as the old kit did.</p></div></div>
+<p class="default">If you say nothing: <b>Warn</b>.</p>
+</section>
+<aside class="say">The first decision needs no background. Agents keep inventing labels, a few letters and a number, and expecting you to remember them. A written rule alone never stopped that. So, should the build step catch them? With the option called warn, the script that builds a briefing lists anything that looks like a made-up label, and the agent rewrites it in plain words before you ever see it. With no check, we rely on the written rule, as before. I recommend warn. If you say nothing, I go with warn.</aside>
+
+<section class="slide" data-title="Decision: build order" data-decision>
+<span class="ask">Decision · Build order</span><h2>What do I build first?</h2>
+<div class="options"><div class="opt rec"><h3>Presenting first<span class="recmark">Recommended</span></h3><p>The player, the build script and the presenting skill. Everything built after that can be reported to you as a briefing.</p></div><div class="opt"><h3>All at once</h3><p>Guide, memory, plan, presenting, installer and migration in one pass. One big hand-off at the end.</p></div></div>
+<p class="default">If you say nothing: <b>Presenting first</b>.</p>
+</section>
+<aside class="say">The second decision is the build order. One option is presenting first: the player, the build script and the presenting skill. Then everything I build afterwards can be reported to you as a briefing. The other option is all at once: the guide, memory, plan, presenting, the installer and migration in a single pass, with one large hand-off at the end. I recommend presenting first. If you say nothing, I go with that.</aside>
+
+<section class="slide" data-title="Two places to try it">
+<h2>Before the last decision: two places to try the kit</h2>
+<div class="cols" style="margin-top:22px"><div class="box"><h3>The talk repository</h3><p style="margin:0">Small, already has its own work area in the old format, nothing else depends on its paths.</p></div>
+<div class="box"><h3>Productivity</h3><p style="margin:0">The one you use every day. Hush lives inside the folder that would be renamed, so the rename has to wait until Hush moves out.</p></div></div>
+</section>
+<aside class="say">The last decision needs a little background. There are two natural places to try the new kit. One is the repository for your qualifying exam talk. It is small, it already has a work area in the old format, and nothing else depends on its paths. The other is Productivity itself, the one you use every day. There, Hush lives inside the folder that would be renamed, so the rename has to wait until Hush moves out.</aside>
+
+<section class="slide" data-title="Decision: first project" data-decision>
+<span class="ask">Decision · First project</span><h2>Where do I migrate first?</h2>
+<div class="options"><div class="opt rec"><h3>Talk repository first<span class="recmark">Recommended</span></h3><p>A full migration on something small. Mistakes are cheap, and it tests every step including the rename.</p></div><div class="opt"><h3>Productivity first</h3><p>You get the benefit where you work, but the rename is deferred and Hush is in the way.</p></div></div>
+<p class="default">If you say nothing: <b>Talk repository first</b>.</p>
+</section>
+<aside class="say">So, where do I migrate first? Starting with the talk repository gives a full migration on something small, where mistakes are cheap, and it exercises every step including the rename. Starting with Productivity gives you the benefit where you actually work, but the rename is deferred and Hush is in the way. I recommend the talk repository first. If you say nothing, that is what I do.</aside>
+
+<section class="slide" data-title="Your decisions">
+<span class="ask">Your decisions</span><h2>Three answers needed</h2>
+<table class="recap"><tr><td>Code check</td><td>Warn</td></tr><tr><td>Build order</td><td>Presenting first</td></tr><tr><td>First project</td><td>Talk repository first</td></tr></table>
+<p class="default">The right column is what I recommend. Answer in your own words, or say "all recommended".</p>
+</section>
+<aside class="say">To recap, three answers are needed. For the code check, I recommend warn. For the build order, presenting first. For the first project, the talk repository. Answer in your own words, or just say, all recommended.</aside>
+
+</body>
+</html>

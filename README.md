@@ -1,480 +1,101 @@
-# Tressoir External
+# Tressoir starter kit
 
-Tressoir External is a small, portable approximation of the Tressoir workflow for ordinary coding-agent harnesses. It provides:
+A small kit for working with coding agents. It does two things:
 
-- a self-contained regular VS Code extension for trusted `.tressoir.md` and `.tressoir.html` artifacts;
-- a project-local **IB (Interpretable Blueprint)** working area;
-- six portable Agent Skills;
-- lightweight Markdown canon, including version-controlled reusable canon artifacts;
-- non-overwriting skill adapters for Claude Code, OpenAI Codex CLI, and the TypeScript Pi coding agent; and
-- a macOS/Linux Bash setup command.
+1. **Shared memory.** State and durable knowledge live in plain files under `WORK/`, so any agent
+   on any harness (Claude Code, Codex, Pi) can continue from them.
+2. **One way of presenting results.** Non-trivial results come back as a briefing: a short deck of
+   narrated slides in one self-contained HTML file.
 
-It does **not** install the Tressoir daemon, SDK, code-server, supervisor, frontend, Python runtime, ontologies, or subagent framework.
+It is meant for frontier models. The guide is short on purpose, and the skills are about a page each.
 
-## MVP status and platform
+## Install
 
-The MVP targets:
+From the root of the project to set up:
 
-- macOS and mainstream Linux;
-- Bash 3.2 or newer;
-- local project filesystems;
-- regular desktop VS Code through an explicitly selected CLI (`code` by default);
-- Claude Code project skills;
-- Codex CLI project skills;
-- TypeScript Pi `0.80.6`-compatible `.agents/skills` discovery after project trust.
+```bash
+/path/to/tressoir-external/install.sh
+```
 
-Native Windows, VS Code web, VSCodium/Open VSX, remote extension hosts, marketplace or npm-package publication, and automatic uninstall are not currently claimed.
-
-## Prerequisites
-
-For the interactive source installer:
-
-- macOS or mainstream Linux with Bash 3.2+;
-- `curl`, `tar`, and a standard `mktemp`;
-- Node.js 22+ and npm when building/installing the VS Code extension;
-- regular desktop VS Code 1.85+ with its `code` CLI available when installing the extension.
-
-Node and npm are not required when you decline the extension. The installed
-Markdown artifact checker requires Node.js 18+ if you choose to run it later.
-
-## Interactive install from GitHub
-
-Open a terminal in the project you want to configure, then run:
+or, without a checkout:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/amlatyrngom/tressoir-external/main/install.sh | bash
 ```
 
-To refresh a prior installation's managed payload as well as the VSIX:
+The installer asks nothing. It always sets up Claude and the shared agents convention together.
+Its only option is `--override`, which refreshes the files the kit owns: the guide, the kit's
+skills and their scripts. It never touches `STATE.md`, `TASK.md`, anything in `MEMORY/` or
+`ARTIFACTS/`, or skills the kit did not ship. Running it again changes nothing.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/amlatyrngom/tressoir-external/main/install.sh | \
-  bash -s -- --override
-```
-
-The installer asks separately whether to:
-
-- install the Tressoir Artifacts VS Code extension;
-- register skills for Claude Code;
-- register skills for OpenAI Codex CLI; and
-- register skills for the TypeScript Pi coding agent.
-
-When at least one agent harness is selected, it also asks:
+## What a project gets
 
 ```text
-Register root guidance in system prompts? [y/n]
+AGENTS.md                 three-line pointer to the guide, the state and root memory
+CLAUDE.md                 the single line @AGENTS.md
+.claude/skills/           a link for each skill
+.agents/skills/           the same links, for the shared agents convention
+WORK/
+  WORK_AREA_GUIDE.md      the always-loaded guide               (kit)
+  STATE.md                what is true and in progress now      (yours)
+  TASK.md                 your scratchpad; agents leave it alone
+  MEMORY/ROOT_MEMORY.md   what should still be known in a month (yours)
+  MEMORY/EXAMPLES/        known-good files kept in their own format
+  ARTIFACTS/<TASK>/       durable outputs, one folder per workstream
+  TMP/                    disposable, ignored by git
+  skills/                 the kit's skills, next to your own
+REPOS/                    child repositories, when there are any
 ```
 
-If accepted, the managed `# Tressoir Guidance` section directly names
-`IB/TRESSOIR.md`, `IB/STATE.md`, and `IB/CANON/ROOT_CANON.md`. Claude uses root
-`CLAUDE.md`; Codex uses root `AGENTS.md`; Pi-only setup uses
-`.pi/APPEND_SYSTEM.md`. Codex and Pi selected together share `AGENTS.md`,
-avoiding duplicate guidance. Missing files are created. Setup upgrades only the
-exact section it generated in earlier releases and preserves edited, duplicated,
-or unrelated content. For Claude, setup also applies two Tressoir defaults to
-`.claude/settings.json` (a smaller auto-compact window and auto-memory off).
+If `AGENTS.md` or `CLAUDE.md` already has content, the pointer is appended and the rest is left
+alone. Any skill you add under `WORK/skills/` gets its two links the next time the installer runs.
 
-The current directory is the target project. The installer downloads the public
-source archive into a temporary directory, builds the VSIX there when selected,
-runs the verified setup command, and removes the downloaded source and build
-output on exit. It does not leave extension source, `node_modules`, package
-output, or a Tressoir External checkout in the target project.
+## Skills
 
-Prompts are read from `/dev/tty`, so they work even though Bash is reading the
-script from the curl pipeline. For a different project or VS Code CLI:
+| Skill | For |
+|---|---|
+| `tressoir-memory` | consolidating state, keeping memory tidy, merges, projects inside projects |
+| `tressoir-plan` | work that needs a decision before implementation; one `PLAN.html` reference page |
+| `tressoir-present` | briefings: writing the slides file, building it, handing it off |
+| `tressoir-migrate` | moving a project from the first kit's `IB/` layout; temporary |
+
+Two optional extras live in `extras/`: `tressoir-structured-review` and `tressoir-isolation`. To
+use one, copy its folder into the project's `WORK/skills/` and run the installer again, which links
+it. From then on `--override` refreshes it with the rest.
+
+## Briefings
+
+An agent writes `<name>.slides.html` and builds it:
 
 ```bash
-TRESSOIR_EXTERNAL_ROOT=/path/to/project \
-TRESSOIR_EXTERNAL_VSCODE_BIN=code-insiders \
-  bash -c 'curl -fsSL https://raw.githubusercontent.com/amlatyrngom/tressoir-external/main/install.sh | bash'
+uv run WORK/skills/tressoir-present/present.py <name>.slides.html
 ```
 
-For unattended use, set all five choices to `yes` or `no`:
+The result is `<name>.html`, which plays from disk in any browser and inline in harness previews
+that show HTML. Nothing has to be running.
+
+- Needs [`uv`](https://docs.astral.sh/uv/) and `ffmpeg`. The script says clearly what is missing.
+- The default voice, George, is local (Kokoro). The first build downloads the voice model, about
+  350 MB, once per machine. Narration is cached, so unchanged slides are not spoken again.
+- `--voice heart` is the other local voice. `--voice harper` uses Azure speech and needs
+  `AZURE_VOICE_KEY` and `AZURE_VOICE_REGION` in the environment, the project's `.env` or `WORK/.env`.
+- `--mp4` also writes a video with chapters and captions, for sharing. It needs Chrome or Chromium.
+- Inline previews refuse files over about 2 MB, roughly nine minutes; the script warns before that.
+
+## Coming from the first kit
+
+The first kit had an `IB/` folder, canon files, a VS Code extension and `.tressoir.md` /
+`.tressoir.html` artifacts. None of that is here any more, and old artifacts are not converted.
+The installer refuses a project that still has `IB/`; follow `skills/tressoir-migrate/SKILL.md`,
+which commits and tags the old files before retiring them.
+
+## Tests
 
 ```bash
-TRESSOIR_EXTERNAL_VSCODE=yes \
-TRESSOIR_EXTERNAL_CLAUDE=yes \
-TRESSOIR_EXTERNAL_CODEX=yes \
-TRESSOIR_EXTERNAL_PI=yes \
-TRESSOIR_EXTERNAL_GUIDANCE=yes \
-  bash -c 'curl -fsSL https://raw.githubusercontent.com/amlatyrngom/tressoir-external/main/install.sh | bash'
+bash tests/test_install.sh                 # installer: layout, repeat runs, --override, migration swap
+bash tests/test_isolation.sh               # the isolation extra's container helper
+uv run skills/tressoir-present/present.py tests/fixtures/three-choices.slides.html
+uv run tests/check_player.py tests/fixtures/three-choices.html    # player, headless Chrome
 ```
 
-To install only the VS Code extension from the current project directory:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/amlatyrngom/tressoir-external/main/install.sh | \
-  env TRESSOIR_EXTERNAL_VSCODE=yes \
-      TRESSOIR_EXTERNAL_CLAUDE=no \
-      TRESSOIR_EXTERNAL_CODEX=no \
-      TRESSOIR_EXTERNAL_PI=no \
-  bash
-```
-
-Accepted choice values are `yes`/`no`, `y`/`n`, `true`/`false`, or `1`/`0`.
-
-## Install from a local source checkout
-
-Keep `bin/` and `share/` together. To set up harness skills without installing
-the extension:
-
-```bash
-/path/to/tressoir-external/bin/tressoir-external setup \
-  --root "$PWD" --claude --codex --pi --register-guidance --no-vscode
-```
-
-To build and install the extension from the checkout:
-
-```bash
-cd /path/to/tressoir-external/extension
-npm ci
-npm run package:vsix
-
-../bin/tressoir-external setup \
-  --root /path/to/project \
-  --claude --codex --pi --register-guidance \
-  --vsix "$PWD/dist/tressoir-artifacts-0.1.8.vsix"
-```
-
-Ordinary `.html` files remain text by default. Use **Reopen With → Tressoir Artifact Preview
-(HTML)** for the trusted rendered view; `.tressoir.html` remains rendered by default. Raw HTML is
-presented without an extension-owned outer card so the authored page controls its own layout.
-
-Set `tressoir.markdown.baseFontSize` or `tressoir.html.baseFontSize` in VS Code settings to tune
-open artifacts live without recompiling. Markdown headings scale with the projection hierarchy;
-HTML `rem`/`em` typography scales from the configured root size.
-
-Useful setup options:
-
-```text
---root PATH        Target another project; default is exactly the current directory
---register-guidance
-                   Create, append, or upgrade selected harness prompt guidance
-                   naming IB/TRESSOIR.md, IB/STATE.md, and IB/CANON/ROOT_CANON.md
---vsix PATH        Install the supplied Tressoir Artifacts VSIX
---vscode-bin PATH  Use code-insiders or an absolute VS Code CLI path
---no-vscode        Skip extension installation
---override         Refresh installer-owned IB payload, skill-owned isolation
-                   references, selected adapters, and the supplied VSIX while
-                   preserving adapted isolation, state, and canon
---dry-run          Print the plan without changing the project or VS Code
-```
-
-Setup verifies the source payload checksums before writing. It creates only
-absent canonical files and collision-checked relative skill links. A second
-identical run is a no-op unless `--override` is supplied.
-
-`--override` is deliberately bounded. It resets `IB/TASK.md`, `IB/TRESSOIR.md`,
-`IB/.gitignore`, the canon-artifacts guide, every bundled skill tree (including
-the isolation reference templates), and selected `.claude/skills/` or
-`.agents/skills/` adapters. It also force-installs the supplied VSIX even when
-the same version is already installed. It preserves the complete adapted
-`IB/isolation/` tree, `IB/STATE.md`, every `*CANON.md`, `IB/ARTIFACTS/`, `IB/TMP/`,
-unknown IB paths, and root harness guidance outside its normal managed-section behavior.
-Skill replacement carries forward any `*CANON.md` stored inside a bundled skill
-tree. After an override, ask an agent to compare the refreshed references under
-`IB/skills/tressoir-isolation/templates/` with the adapted files and port only
-the relevant upstream changes. Use `--override --dry-run` to inspect this refresh without
-writing.
-
-The older `tressoir.bridge` extension owns the same artifact editor view types
-and cannot be enabled alongside this standalone extension. The VS Code CLI
-reports installation inventory, not enabled state, so if setup finds the
-legacy bridge installed it conservatively skips the standalone extension and
-asks you to uninstall the bridge, reload VS Code, and retry. After
-upgrading Tressoir Artifacts, setup also asks you to reload the VS Code window
-(or close and reopen affected artifact tabs) so already-open retained webviews
-do not keep old runtime JavaScript.
-
-## Created project layout
-
-```text
-IB/
-├── TRESSOIR.md
-├── .gitignore
-├── TASK.md
-├── STATE.md
-├── ARTIFACTS/
-├── TMP/
-├── CANON/
-│   ├── ROOT_CANON.md
-│   └── CANON_ARTIFACTS/
-│       └── README.md
-└── skills/
-    ├── tressoir-artifact-md/
-    ├── tressoir-artifact-html/
-    ├── tressoir-plan/
-    ├── tressoir-working-area/
-    ├── tressoir-canon/
-    ├── tressoir-structured-review/
-    └── tressoir-isolation/
-```
-
-Setup also creates the small, adaptable isolation starter:
-
-```text
-IB/isolation/
-├── README.md
-├── user.devcontainer.json
-├── agent.devcontainer.json
-└── agent-setup.sh
-```
-
-When their destinations are free, setup exposes the two canonical templates through live relative
-links at `.devcontainer/user/devcontainer.json` and
-`.devcontainer/agent/devcontainer.json`. Existing Dev Container paths are always preserved,
-including under `--override`.
-
-Claude receives per-skill relative links under `.claude/skills/`. Codex and Pi share per-skill links under `.agents/skills/`.
-
-## Isolation starters
-
-The `tressoir-isolation` skill helps an agent inspect the project's existing toolchain and Dev
-Container setup, then adapt one of the two templates without replacing mature configuration.
-Prefer the setup-created symlink and edit its canonical target under `IB/isolation/`; copy only
-where symlinks are unsuitable. Select the configuration with **Dev Containers: Reopen in
-Container**.
-
-The user template keeps the normal read-write, host-backed project workspace. The dedicated Agent
-Container mounts host source read-only at `/source`, works in disposable `/workspace`, and mounts
-the host's `IB/` read-write at `/workspace/IB`. Any copied root `AGENTS.md` or `CLAUDE.md` receives
-the isolation notice; absent guidance files remain absent. A user container and agent container can
-be opened independently in two VS Code windows; this does not require Compose, Docker-in-Docker, or
-a host Docker socket.
-
-Both templates use the official Node Dev Container Feature with Node 24 LTS. The selected harness
-flags render the matching official CLIs into both configurations. Codex and Claude also declare
-their official VS Code extensions (`openai.chatgpt` and `anthropic.claude-code`). Pi has no official
-VS Code extension and therefore receives only its official `@earendil-works/pi-coding-agent` CLI.
-The host-aligned non-root `vscode` user has passwordless `sudo`; startup repairs its container-local
-home and cache ownership so ordinary tool output remains user-owned while system administration is
-unrestricted.
-
-The adapted four-file starter is always create-only. Installer-owned bases live under
-`IB/skills/tressoir-isolation/templates/` with `.template` names. `--override` refreshes those
-references but leaves every byte under `IB/isolation/` untouched. Ask an agent to reconcile a new
-reference into the adapted files while preserving project-specific image, features, mounts,
-extensions, lifecycle commands, and selected harnesses.
-
-## Optional root guidance registration
-
-Canonical guidance is installed as `IB/TRESSOIR.md`. The interactive installer
-can register it in root harness instruction files when you answer yes to:
-
-```text
-Register root guidance in system prompts? [y/n]
-```
-
-The equivalent direct setup option is `--register-guidance`.
-
-For selected Claude setup, the managed section in root `CLAUDE.md` is:
-
-```md
-# Tressoir Guidance
-
-Before substantial work, read and follow `IB/TRESSOIR.md`.
-Read current status and open decisions in `IB/STATE.md`.
-Read durable project decisions in `IB/CANON/ROOT_CANON.md`.
-```
-
-For selected Codex setup, the managed section in root `AGENTS.md` is identical:
-
-```md
-# Tressoir Guidance
-
-Before substantial work, read and follow `IB/TRESSOIR.md`.
-Read current status and open decisions in `IB/STATE.md`.
-Read durable project decisions in `IB/CANON/ROOT_CANON.md`.
-```
-
-For Pi-only setup, that same prose section is written to
-`.pi/APPEND_SYSTEM.md`. When Codex and Pi are both selected, root `AGENTS.md`
-serves both and `.pi/APPEND_SYSTEM.md` is not created.
-
-When Claude is selected and guidance is registered, setup also applies Tressoir
-defaults to root `.claude/settings.json`:
-
-```json
-{
-  "env": {
-    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "400000"
-  },
-  "autoMemoryEnabled": false
-}
-```
-
-Claude Code's 1M-token context default is costly and unnecessary here, and the
-Interpretable Blueprint owns project memory, so auto-memory stays off. An
-existing `settings.json` is updated atomically with `jq` or `python3`: only
-these two keys are set, and all other settings, environment entries, and
-restrictive file permissions are preserved.
-A symlinked or non-regular `settings.json` is left untouched and reported. This
-is Claude-only; Codex has sensible defaults and is not modified.
-
-Registration is intentionally narrow:
-
-- If the root target is absent, setup creates it.
-- If it is a regular file without any Tressoir guidance, setup appends one section.
-- If it still contains the exact section from an earlier release, setup upgrades that block in place.
-- If the managed section was edited or duplicated, or the file mentions `TRESSOIR.md` unrelatedly, setup preserves the file untouched and prints the section to add manually.
-- Reruns do not duplicate the section.
-- Symlinks, directories, and other incompatible targets are preserved and
-  reported as safe degradation.
-- Setup never edits `.claude/CLAUDE.md`, `AGENTS.override.md`,
-  `.claude/rules/*`, `.pi/SYSTEM.md`, or global instructions. The only managed
-  settings are the two Claude keys above in `.claude/settings.json`.
-
-Declining the prompt preserves the earlier behavior: setup prints manual
-Claude, Codex, and Pi inclusion options and makes no instruction-file change.
-Existing instruction precedence remains under user control.
-
-## Working-area behavior
-
-`IB` means **Interpretable Blueprint**: a human-inspectable workspace shared across agents and sessions.
-
-- `TASK.md` is user-owned and is **not** read or edited automatically. Agents access it only on explicit user request and at the relevant point.
-- `STATE.md` is agent-maintained. Keep it current; around 16,000 characters, proactively condense it toward 8,000.
-- `ARTIFACTS/` stores durable plans, research, explainers, reviews, and reusable helpers. Reuse one upper-case folder for the full lifetime of a broad task.
-- `TMP/` stores disposable logs, dumps, downloads, screenshots, and experiments.
-- `CANON/ROOT_CANON.md` indexes small, focused subsystem canon files.
-- `CANON/CANON_ARTIFACTS/` stores reviewed, validated configs, scripts, templates, fixtures, and small reference implementations that are known-good reusable examples. These files should be version-controlled, with their usage and limits documented in the directory.
-
-The installed `TRESSOIR.md` points to the exact skill to use for planning, artifacts, canon/upkeep, and structured review.
-
-Setup also seeds `IB/.gitignore` on a create-only basis. Its narrow defaults ignore disposable `TMP/` contents, artifact-local `vendor/` caches, `.env`, and `.DS_Store`; it does not hide `TASK.md`, `STATE.md`, prose canon, `CANON_ARTIFACTS/`, skills, task artifacts, or interaction records. An existing `IB/.gitignore` is preserved unless the user explicitly passes `--override`.
-
-## Artifact template folder and checker
-
-After setup:
-
-```text
-IB/skills/tressoir-artifact-md/user_artifact_md_template/
-├── PLAN.tressoir.md
-├── INTERACTIVE.tressoir.md
-├── TASK.md
-└── interactions.json
-```
-
-Copy the relevant template into an existing broad-task folder without overwriting. The folder is intentionally reusable: an initial plan, user-requested `<STEP>_PLAN.md` + `<STEP>_PLAN.tressoir.md` pair, explainers, research, raw HTML, and `NEXT_INTERACTIVE.tressoir.md` may all live together. Create another upper-case folder only for a genuinely separate workstream or when the user requests one.
-
-For example:
-
-```bash
-cp IB/skills/tressoir-artifact-md/user_artifact_md_template/PLAN.tressoir.md \
-  IB/ARTIFACTS/FEATURE_X/MIGRATION_PLAN.tressoir.md
-```
-
-Check first that the destination is absent. Preserve an existing folder-local `TASK.md` and `interactions.json`; for a projected artifact, create the matching plain Markdown source as well.
-
-Check projected Markdown using the exact committed lint runtime:
-
-```bash
-node IB/skills/tressoir-artifact-md/scripts/check_md.js \
-  IB/ARTIFACTS/FEATURE_X/PLAN.tressoir.md
-```
-
-The checker requires Node 18+ but no npm install. Node is not required to render the installed VS Code extension; it is needed only for this optional authoring check and for extension development.
-
-## VS Code extension
-
-The VSIX is built from self-contained source under `extension/` and contains only the artifact stack:
-
-- `.tressoir.md` and `.tressoir.html` custom editors;
-- projection and webview runtime;
-- interaction persistence and sibling opening;
-- theme/morph behavior;
-- committed Markdown runtime assets.
-
-It contains no backend bridge, agent editor commands, plugin host, daemon connection, supervisor, code-server, or Python runtime.
-
-### Trusted-artifact warning
-
-Both artifact formats are executable trusted content, not inert previews.
-
-- Raw HTML and authored inline, relative, or direct HTTPS scripts can execute.
-- Markdown permits raw HTML and scripts.
-- Remote HTML resources load from the network; declared Markdown resources may use local caching.
-- Authored code receives a narrow contained interaction/open-file helper.
-
-Only open artifacts from authors and workspaces you trust. The MVP has no sanitized safe-preview mode.
-
-## Collision behavior and result codes
-
-Without `--override`, the command never force-replaces an existing file,
-directory, or symlink. Override mode replaces only the exact managed paths
-listed above, using staged same-directory swaps; unsafe ancestors are still
-rejected.
-
-- `0` — requested setup is complete or already correct.
-- `2` — setup completed safely but preserved one or more adapter/canonical-skill collisions; manual work may remain.
-- `1` — validation or extension installation failed.
-
-Seed files and canonical guidance are create-only by default. Existing user
-versions and differing skill trees are preserved. `--override` refreshes the
-managed subset while retaining state, canon, artifacts, temporary work, and
-unknown paths.
-
-VS Code installation happens after project setup. If it fails, project setup remains in place and a rerun retries the extension phase.
-
-## Development and release verification
-
-Extension-only:
-
-```bash
-cd extension
-npm ci
-npm run typecheck
-npm test
-npm run package:vsix
-```
-
-Complete direct release gate:
-
-```bash
-scripts/check_release.sh
-```
-
-For a disposable, committed project containing deliberate collisions and
-existing Claude/Codex/Pi files:
-
-```bash
-tests/helpers/dummy_repo/make_dummy_repo.sh "/tmp/tressoir dummy repo"
-```
-
-The generated repository includes its own `TESTING.md` and verification helpers
-for non-clobbering, all-harness setup, and an idempotent rerun.
-
-The release gate:
-
-- runs 112 focused extension tests;
-- builds from a clean `dist/`;
-- inspects the packaged manifest and archive;
-- requires both artifact editors and all runtime assets;
-- rejects source, tests, source maps, `node_modules`, and nested VSIX files;
-- validates all seven Agent Skills;
-- checks both distributed Markdown templates with the bundled checker;
-- regenerates payload checksums; and
-- runs filesystem setup fixtures for combinations, idempotence, dry-run,
-  collisions, root-guidance creation/append/upgrade/preservation, Claude
-  settings-defaults merge, misplaced
-  `.agent` adapter detection, path spaces, extension failure, extension upgrade,
-  legacy-bridge conflict, symlink containment, and bounded override behavior;
-- exercises the shared container helper with mocked administration and npm boundaries, including
-  home/cache ownership repair and target-specific CLI selection;
-- runs an offline piped-bootstrap fixture that builds in temporary storage,
-  installs all selected integrations, forwards `--override`, registers opt-in
-  root guidance, and cleans up; and
-- rejects generated VSIX files in the public source payload.
-
-`extension/dist/`, `extension/node_modules/`, and npm debug logs are ignored.
-Release checks build transient output locally; no npm package is published.
-
-For a final desktop smoke, install the built VSIX into isolated VS Code directories and confirm:
-
-```text
-tressoir.tressoir-artifacts@0.1.8
-```
-
-## Licensing
-
-First-party Tressoir External and Tressoir Artifacts code is licensed under the MIT License; see `LICENSE` and `extension/LICENSE.md`. `extension/THIRD_PARTY_NOTICES.md` records bundled runtime provenance and third-party licenses.
+The last two build the fixture briefing and play it at two sizes on every audio route.
