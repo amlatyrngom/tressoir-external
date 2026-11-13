@@ -70,14 +70,20 @@ An entry restates whatever is no longer true, and nothing else:
 - A line under `interface` replaces the line of that name in that box, or is added last. Leave the
   words out to keep them. `- name` removes a line. A rename is `- old` and the new line. A changed
   signature goes here and not also in `affects`. A new type goes under the box that owns it.
+- When two built entries state the same line, the later one in the file stands. The script takes
+  the line out of the earlier entry, puts its name under that entry's `affects`, and says so.
 - A box under `boxes` is matched by `folder`. Write a new one whole, with its `interface`. For an
   existing one give only what changed; `also` adds paths.
+- A new box is a folder directly in a row's or a region's folder. The script does not place any
+  other: a folder inside a box is not a box, and where two regions share the folder (a flat
+  project) the region is mine to choose. Leave such a box out of `boxes` and tell me.
 - A planned entry also says what git cannot know yet: a note that starts with `+ ` is a file the
   plan adds, `- ` one it removes.
 
 How many entries: with a plan, one per plan step, with the same names. Without a plan, one per
-task I asked for, written before the task's first commit. Do not rebuild entries later from an
-old diff.
+task I asked for, written before the task's first commit. Every entry has its own name: two built
+entries, or two of one plan, with the same name stop the script. Do not rebuild entries later from
+an old diff.
 
 ### `affects`: the nearest listed function
 
@@ -117,7 +123,14 @@ uv run WORK/skills/tressoir-system-view/system_view.py --from <commit>   # also 
 
 It needs only Python 3 and git; `python3` works in place of `uv run`. Once the last commit holds a
 built entry, the next run takes it out of `changes.json` by itself: a built and committed change
-reads as if it was always there. Move Seen only when a planned task starts, or when I say so.
+reads as if it was always there. "Holds" means the commit has the entry unchanged and its
+`system.json` already says what the entry states, so an entry committed before the script ran
+stays for one more commit. Work that goes on in the same files after that commit needs an entry
+of its own. Move Seen only when a planned task starts, or when I say so.
+
+A file in a shape the script cannot read (a list where an object belongs, text where a list
+belongs, a file not saved as UTF-8) stops it with one sentence that says what to write. Nothing
+is folded until that is corrected.
 
 What the script prints:
 
@@ -129,7 +142,8 @@ What the script prints:
 | a built entry with a `+ ` file that does not exist | a flow passing a box an entry changes: check it still reads true |
 | a planned path that does not exist and has no `+ ` | an open plan restates a line that has changed since the last commit |
 | a name twice in a box; a path in two boxes; a bare name with no single match | an entry replaced a line: what it was, what it is |
-| | a flow step, a link or a neighbour that points at nothing |
+| a new box the script will not place: inside a box, deeper than a row, or where regions share the folder | a flow step, a link or a neighbour that points at nothing |
+| | a box with no file; a figure whose regions give no folder |
 
 Reading a diff:
 
@@ -154,8 +168,9 @@ Written with me. Four layers; each is optional and the page works without the la
 1. **Regions and boxes.** Five regions: `entry` (how work gets in), `core` (what the project
    does), `external` (services it calls), `platform` (what differs per platform), `separate`
    (another product in the same repository). A region has a `folder`, a `line` and `boxes`; leave
-   it empty when it does not apply. `links` between regions have `from`, `to` (region folders), a
-   short `label` and a sentence, `says`.
+   it empty when it does not apply. Where the code sits at the top of the repository, the folder
+   is written `"./"`. `links` between regions have `from`, `to` (region folders), a short `label`
+   and a sentence, `says`.
 2. **Inside a box.** `inside` lists its rows; a row is a folder and its boxes are folders in it.
    A box with an inside may give `links` between its rows, and `from` and `uses`: the outside
    boxes it works with, each with a sentence.
@@ -170,7 +185,8 @@ Written with me. Four layers; each is optional and the page works without the la
   `"shared": true` marks the one box of helpers with no better home.
 - A box lists what other boxes call. An entry box lists its entry points: commands, routes.
 - Names are spelt as in the code. Where the code has no single name (a command, a route), choose
-  one; the note that it appears nowhere is then expected.
+  one; the note that it appears nowhere is then expected. The name of a line is its first word, so
+  two routes cannot both start with `GET`: write `get_users  // GET /users, lists the users`.
 - A type is written in the box that owns it.
 - A bare name (`"lookup"`) is the function of that name from a box inside, and must match exactly
   one. A parent never writes out a signature that an inner box lists.
