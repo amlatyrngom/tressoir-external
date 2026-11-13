@@ -10,7 +10,7 @@
 
 At 375, 705, 900 and 1440 pixels wide it goes through every tab, every view, every box (closed and
 with every line opened) and every flow step, and expects: no console error; no text of the figure
-on a box or on other text; no two regions picked by the same name; at 375 pixels, nothing wider than
+on a box or on other text; no name larger than its box; no two regions picked by the same name; at 375 pixels, nothing wider than
 the screen. It then draws the page
 inside a hidden frame, shows the frame, and expects the same figure as in a frame that was never
 hidden. Uses the Chrome already installed; downloads no browser.
@@ -31,6 +31,8 @@ SWEEP = """(narrow) => { const bad = [], strip = document.getElementById('strip'
     const boxes = [...st.querySelectorAll('.nd')].map(e => [e.textContent, R(e)]);
     const texts = [...st.querySelectorAll('.ed text')].filter(e => e.style.display !== 'none').map(e => [e.textContent, R(e)])
       .concat([...st.querySelectorAll('.rg b')].map(e => [e.textContent, R(e)]));
+    st.querySelectorAll('.nd').forEach(e => { const s = e.querySelector('span'); if (!s) return; const a = R(s), b = R(e);
+      if (a.left < b.left - 1 || a.right > b.right + 1 || a.top < b.top - 1 || a.bottom > b.bottom + 1) bad.push(where + ': the name "' + e.textContent + '" does not fit in its box'); });
     const picks = [...st.querySelectorAll('.rg')].map(e => e.dataset.pick);
     if (new Set(picks).size !== picks.length) bad.push(where + ': two regions are picked by the same name (' + picks.join(', ') + ')');
     texts.forEach(([t, r]) => boxes.forEach(([n, b]) => { if (hit(r, b)) bad.push(where + ': "' + t + '" is on the box ' + n); }));

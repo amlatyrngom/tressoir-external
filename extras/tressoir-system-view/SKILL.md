@@ -217,7 +217,9 @@ Written with me. Four layers; each is optional and the page works without the la
 ### Starting in a project that already has code
 
 Propose the regions and boxes from the code as it is, and settle them with me before going
-further: around a dozen boxes, each a component I would name when describing the project. Once the
+further. Draw what a system architect would put on a whiteboard: a box is a part with a job of its
+own, not a file, and its lines are what an architect needs to know to connect it to the others.
+That is around a dozen boxes; a simple project needs fewer, a complex one more. Once the
 figure is agreed, add the interface and one or two flows. Give a box an inside only when it has
 folders of its own that I would name; a box that is one file or one flat folder has none. Where a
 component is spread out, give the box its main folder and list the rest under `also`. Leave

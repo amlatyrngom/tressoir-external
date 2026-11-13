@@ -34,7 +34,7 @@
       ] },
     "platform": { "folder": "pocket/", "line": "differs per operating system",
       "boxes": [
-        { "name": "Notifier", "folder": "pocket/notify/", "line": "says when a page is saved",
+        { "name": "Desktop notices", "folder": "pocket/notify/", "line": "says when a page is saved",
           "interface": ["notify(title: Text)  // shows a desktop notice"] }
       ] },
     "separate": { "folder": "", "line": "",

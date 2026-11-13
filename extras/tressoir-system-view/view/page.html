@@ -49,7 +49,9 @@ button { font:inherit; color:inherit; cursor:pointer; background:none; border:0;
 .rg { position:absolute; border:1px solid color-mix(in srgb, var(--k) 45%, var(--panel)); border-radius:9px; background:color-mix(in srgb, var(--k) 7%, var(--panel)); cursor:pointer; }
 .rg b { position:absolute; white-space:nowrap; font-size:9.5px; line-height:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--k); font-weight:700; }
 .rg.sel { box-shadow:0 0 0 2px var(--k); }
-.nd { --bd:var(--line); position:absolute; display:grid; place-items:center; border:1.5px solid var(--bd); border-radius:6px; background:var(--panel); font-size:12.5px; font-weight:650; white-space:nowrap; cursor:pointer; }
+.nd { --bd:var(--line); position:absolute; display:grid; place-items:center; border:1.5px solid var(--bd); border-radius:6px; background:var(--panel); font-size:12.5px; font-weight:650; line-height:1.1; text-align:center; overflow-wrap:anywhere; cursor:pointer; }
+/* a name wraps onto a second line only where its box is too narrow for it; pills and chips are sized to their text */
+.nd.tight { font-size:11px; } .nd.pill, .nd.near { white-space:nowrap; }
 .nd.util { border-style:dashed; font-weight:500; }
 .nd.add { --bd:var(--add); background:color-mix(in srgb, var(--add) 13%, var(--panel)); color:var(--add); }
 .nd.chg { --bd:var(--chg); background:color-mix(in srgb, var(--chg) 13%, var(--panel)); color:var(--chg); }
@@ -301,7 +303,7 @@ function stage(){ const L = LAY = layout(V);
   const live = boxes.filter(b => st(b) && st(b) !== 'del'), tray = boxes.filter(b => st(b) === 'del' && live.some(o => over(L.pos[b.folder], L.pos[o.folder]))), full = L.H + (tray.length ? 42 : 0);
   const regions = L.regions.map(g => `<div class="rg ${g.r.slot}" data-pick="region:${g.r.id}" style="left:${g.x}px;top:${g.y}px;width:${g.w}px;height:${g.h}px"><b style="left:8px;top:6px">${g.r.title}</b></div>`).join('');
   const nd = (b, pos, extra) => { const c = st(b); if (c === null) return '';
-    return `<div class="nd ${c} ${b.shared ? 'util' : ''} ${viewOf(b.folder) && !extra ? 'has' : ''} ${extra || ''}" data-pick="node:${b.folder}" style="left:${pos[0]}px;top:${pos[1]}px;width:${pos[2]}px;height:${pos[3]}px"><span>${esc(b.name)}</span></div>`; };
+    return `<div class="nd ${c} ${b.shared ? 'util' : ''} ${viewOf(b.folder) && !extra ? 'has' : ''} ${pos[2] < 80 ? 'tight' : ''} ${extra || ''}" data-pick="node:${b.folder}" style="left:${pos[0]}px;top:${pos[1]}px;width:${pos[2]}px;height:${pos[3]}px"><span>${esc(b.name)}</span></div>`; };
   const nodes = boxes.map(b => { const t = tray.indexOf(b); return nd(b, t < 0 ? L.pos[b.folder] : [76 + t * 124, L.H + 4, L.pos[b.folder][2], 30]); }).join('') + L.near.map(n => nd(boxAt(n.folder), n.pos, 'near')).join('')
     + L.labs.map(l => `<div class="lab" style="left:${l.x}px;top:${l.y}px">${l.text}</div>`).join('') + (tray.length ? `<div class="lab gone" style="left:8px;top:${L.H + 13}px">Removed</div>` : '');
   const edges = L.edges.map(edgeSvg).join('');
