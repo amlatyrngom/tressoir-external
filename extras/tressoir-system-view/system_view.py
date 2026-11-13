@@ -30,6 +30,7 @@ INNER_SLOTS = ['entry', 'core', 'ext', 'plat']
 HEAD_KEYS = ['name', 'folder', 'line', 'plan', 'shared']
 # left out of the file view: the harness's links to the skills
 LINK_FOLDERS = ['.claude/skills/', '.agents/skills/']
+EMPTY_BLOB = 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391'
 
 
 class Stop(Exception):
@@ -108,15 +109,41 @@ class Git:
         return out if code == 0 else None
 
     def changed_since(self, commit):
-        """{path: add | chg | del} between a commit and the working tree, untracked files included."""
-        out = self._run('diff', '--name-status', '--no-renames', '--relative', '-z', commit)[1].split('\0')
-        st = {}
-        for i in range(0, len(out) - 1, 2):
-            st[out[i + 1]] = {'A': 'add', 'D': 'del'}.get(out[i][:1], 'chg')
-        for p in self._run('ls-files', '-z', '--others', '--exclude-standard')[1].split('\0'):
-            if p:
-                st[p] = 'add'
-        return {p: s for p, s in st.items() if self.keep([p])}
+        """({path: add | chg | del}, {new path: old path}) between a commit and the working tree, untracked files
+        included. A renamed file is `del` under its old path and `add` under its new one, and is in the second map."""
+        out = self._run('diff', '--name-status', '-M', '--relative', '-z', commit)[1].split('\0')
+        st, moved, i = {}, {}, 0
+        while i < len(out) - 1:
+            code = out[i][:1]
+            if code in ('R', 'C') and i + 2 < len(out):
+                if code == 'R':
+                    st[out[i + 1]], moved[out[i + 2]] = 'del', out[i + 1]
+                st[out[i + 2]] = 'add'
+                i += 3
+            else:
+                st[out[i + 1]] = {'A': 'add', 'D': 'del'}.get(code, 'chg')
+                i += 2
+        new = [p for p in self._run('ls-files', '-z', '--others', '--exclude-standard')[1].split('\0') if p]
+        for p in new:
+            st[p] = 'add'
+        # a file moved without telling git: the same content under a new name git does not follow yet
+        gone = [p for p, v in st.items() if v == 'del' and p not in moved.values()]
+        if gone and new and len(new) <= 500:
+            was = {}
+            for p in gone:
+                code, sha = self._run('rev-parse', '%s:./%s' % (commit, p))
+                if code == 0 and sha.strip() != EMPTY_BLOB:
+                    was.setdefault(sha.strip(), p)
+            code, shas = self._run('hash-object', '--', *new)
+            if code == 0:
+                for p, sha in zip(new, shas.split('\n')):
+                    if sha in was and was[sha] not in moved.values():
+                        moved[p] = was[sha]
+        st = {p: v for p, v in st.items() if self.keep([p])}
+        return st, {n: o for n, o in moved.items() if n in st and o in st}
+
+    def diff(self, commit, path):
+        return self._run('diff', '-U0', commit, '--', path)[1]
 
     def commits_between(self, older, newer='HEAD'):
         return [c for c in self._run('rev-list', '--reverse', '%s..%s' % (older, newer))[1].split('\n') if c]
@@ -188,8 +215,16 @@ class World:
         self.order = {}        # folder -> ids of its lines, in order
         for row, parent, _key in rows_of(system):
             for b in row.get('boxes') or []:
+                if b['folder'] in self.boxes and problems is not None:
+                    problems.error('The box %s is written twice.' % b['folder'])
                 self.boxes[b['folder']] = b
                 self.parent[b['folder']] = parent['folder'] if parent else None
+        owner = {}
+        for folder in self.boxes:
+            for p in self.paths(folder):
+                if p in owner and owner[p] != folder and problems is not None:
+                    problems.error('The path %s is given to two boxes: %s and %s.' % (p, owner[p], folder))
+                owner.setdefault(p, folder)
         bare = []
         for folder, b in self.boxes.items():
             self.order[folder] = []
@@ -521,8 +556,8 @@ def state_snap(lists, world, files, all_files):
     return snap
 
 
-def delta_snap(lists, a, b, a_files, b_files, changed, all_files):
-    """From state a to state b. `changed` is {path: add | chg | del}."""
+def delta_snap(lists, a, b, a_files, b_files, changed, all_files, moved=None):
+    """From state a to state b. `changed` is {path: add | chg | del}; `moved` is {new path: old path}."""
     listed = World(lists.sys)
     snap = {'files': {}, 'boxes': {}, 'lines': {}}
     for p in all_files:
@@ -530,6 +565,11 @@ def delta_snap(lists, a, b, a_files, b_files, changed, all_files):
             snap['files'][p] = changed[p]
         elif p not in a_files and p not in b_files:
             snap['files'][p] = None
+    # a renamed file is one line: its new path, with the old name beside it
+    for new, old in (moved or {}).items():
+        snap['files'][new], snap['files'][old] = 'chg', None
+    if moved:
+        snap['moved'] = dict(moved)
     for f in listed.boxes:
         ina, inb = f in a.boxes, f in b.boxes
         if not ina and not inb:
@@ -612,6 +652,312 @@ def emit_flows(system):
     return out
 
 
+# ---------------------------------------------------------------- the checks
+
+def check_shape(system, entries, shown):
+    """Stops on a file whose shape the rest of the script cannot read."""
+    regions = system.get('regions')
+    if regions is not None and not isinstance(regions, dict):
+        raise Stop('%s: "regions" must be an object.' % shown('system.json'))
+
+    def row(r, where):
+        if not isinstance(r, dict) or not isinstance(r.get('boxes') or [], list):
+            raise Stop('%s: %s must be an object with a list under "boxes".' % (shown('system.json'), where))
+        for b in r.get('boxes') or []:
+            if not isinstance(b, dict) or not isinstance(b.get('folder'), str) or not b['folder']:
+                raise Stop('%s: a box in %s has no "folder"%s.' % (shown('system.json'), where,
+                           ' (%s)' % b['name'] if isinstance(b, dict) and b.get('name') else ''))
+            if not isinstance(b.get('interface') or [], list) or not all(isinstance(t, str) for t in b.get('interface') or []):
+                raise Stop('%s: "interface" of %s must be a list of lines.' % (shown('system.json'), b['folder']))
+            for inner in b.get('inside') or []:
+                row(inner, 'the rows inside ' + b['folder'])
+
+    for key, r in (regions or {}).items():
+        if key not in REGIONS:
+            raise Stop('%s has a region "%s". The regions are: %s.' % (shown('system.json'), key, ', '.join(REGIONS)))
+        if r is not None:
+            row(r, 'the region "%s"' % key)
+    for e in entries:
+        if not isinstance(e, dict) or not isinstance(e.get('name'), str) or not e['name']:
+            raise Stop('%s: every entry is an object with a "name".' % shown('changes.json'))
+        ok = (isinstance(e.get('files') or {}, dict) and all(isinstance(n, str) for n in (e.get('files') or {}).values())
+              and isinstance(e.get('affects') or [], list) and all(isinstance(a, str) for a in e.get('affects') or [])
+              and isinstance(e.get('interface') or {}, dict)
+              and all(isinstance(l, list) and all(isinstance(t, str) for t in l) for l in (e.get('interface') or {}).values())
+              and isinstance(e.get('boxes') or [], list) and all(isinstance(b, dict) for b in e.get('boxes') or [])
+              and all(isinstance(b.get('interface') or [], list) for b in e.get('boxes') or []))
+        if not ok:
+            raise Stop('%s: the entry "%s" is not in the shape the skill gives: "files" is an object of notes, "affects" a list of '
+                       'names, "interface" an object of lists of lines, "boxes" a list of boxes.' % (shown('changes.json'), e['name']))
+
+
+def stated(entry):
+    """Every interface line an entry states: (the list it is in, the box's folder, the text)."""
+    out = []
+    for folder, lines in (entry.get('interface') or {}).items():
+        out.extend((lines, folder, t) for t in list(lines))
+    for b in entry.get('boxes') or []:
+        if b.get('folder'):
+            out.extend((b['interface'], b['folder'], t) for t in list(b.get('interface') or []))
+    return out
+
+
+def line_id(folder, text):
+    p = parse_line(text[2:] if text.startswith('- ') else text)
+    return p['name'] if p['type'] else folder + '#' + p['name']
+
+
+def later_wins(built, problems):
+    """A built line is stated once. When two built entries state the same line the later one stands: the line is taken
+    out of the earlier entry, and its name goes under that entry's `affects` unless the line is gone."""
+    first, rewritten = {}, False
+    for e in built:
+        for lines, folder, text in stated(e):
+            i = line_id(folder, text)
+            old = first.get(i)
+            if old is not None and old[0] is not e and old[2] in old[1]:
+                old[1].remove(old[2])
+                name = parse_line(text[2:] if text.startswith('- ') else text)['name']
+                if not text.startswith('- ') and not old[2].startswith('- ') \
+                        and name not in [a.rpartition(': ')[2] for a in old[0].get('affects') or []]:
+                    old[0].setdefault('affects', []).append(name)
+                problems.note('"%s" and "%s" both state %s in %s. The later one stands, and the line is taken out of the earlier '
+                              'entry. It was: %s. It is: %s.' % (old[0].get('name', '?'), e.get('name', '?'), name, folder, old[2], text))
+                rewritten = True
+            first[i] = (e, lines, text)
+    if rewritten:
+        for e in built:
+            if 'interface' in e:
+                e['interface'] = {f: l for f, l in e['interface'].items() if l}
+                if not e['interface']:
+                    del e['interface']
+    return rewritten
+
+
+def check_files(entry, now_files, changed, problems):
+    """A built entry's files: a `+ ` file exists, and no file is unchanged while the others differ."""
+    name, files = entry.get('name', '?'), entry.get('files') or {}
+    missing = [p for p, n in files.items() if n.startswith('+ ') and p not in now_files]
+    for p in missing:
+        problems.error('%s: %s is written as a new file ("+ ") and does not exist.' % (name, p))
+    if changed is None:
+        return
+    same = [p for p in files if p not in changed and p not in missing]
+    if same and len(same) < len(files):
+        for p in same:
+            problems.error('%s: %s does not differ from the last commit, while other files of the entry do. '
+                           'Take it out of the entry, or make the change its note describes.' % (name, p))
+
+
+def figure_paths(*worlds):
+    """Every path the figure covers: the regions' folders and the boxes' paths."""
+    out = set()
+    for w in worlds:
+        if w is None:
+            continue
+        for r in (w.sys.get('regions') or {}).values():
+            if r and r.get('folder'):
+                out.add(r['folder'])
+        for f in w.boxes:
+            out.update(w.paths(f))
+    return out
+
+
+def some(items, most=6):
+    items = list(items)
+    return ', '.join(items[:most]) + (' and %d more' % (len(items) - most) if len(items) > most else '')
+
+
+def differs(a, b):
+    return (a is None) != (b is None) or (a is not None and (a['sig'], a['words']) != (b['sig'], b['words']))
+
+
+def note_loose_files(world, now_files, problems):
+    for key in REGIONS:
+        folder = ((world.sys.get('regions') or {}).get(key) or {}).get('folder')
+        if not folder:
+            continue
+        loose = sorted(p for p in now_files if under(folder, p) and world.box_of(p) is None)
+        if loose:
+            problems.note('%d %s under %s belong%s to no box: %s.' % (len(loose), 'file' if len(loose) == 1 else 'files', folder,
+                                                                      's' if len(loose) == 1 else '', some(loose)))
+
+
+def note_unseen_names(world, code, now_files, problems):
+    """A listed name that appears nowhere in the files of its box."""
+    words = {}
+    for p in now_files:
+        homes = [f for f in world.boxes if world.order.get(f) and world.holds(f, p)]
+        if homes:
+            ids = set(re.findall(r'[A-Za-z_]\w*', code.text(p)))
+            for f in homes:
+                words.setdefault(f, set()).update(ids)
+    for folder, ids in world.order.items():
+        if folder in words:
+            missing = [world.lines[i]['name'] for i in ids if world.lines[i]['name'].split('.')[-1] not in words[folder]]
+            if missing:
+                problems.note('Listed in %s and found nowhere in its files: %s.' % (folder, some(missing)))
+
+
+def note_flows(system, built, world, problems):
+    """A flow that passes a box a built entry states a line of, or calls a function it marks."""
+    for f in system.get('flows') or []:
+        for e in built:
+            boxes = set(folder for _l, folder, _t in stated(e))
+            marks = set(hits_of(e, world))
+            where = [s.get('at') for s in f.get('steps') or []
+                     if s.get('at') in boxes or (s.get('calls') and '%s#%s' % (s.get('at'), s['calls']) in marks)]
+            if where:
+                problems.note('The flow "%s" passes %s, which "%s" changes. Check that the flow still reads true.'
+                              % (f.get('name', '?'), some(sorted(set(where)), 3), e.get('name', '?')))
+
+
+def note_dangling(system, world, problems):
+    """A flow step, a link or a neighbour that points at nothing."""
+    regions = system.get('regions') or {}
+    ends = set(r['folder'] for r in regions.values() if r and r.get('folder'))
+    for l in system.get('links') or []:
+        for k in ('from', 'to'):
+            if l.get(k) not in ends:
+                problems.note('A link of the overview points at %s, which is not a region\'s folder. It is not drawn.' % l.get(k))
+    for folder, b in world.boxes.items():
+        rows = set(r.get('folder') for r in b.get('inside') or [])
+        for l in b.get('links') or []:
+            for k in ('from', 'to'):
+                if l.get(k) not in rows:
+                    problems.note('A link inside %s points at %s, which is none of its rows. It is not drawn.' % (folder, l.get(k)))
+        for k in ('from', 'uses'):
+            for x in (b.get(k) or {}).get('boxes') or []:
+                if x not in world.boxes:
+                    problems.note('%s: "%s" names %s, which is not a box.' % (folder, k, x))
+    for f in system.get('flows') or []:
+        for n, s in enumerate(f.get('steps') or []):
+            at = s.get('at')
+            if at not in world.boxes:
+                problems.note('The flow "%s", step %d, is at %s, which is not a box.' % (f.get('name', '?'), n + 1, at))
+            elif s.get('calls') and '%s#%s' % (at, s['calls']) not in world.lines:
+                problems.note('The flow "%s", step %d, calls %s, which %s does not list. The page draws the step without its call.'
+                              % (f.get('name', '?'), n + 1, s['calls'], at))
+
+
+# ---------------------------------------------------------------- what the text of the code shows
+
+DEF = re.compile(r'^\s*(?:(?:pub(?:\([a-z]+\))?|export|default|async|static|public|private|protected|internal|inline|virtual|override'
+                 r'|unsafe|extern|final|abstract)\s+)*(?:def|fn|func|function|fun|sub|proc)\b\s*\*?\s*(?:\([^)]*\)\s*)?([A-Za-z_]\w*)')
+CALLISH = re.compile(r'([A-Za-z_]\w*)\s*\(')
+NOT_A_NAME = set('if for while switch return catch sizeof function def fn func class new typeof elif with and or not in is'.split())
+
+
+def name_in(text):
+    """The function a line of code starts, as far as its text shows."""
+    m = DEF.match(text)
+    if m:
+        return m.group(1)
+    for n in CALLISH.findall(text):
+        if n not in NOT_A_NAME:
+            return n
+    return None
+
+
+class Code:
+    """Where functions start, which hold changed lines, and who calls whom inside a box. Read from the text alone:
+    a help for writing `affects`, never a check."""
+
+    def __init__(self, root, git, commit, world, now_files):
+        self.root, self.git, self.commit, self.world, self.now = root, git, commit, world, now_files
+        self._text, self._defs, self._box = {}, {}, {}
+
+    def text(self, path):
+        if path not in self._text:
+            full, text = os.path.join(self.root, path), ''
+            try:
+                if os.path.getsize(full) <= 512 * 1024:
+                    with open(full, encoding='utf-8', errors='ignore') as f:
+                        text = f.read()
+            except OSError:
+                pass
+            self._text[path] = text
+        return self._text[path]
+
+    def defs(self, path):
+        """[(name, the lines up to the next function)] for one file."""
+        if path not in self._defs:
+            lines = self.text(path).split('\n')
+            starts = [(i, m.group(1)) for i, m in ((i, DEF.match(l)) for i, l in enumerate(lines)) if m]
+            self._defs[path] = [(n, '\n'.join(lines[i + 1:starts[k + 1][0] if k + 1 < len(starts) else len(lines)]))
+                                for k, (i, n) in enumerate(starts)]
+        return self._defs[path]
+
+    def changed_fns(self, path, status):
+        """The functions of a file that hold changed lines."""
+        if status == 'add':
+            return [n for n, _body in self.defs(path)]
+        if status != 'chg' or not self.commit:
+            return []
+        out, ctx, first = [], None, False
+        for line in self.git.diff(self.commit, path).split('\n'):
+            if line.startswith('@@'):
+                ctx, first = (name_in(line.split('@@', 2)[-1]) if line.count('@@') >= 2 else None), True
+            elif line[:1] in ('+', '-') and not line.startswith(('+++', '---')):
+                m = DEF.match(line[1:])
+                if m:
+                    ctx = m.group(1)
+                if ctx and (m or first) and ctx not in out:
+                    out.append(ctx)
+                first = False
+        return out
+
+    def home(self, path):
+        """The nearest box around a file that lists a function, and the names it lists."""
+        chain = self.world.around(self.world.box_of(path))
+        for f in chain:
+            names = [self.world.lines[i]['name'] for i in self.world.order.get(f, []) if not self.world.lines[i]['type']]
+            if names:
+                return f, names
+        return (chain[0] if chain else None), []
+
+    def reach(self, path, fns):
+        """The listed functions of the file's box through which these functions are reached: the first listed one on each path."""
+        home, names = self.home(path)
+        if not home or not names or not fns:
+            return []
+        if home not in self._box:
+            files = sorted(p for p in self.now if self.world.holds(home, p))[:400]
+            self._box[home] = [d for p in files for d in self.defs(p)]
+        short = {n.split('.')[-1]: n for n in names}
+        out, seen, todo = [], set(), list(fns)
+        while todo and len(seen) < 400:
+            f = todo.pop(0)
+            if f in seen:
+                continue
+            seen.add(f)
+            if f in short:
+                if short[f] not in out:
+                    out.append(short[f])
+                continue
+            pat = re.compile(r'\b%s\s*\(' % re.escape(f))
+            todo.extend(n for n, body in self._box[home] if n not in seen and pat.search(body))
+        return out
+
+    def proposal(self, paths, changed, moved):
+        """(names proposed for `affects`, whether any changed function was found, one line of help per file)."""
+        names, found, said = [], False, []
+        for p in paths:
+            st = changed.get(p)
+            fns = self.changed_fns(p, st) if p not in moved else []
+            found = found or bool(fns)
+            for n in self.reach(p, fns):
+                if n not in names:
+                    names.append(n)
+            what = 'renamed from %s' % moved[p] if p in moved else {'add': 'new', 'del': 'removed'}.get(st, 'changed')
+            if fns:
+                what += (', with ' if st == 'add' else ' in ') + some(fns, 8)
+            home, listed = self.home(p)
+            where = 'It is in no box.' if not home else 'Its box %s lists %s.' % (home, some(listed, 12) if listed else 'nothing')
+            said.append('  %s: %s. %s' % (p, what, where))
+        return names, found, said
+
+
 # ---------------------------------------------------------------- the build
 
 def find_work(start, given):
@@ -652,6 +998,7 @@ def build(args):
     words = read_json(os.path.join(here, 'lines.json'), {}, shown('lines.json'))
     if not isinstance(system, dict) or not isinstance(entries, list) or not isinstance(words, dict):
         raise Stop('system.json must hold an object, changes.json a list, and lines.json an object.')
+    check_shape(system, entries, shown)
     problems = Problems()
     built = [e for e in entries if not e.get('plan')]
     plans = []
@@ -659,35 +1006,128 @@ def build(args):
         if e.get('plan') and e['plan'] not in plans:
             plans.append(e['plan'])
 
-    # ---- the states: the last commit, now, and each plan
+    def at_commit(commit):
+        raw = git.show(commit, '%s/SYSTEM_VIEW/system.json' % name)
+        old = parse_json_text(raw) if raw else None
+        try:
+            return World(old) if isinstance(old, dict) and old else None
+        except (KeyError, TypeError, AttributeError):
+            return None
+
+    # ---- what git knows
     now_files = git.files_now() if git.ok else set(scan(root, git.hidden))
     head_files = git.files_at(git.head) if git.head else None
-    changed = git.changed_since(git.head) if git.head else {}
-    folded = fold(system, built, problems)
+    changed, moved = git.changed_since(git.head) if git.head else ({}, {})
+    at_head = at_commit(git.head) if git.head else None
+
+    # ---- the built entries: each line stated once, then folded one entry at a time
+    on_disk = copy.deepcopy(built)
+    rewritten = later_wins(built, problems)
+    base = Problems()
+    World(system, base)
+    for t in base.errors:
+        problems.error(t)
+    folded, failed = system, []
+    for e in built:
+        mine = Problems()
+        trial = fold(folded, [e], mine)
+        hits_of(e, World(trial, mine), mine)
+        check_files(e, now_files, changed if git.head else None, mine)
+        new = [t for t in mine.errors if t not in base.errors]
+        if new:
+            failed.append(e)
+            for t in new:
+                problems.error(t if t.startswith(e['name'] + ':') else '%s: %s' % (e['name'], t))
+            continue
+        for t in mine.notes:
+            problems.note(t)
+        folded = trial
     if head_files is not None:
         folded, gone = drop_removed(folded, head_files, now_files)
         for f in gone:
             problems.note('The box %s is removed: every file it had at the last commit is gone.' % f)
-    current = World(folded, problems)
-    for e in built:
-        hits_of(e, current, problems)
+    current = World(folded)
     text = pretty(folded) + '\n'
     path = os.path.join(here, 'system.json')
     before = open(path, encoding='utf-8').read() if os.path.exists(path) else ''
-    if text != before and not problems.errors and not args.check and system:
+    if text != before and not args.check and system:
         with open(path, 'w', encoding='utf-8') as f:
             f.write(text)
         print('Folded the built changes into %s.' % shown('system.json'))
 
-    def at_commit(commit):
-        raw = git.show(commit, '%s/SYSTEM_VIEW/system.json' % name)
-        old = parse_json_text(raw) if raw else None
-        return World(old) if isinstance(old, dict) and old else None
+    # ---- then dropped: a built entry goes once the last commit holds it, its files and its lines unchanged
+    dropped, new_words = [], False
+    if at_head is not None:
+        raw = git.show(git.head, '%s/SYSTEM_VIEW/changes.json' % name)
+        held = {}
+        for x in (parse_json_text(raw) if raw else None) or []:
+            if isinstance(x, dict) and not x.get('plan'):
+                held[x.get('name')] = x
+        for e, was in zip(built, on_disk):
+            if any(e is f for f in failed) or held.get(was['name']) != was or any(p in changed for p in e.get('files') or {}):
+                continue
+            if any(differs(at_head.lines.get(line_id(folder, t)), current.lines.get(line_id(folder, t))) for _l, folder, t in stated(was)):
+                continue
+            if any(b.get('folder') not in at_head.boxes or b.get('folder') not in current.boxes
+                   or any(at_head.boxes[b['folder']].get(k) != current.boxes[b['folder']].get(k) for k in ('name', 'line', 'also'))
+                   for b in e.get('boxes') or []):
+                continue
+            dropped.append(e)
+    if dropped:
+        built = [e for e in built if not any(e is d for d in dropped)]
+        entries = [e for e in entries if not any(e is d for d in dropped)]
+        for e in dropped:
+            for p, n in (e.get('files') or {}).items():
+                if p in now_files and not words.get(p) and note_of(n):
+                    words[p], new_words = note_of(n), True
+    if not args.check:
+        if rewritten or dropped:
+            with open(os.path.join(here, 'changes.json'), 'w', encoding='utf-8') as f:
+                f.write(pretty(entries) + '\n')
+        if dropped:
+            print('Took %d built %s out of %s, now that the last commit holds %s: %s.' % (
+                len(dropped), 'entry' if len(dropped) == 1 else 'entries', shown('changes.json'),
+                'it' if len(dropped) == 1 else 'them', some([e['name'] for e in dropped])))
+        if new_words:
+            with open(os.path.join(here, 'lines.json'), 'w', encoding='utf-8') as f:
+                f.write(pretty(words) + '\n')
 
-    committed = at_commit(git.head) if git.head else None
+    committed = at_head
     if git.head and committed is None:
         committed = current
         problems.note('The last commit has no %s, so nothing in the figure or the listing is marked as new.' % shown('system.json'))
+
+    # ---- what no entry explains, and what the files and the code say beside the entries
+    code = Code(root, git, git.head, current, now_files)
+    loose, prepared = [], None
+    if git.head:
+        explained = set(p for e in built for p in e.get('files') or {})
+        unexplained = sorted(p for p in changed if p not in explained and p not in moved.values())
+        fig = figure_paths(current, at_head)
+        loose = [p for p in unexplained if any(under(f, p) for f in fig)]
+        if loose:
+            problems.error('%d changed %s under the figure %s in no entry: %s. An entry is prepared below.' % (
+                len(loose), 'file' if len(loose) == 1 else 'files', 'is' if len(loose) == 1 else 'are', some(loose)))
+            names, _found, said = code.proposal(unexplained, changed, moved)
+            prepared = ({'name': '?', 'line': '?', 'files': {p: '?' for p in unexplained}}, said)
+            if names:
+                prepared[0]['affects'] = names
+        for e in built:
+            if any(e is f for f in failed):
+                continue
+            paths = [p for p in e.get('files') or {} if p in changed]
+            names, found, _said = code.proposal(paths, changed, moved)
+            states = set(parse_line(t)['name'] for _l, _f, t in stated(e) if not t.startswith('- '))
+            mine = [a.rpartition(': ')[2] for a in e.get('affects') or []]
+            names = [n for n in names if n not in states]
+            if found and set(names) != set(mine):
+                problems.note('%s: "affects" has %s. Following its changed lines to the nearest listed functions gives %s. '
+                              'Only said: correct the entry if the second is right.'
+                              % (e['name'], ', '.join(mine) or 'nothing', ', '.join(names) or 'nothing'))
+    note_loose_files(current, now_files, problems)
+    note_unseen_names(current, code, now_files, problems)
+    note_flows(folded, built, current, problems)
+    note_dangling(folded, current, problems)
 
     plan_worlds = []
     for pl in plans:
@@ -696,6 +1136,17 @@ def build(args):
         after = (now_files | set(p for p, s in files.items() if s == 'add')) - set(p for p, s in files.items() if s == 'del')
         psys, _gone = drop_removed(fold(folded, mine, problems, quiet=True), now_files, after)
         plan_worlds.append((pl, mine, World(psys), files, after))
+        for e in mine:
+            done = [p for p, n in (e.get('files') or {}).items()
+                    if (n.startswith('+ ') and p in now_files) or (n.startswith('- ') and p not in now_files)]
+            if done:
+                problems.note('%s, of the plan %s, looks built: %s %s. Once it is built, correct the entry and delete its "plan" key.' % (
+                    e['name'], pl, some(done, 3), 'is already as the plan leaves it' if len(done) == 1 else 'are already as the plan leaves them'))
+            moved_on = [parse_line(t[2:] if t.startswith('- ') else t)['name'] for _l, folder, t in stated(e)
+                        if at_head is not None and differs(at_head.lines.get(line_id(folder, t)), current.lines.get(line_id(folder, t)))]
+            if moved_on:
+                problems.note('%s, of the plan %s, restates %s, which %s changed since the last commit. Check the plan against the line as it is now.' % (
+                    e['name'], pl, some(moved_on), 'has' if len(moved_on) == 1 else 'have'))
 
     # ---- starting points other than the last commit
     starts = []
@@ -724,13 +1175,13 @@ def build(args):
     for tab, label, c in starts:
         w = at_commit(c) or committed or current
         lists.add(w)
-        start_worlds.append((tab, label, c, w, git.files_at(c), git.changed_since(c)))
+        start_worlds.append((tab, label, c, w, git.files_at(c)) + git.changed_since(c))
     all_files = set(now_files)
     if head_files is not None:
         all_files |= head_files
     for _pl, _mine, _w, files, after in plan_worlds:
         all_files |= after
-    for _tab, _label, _c, _w, files, _ch in start_worlds:
+    for _tab, _label, _c, _w, files, _ch, _mv in start_worlds:
         all_files |= files
 
     changes, index = [], {}
@@ -751,13 +1202,13 @@ def build(args):
     snap['current'] = state_snap(lists, current, now_files, all_files)
     if committed is not None:
         tabs.append({'id': 'cc', 'label': 'Committed → Current', 'delta': True})
-        s = delta_snap(lists, committed, current, head_files, now_files, changed, all_files)
+        s = delta_snap(lists, committed, current, head_files, now_files, changed, all_files, moved)
         s['changes'] = [change(e) for e in built]
         s['hits'] = {str(change(e)): hits_of(e, current, base=committed) for e in built}
         snap['cc'] = s
-    for tab, label, c, w, files, ch in start_worlds:
+    for tab, label, c, w, files, ch, mv in start_worlds:
         tabs.append({'id': tab, 'label': label, 'delta': True})
-        s = delta_snap(lists, w, current, files, now_files, ch, all_files)
+        s = delta_snap(lists, w, current, files, now_files, ch, all_files, mv)
         since = built + [e for e in entries_since(git, name, c) if (e.get('name', ''), '') not in set((b.get('name', ''), '') for b in built)]
         s['changes'] = [change(e) for e in since]
         s['hits'] = {str(change(e)): hits_of(e, current, base=w) for e in since}
@@ -798,7 +1249,7 @@ def build(args):
     elif not git.head:
         foot.append('There is no commit yet, so only the current state is shown.')
     if not listed.boxes:
-        foot.append('No boxes yet. Write the regions and their boxes in %s, with the project\'s owner.' % shown('system.json'))
+        data['none'] = 'No boxes yet. Write the regions and their boxes in %s, with the project\'s owner.' % shown('system.json')
     stamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
     foot.insert(0, 'Built %s%s.' % (stamp, ' from commit %s and the working tree' % git.short(git.head) if git.head else ''))
     data['built'] = foot
@@ -807,9 +1258,15 @@ def build(args):
         print('ERROR  ' + t)
     for t in problems.notes:
         print('note   ' + t)
+    if prepared:
+        print('\nPrepared for the changed files no entry explains. Put it in %s, name it, and correct it:' % shown('changes.json'))
+        print(pretty(prepared[0], '  ').join(['  ', '']))
+        print('\n'.join(prepared[1]))
     if problems.errors:
-        print('%d %s. Nothing was folded. Fix %s and run again.' % (len(problems.errors), 'error' if len(problems.errors) == 1 else 'errors',
-                                                                  'it' if len(problems.errors) == 1 else 'them'))
+        print('%d %s.%s Fix %s and run again.' % (
+            len(problems.errors), 'error' if len(problems.errors) == 1 else 'errors',
+            ' Nothing was folded from: %s.' % some([e['name'] for e in failed]) if failed else '',
+            'it' if len(problems.errors) == 1 else 'them'))
     if args.check:
         return 1 if problems.errors else 0
     template = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'view', 'page.html')

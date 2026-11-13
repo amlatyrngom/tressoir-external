@@ -1,0 +1,15 @@
+{ "name": "",
+  "regions": {
+    "entry": { "folder": "", "line": "",
+      "boxes": [] },
+    "core": { "folder": "", "line": "",
+      "boxes": [] },
+    "external": { "folder": "", "line": "",
+      "boxes": [] },
+    "platform": { "folder": "", "line": "",
+      "boxes": [] },
+    "separate": { "folder": "", "line": "",
+      "boxes": [] }
+  },
+  "links": [],
+  "flows": [] }

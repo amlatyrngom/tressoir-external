@@ -368,7 +368,7 @@ function describe(pick){ const d = delta(), row = c => { const m = cmark(c); ret
   // a line of the file view
   const mono = t => `<b style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600">${esc(t)}</b>`, short = p => p.replace(/\/$/, '').split('/').pop() + (p.endsWith('/') ? '/' : '');
   if (boxAt(id)) return describe('node:' + id); if (regionAt(id)) return describe('region:' + id);
-  const lines = f => { const s = d ? fst(f) : ''; if (!s) return []; const cs = inDelta().filter(c => c.files[f.path]); return cs.length ? cs.map(c => ({ m:s, name:c.name, text:c.files[f.path] })) : [{ m:s, text:s === 'add' ? 'new file' : s === 'del' ? 'removed' : 'changed; no named change explains it' }]; };
+  const lines = f => { const s = d ? fst(f) : ''; if (!s) return []; const cs = inDelta().filter(c => c.files[f.path]); return cs.length ? cs.map(c => ({ m:s, name:c.name, text:c.files[f.path] })) : [{ m:s, text:s === 'add' ? 'new file' : s === 'del' ? 'removed' : movedFrom(f.path) ? 'renamed from ' + movedFrom(f.path) : 'changed; no named change explains it' }]; };
   const line = (l, who) => `<div class="dl ${l.m}"><span class="g">${mark[l.m]}</span><span>${l.name ? `<b>${esc(l.name)}</b> ` : ''}${who ? mono(who) + ' ' : ''}<span class="m">${esc(l.text)}</span></span></div>`;
   const none = d ? `<p class="m" style="margin:0">Nothing changed here.</p>` : '', f = S.files.find(x => x.path === id);
   if (f) return `<p class="t">${mono(short(id))} <span class="m">${esc(f.line)}</span></p>${lines(f).map(l => line(l)).join('') || none}`;
@@ -380,7 +380,7 @@ function show(){ const pick = hov || pin, i = (pick || ':').indexOf(':'), type =
   $('strip').className = 'strip'; $('strip').innerHTML = describe(pick); }
 // text is placed by measuring it. While the page is not displayed every measure is zero, so the placing waits (blind) and the figure is drawn again once it has a size
 let blind = false, figW = -1, blindT;
-function renderFigure(){ $('fig').innerHTML = flow !== null ? flowLanes(S.flows[flow]) : stage(); fit(); const st = [...document.querySelectorAll('.stage')]; blind = st.some(s => !s.offsetWidth); if (!blind) st.forEach(declutter);
+function renderFigure(){ $('fig').innerHTML = S.none ? `<p class="m" style="margin:14px 16px">${esc(S.none)}</p>` : flow !== null ? flowLanes(S.flows[flow]) : stage(); fit(); const st = [...document.querySelectorAll('.stage')]; blind = st.some(s => !s.offsetWidth); if (!blind) st.forEach(declutter);
   clearTimeout(blindT); if (blind) blindT = setTimeout(function again(){ $('fig').offsetWidth ? renderFigure() : blindT = setTimeout(again, 250); }, 250); show(); }
 function refit(){ const w = $('fig').offsetWidth; if (w === figW && !(blind && w)) return; figW = w; blind && w ? renderFigure() : fit(); }
 const folderOf = pick => !pick ? null : /^(node|region):/.test(pick) ? pick.slice(pick.indexOf(':') + 1) : /^step:/.test(pick) && flow !== null ? sf(S.flows[flow].steps[+pick.slice(5)]) : null;
@@ -405,6 +405,8 @@ function entries(){ const out = [], seen = new Set();
       parent = p; }
     const b = boxAt(f.path); out.push({ path:f.path, parent, name:parts[parts.length - 1] + (f.path.endsWith('/') ? '/' : ''), line:f.line, file:f, box:b, slot: b && isSep(b) ? 'sep' : null }); });
   return out; }
+const movedFrom = p => (delta() && SN().moved || {})[p];
+function oldName(e){ const o = e.file && movedFrom(e.path); if (!o) return ''; const cut = o.lastIndexOf('/') + 1; return `<span class="old">${esc(o.slice(0, cut) === e.parent ? o.slice(cut) : o)}</span> `; }
 function renderTree(){ counts();
   const all = entries(), kids = {}; all.forEach(e => (kids[e.parent] = kids[e.parent] || []).push(e));
   const d = delta(), fold = only && d; let hidden = 0;
@@ -418,7 +420,7 @@ function renderTree(){ counts();
       const what = d && s !== 'add' && s !== 'del' && e.box ? touching(e.path).map(c => c.name).join('; ') : '';
       const text = what || (s === 'chg' ? (notes(e.path).join('; ') || e.line) : e.line), sub = rows(e.path, dep + 1), shut = sub && closed.has(e.path) && !(reveal && reveal !== e.path && reveal.startsWith(e.path)), t = shut ? tally(e.path) : null;
       const roll = t && d ? `<span class="roll">${['add', 'chg', 'del'].filter(x => t[x]).map(x => `<span class="c ${x}">${mark[x]}${t[x]}</span>`).join('')}</span>` : '';
-      out += `<div class="r ${s || 'same'} ${ins ? 'inside' : ''} ${sub ? 'dir' : ''} ${reveal && e.path.startsWith(reveal) ? 'hot' : ''} ${pin === 'path:' + e.path ? 'sel' : ''}" data-pick="path:${esc(e.path)}" data-id="${esc(e.path)}"><span class="g">${mark[s] || ''}</span><span class="n" style="margin-left:${dep * 16}px">${e.slot ? `<i class="sw ${e.slot}"></i>` : ''}${esc(e.name)}${shut ? '<span class="dots"> …</span>' : ''}</span>${roll}<span class="p ${what ? 'what' : ''}">${esc(text)}</span></div>` + (shut ? '' : sub); }
+      out += `<div class="r ${s || 'same'} ${ins ? 'inside' : ''} ${sub ? 'dir' : ''} ${reveal && e.path.startsWith(reveal) ? 'hot' : ''} ${pin === 'path:' + e.path ? 'sel' : ''}" data-pick="path:${esc(e.path)}" data-id="${esc(e.path)}"><span class="g">${mark[s] || ''}</span><span class="n" style="margin-left:${dep * 16}px">${e.slot ? `<i class="sw ${e.slot}"></i>` : ''}${oldName(e)}${esc(e.name)}${shut ? '<span class="dots"> …</span>' : ''}</span>${roll}<span class="p ${what ? 'what' : ''}">${esc(text)}</span></div>` + (shut ? '' : sub); }
     return out; };
   $('tree').className = 'tree' + (d ? ' diff' : '');
   $('tree').innerHTML = rows('', 0) + (hidden ? `<div class="foot">${hidden} unchanged hidden</div>` : '');

@@ -238,6 +238,266 @@ def marlin(tmp):
           and read(os.path.join(root, 'WORK/SYSTEM_VIEW/system.json')) == before, out + err)
 
 
+# ---------------------------------------------------------------- a small project with real code, for the checks
+
+MINI = {
+    'name': 'Mini',
+    'regions': {
+        'entry': {'folder': 'src/entry/', 'line': 'how it is used', 'boxes': [
+            {'name': 'Command line', 'folder': 'src/entry/cli/', 'line': 'the commands',
+             'interface': ['main(argv: [Text])  // runs one command']}]},
+        'core': {'folder': 'src/core/', 'line': 'what it does', 'boxes': [
+            {'name': 'Entries', 'folder': 'src/core/entries/', 'line': 'records entries',
+             'interface': ['add(entry: NewEntry) → EntryId  // records one entry', 'listing() → [Entry]  // every entry',
+                           'NewEntry = { text: Text }  // an entry not yet recorded']},
+            {'name': 'Reports', 'folder': 'src/core/reports/', 'line': 'totals',
+             'interface': ['monthly(month: Month) → Report  // one month']}]}},
+    'links': [{'from': 'src/entry/', 'to': 'src/core/', 'label': 'commands', 'says': 'The command line calls the core.'}],
+    'flows': [{'name': 'Adding an entry', 'line': 'from the command to the record', 'steps': [
+        {'at': 'src/entry/cli/', 'does': 'reads the command', 'calls': 'main'},
+        {'at': 'src/core/entries/', 'gets': 'the entry', 'does': 'records it', 'calls': 'add'}]}]}
+MINI_FILES = {
+    'src/entry/cli/main.py': 'def main(argv):\n    return add(argv)\n',
+    'src/core/entries/entries.py': 'class NewEntry:\n    pass\n\n\ndef add(entry):\n    return _store(entry)\n\n\n'
+                                   'def _store(entry):\n    return _key(entry)\n\n\ndef _key(entry):\n    return 1\n\n\n'
+                                   'def listing():\n    return []\n',
+    'src/core/reports/monthly.py': 'def monthly(month):\n    return total(month)\n\n\ndef total(month):\n    return 0\n',
+    'docs/readme.md': 'How to use it.\n',
+}
+ENTRIES_PY, MONTHLY_PY = 'src/core/entries/entries.py', 'src/core/reports/monthly.py'
+SV = 'WORK/SYSTEM_VIEW/'
+
+
+def mini(tmp):
+    root = os.path.join(tmp, 'mini')
+    for path, text in MINI_FILES.items():
+        write(root, path, text)
+    write(root, SV + 'system.json', json.dumps(MINI, ensure_ascii=False))
+    write(root, SV + 'changes.json', '[]\n')
+    write(root, SV + 'lines.json', '{}\n')
+    git(root, 'init', '-q')
+    git(root, 'config', 'user.email', 'tests@example.com')
+    git(root, 'config', 'user.name', 'Tests')
+    run(root)                                   # the script gives system.json its format
+    git(root, 'add', '-A')
+    git(root, 'commit', '-q', '-m', 'the base')
+    git(root, 'tag', 'base')
+    return root
+
+
+def back(root):
+    git(root, 'reset', '-q', '--hard', 'base')
+    git(root, 'clean', '-q', '-fd')
+
+
+def entries(root, *es):
+    write(root, SV + 'changes.json', json.dumps(list(es), ensure_ascii=False))
+
+
+def edit(root, path, old, new):
+    text = read(os.path.join(root, path))
+    assert old in text, (path, old)
+    write(root, path, text.replace(old, new))
+
+
+def system(root):
+    return json.loads(read(os.path.join(root, SV + 'system.json')))
+
+
+def lines_of(root, folder):
+    for region in system(root)['regions'].values():
+        for b in (region or {}).get('boxes', []):
+            if b['folder'] == folder:
+                return b.get('interface', [])
+    return None
+
+
+def checks(tmp):
+    root = mini(tmp)
+    code, out, err = run(root)
+    check('mini: a clean project has no error and no note', code == 0 and 'ERROR' not in out and 'note' not in out, out + err)
+    ent, rep = 'src/core/entries/', 'src/core/reports/'
+    keys = {'name': 'Keys are stable', 'line': 'a key no longer depends on the clock',
+            'files': {ENTRIES_PY: 'the key is the same on every run'}, 'affects': ['add']}
+
+    # ---- errors
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    edit(root, 'docs/readme.md', 'use it', 'use it well')
+    code, out, err = run(root)
+    check('a changed file under the figure that no entry explains is an error',
+          code == 1 and 'ERROR  1 changed file under the figure is in no entry: ' + ENTRIES_PY in out, out + err)
+    check('an entry is prepared for it, with every unexplained file and what the code shows',
+          'Prepared for the changed files no entry explains' in out and '"docs/readme.md": "?"' in out
+          and ENTRIES_PY + ': changed in _key. Its box src/core/entries/ lists add, listing.' in out, out)
+    check('the prepared entry proposes the nearest listed function, found through the callers', '"affects": ["add"]' in out, out)
+    entries(root, dict(keys, files=dict(keys['files'], **{'docs/readme.md': 'says so'})))
+    code, out, err = run(root)
+    check('with an entry for them the error is gone', code == 0 and 'ERROR' not in out, out + err)
+    entries(root, dict(keys, files=dict(keys['files'], **{'docs/readme.md': 'says so'}), affects=[]))
+    code, out, err = run(root)
+    check('affects that differs from what the code shows is only said',
+          code == 0 and 'Keys are stable: "affects" has nothing. Following its changed lines to the nearest listed functions gives add.' in out, out + err)
+
+    back(root)
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    edit(root, MONTHLY_PY, 'return 0', 'return 1')
+    count = dict(keys, interface={ent: ['count() → Int  // how many entries']})
+    years = {'name': 'Totals by year', 'line': 'a year at a time', 'files': {MONTHLY_PY: 'adds up the months'}, 'affects': ['yearly']}
+    entries(root, count, years)
+    code, out, err = run(root)
+    check('an entry that fails a check is not folded, and says which', code == 1 and 'Totals by year: "affects" names yearly' in out
+          and 'Nothing was folded from: Totals by year.' in out, out + err)
+    check('the entries that pass are folded all the same', 'count() → Int  // how many entries' in lines_of(root, ent), lines_of(root, ent))
+    check('the page is still written, and lists both changes',
+          [c['name'] for c in page_data(root)['changes']] == ['Keys are stable', 'Totals by year'])
+    check('a flow that passes a box an entry changes is said',
+          'note   The flow "Adding an entry" passes src/core/entries/, which "Keys are stable" changes.' in out, out)
+    check('a listed name found nowhere in its box is said', 'note   Listed in src/core/entries/ and found nowhere in its files: count.' in out, out)
+
+    back(root)
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    edit(root, MONTHLY_PY, 'return 0', 'return 1')
+    both = {'name': 'Exports', 'line': 'both can export', 'files': {ENTRIES_PY: 'exports', MONTHLY_PY: 'exports'},
+            'interface': {ent: ['export() → Text  // every entry as text'], rep: ['export() → Text  // the totals as text']}}
+    entries(root, dict(both, affects=['export']))
+    code, out, err = run(root, '--check')
+    check('a name in affects that two boxes list is an error that asks for the box', code == 1 and 'Write it as "<box folder>: export"' in out, out + err)
+    entries(root, dict(both, affects=['src/core/reports/: export']))
+    code, out, err = run(root, '--check')
+    check('written with its box, the name is found', code == 0 and 'ERROR' not in out, out + err)
+
+    back(root)
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    entries(root, dict(keys, files={ENTRIES_PY: 'the key is the same on every run', MONTHLY_PY: 'uses the key'}))
+    code, out, err = run(root, '--check')
+    check('a file of a built entry that does not differ while the others do is an error',
+          code == 1 and 'Keys are stable: %s does not differ from the last commit' % MONTHLY_PY in out, out + err)
+    entries(root, dict(keys, files={ENTRIES_PY: 'the key is the same on every run', 'src/core/entries/keys.py': '+ makes keys'}))
+    code, out, err = run(root, '--check')
+    check('a built entry with a "+ " file that does not exist is an error',
+          code == 1 and 'src/core/entries/keys.py is written as a new file ("+ ") and does not exist' in out, out + err)
+
+    back(root)
+    entries(root, {'name': 'Totals by year', 'line': 'a year at a time', 'plan': 'Years', 'files': {'src/core/reports/yearly.py': 'adds up the months'}})
+    code, out, err = run(root, '--check')
+    check('a planned path that does not exist and has no "+ " is an error that names its neighbours',
+          code == 1 and 'src/core/reports/yearly.py does not exist and its note has no "+ ". Nearest: ' + MONTHLY_PY in out, out + err)
+
+    back(root)
+    good = system(root)
+    for what, change, said in [
+            ('a name twice in a box', lambda b: b[1]['interface'].append('add(entry: NewEntry)  // again'), 'add is written twice: in src/core/entries/'),
+            ('a path in two boxes', lambda b: b[2].update(also=['src/core/entries/']), 'The path src/core/entries/ is given to two boxes'),
+            ('a bare name with no function inside', lambda b: b[1]['interface'].append('ghost'), 'ghost in src/core/entries/ is a bare name')]:
+        bad = json.loads(json.dumps(good))
+        change(bad['regions']['entry']['boxes'] + bad['regions']['core']['boxes'])
+        write(root, SV + 'system.json', json.dumps(bad, ensure_ascii=False))
+        code, out, err = run(root, '--check')
+        check('%s is an error' % what, code == 1 and 'ERROR  ' + said in out, out + err)
+    bad = json.loads(json.dumps(good))
+    del bad['regions']['core']['boxes'][0]['folder']
+    write(root, SV + 'system.json', json.dumps(bad, ensure_ascii=False))
+    code, out, err = run(root)
+    check('a box with no folder stops the script', code == 2 and 'a box in the region "core" has no "folder" (Entries)' in err, out + err)
+
+    # ---- notes
+    bad = json.loads(json.dumps(good))
+    bad['links'].append({'from': 'src/entry/', 'to': 'src/nowhere/', 'says': 'nothing'})
+    bad['flows'][0]['steps'] += [{'at': 'src/core/nowhere/', 'does': 'nothing'}, {'at': rep, 'does': 'totals a year', 'calls': 'yearly'}]
+    bad['regions']['core']['boxes'][1]['uses'] = {'boxes': ['src/gone/'], 'says': 'nothing'}
+    write(root, SV + 'system.json', json.dumps(bad, ensure_ascii=False))
+    write(root, 'src/core/loose.py', 'x = 1\n')
+    code, out, err = run(root)
+    check('a link, a neighbour or a flow step that points at nothing is said, and the page is built',
+          'A link of the overview points at src/nowhere/' in out and 'step 3, is at src/core/nowhere/, which is not a box' in out
+          and 'step 4, calls yearly, which src/core/reports/ does not list. The page draws the step without its call.' in out
+          and 'src/core/reports/: "uses" names src/gone/' in out and os.path.exists(os.path.join(root, 'WORK/SYSTEM_VIEW.html')), out + err)
+    check('a file under a region that belongs to no box is said', 'note   1 file under src/core/ belongs to no box: src/core/loose.py.' in out, out)
+
+    back(root)
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    force = 'add(entry: NewEntry, force: Bool) → EntryId?  // records one entry'
+    entries(root, dict(keys, interface={ent: ['add(entry: NewEntry) → EntryId?  // records one entry']}, affects=[]),
+            {'name': 'Forced adds', 'line': 'an entry can be recorded twice on purpose', 'plan': 'Force',
+             'files': {MONTHLY_PY: '+ counts the forced ones'}, 'interface': {ent: [force]}})
+    code, out, err = run(root)
+    check('a planned entry whose "+ " file exists is said to look built', code == 0 and 'Forced adds, of the plan Force, looks built: ' + MONTHLY_PY in out, out + err)
+    check('an open plan that restates a line changed since the last commit is said',
+          'Forced adds, of the plan Force, restates add, which has changed since the last commit.' in out, out)
+    plan = page_data(root)['snap']['plan:0']['lines']['src/core/entries/#add']
+    check('the plan tab starts from the line as it is now', plan.get('s') == 'chg' and plan.get('was') == 'add(entry: NewEntry) → EntryId?', plan)
+
+    # ---- a line stated by two built entries
+    back(root)
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    edit(root, MONTHLY_PY, 'return 0', 'return 1')
+    first = dict(keys, affects=[], interface={ent: ['add(entry: NewEntry) → EntryId?  // records one entry', 'count() → Int  // how many']})
+    second = {'name': 'Forced adds', 'line': 'on purpose', 'files': {MONTHLY_PY: 'counts the forced ones'}, 'interface': {ent: [force]}}
+    entries(root, first, second)
+    code, out, err = run(root)
+    now = json.loads(read(os.path.join(root, SV + 'changes.json')))
+    check('when two built entries state a line the later one stands, and it is said',
+          code == 0 and '"Keys are stable" and "Forced adds" both state add in src/core/entries/' in out and force in lines_of(root, ent), out + err)
+    check('the line leaves the earlier entry, and its name goes under affects',
+          now[0].get('interface') == {ent: ['count() → Int  // how many']} and now[0].get('affects') == ['add'] and now[1]['interface'] == {ent: [force]}, now)
+
+    # ---- dropping
+    back(root)
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    write(root, 'src/core/entries/dedupe.py', 'def same(a, b):\n    return a == b\n')
+    entries(root, dict(keys, files={ENTRIES_PY: 'the key is the same on every run', 'src/core/entries/dedupe.py': 'recognises an entry already recorded'},
+                       interface={ent: ['add(entry: NewEntry) → EntryId?  // records one entry']}))
+    git(root, 'add', '-A')
+    git(root, 'commit', '-q', '-m', 'committed without running the script')
+    code, out, err = run(root)
+    data = page_data(root)
+    check('an entry stays while a line it states is not in system.json at the last commit',
+          code == 0 and 'Took' not in out and [c['name'] for c in data['changes']] == ['Keys are stable']
+          and (data['snap']['cc']['lines'].get('src/core/entries/#add') or {}).get('s') == 'chg', out + err)
+    git(root, 'add', '-A')
+    git(root, 'commit', '-q', '-m', 'the fold')
+    code, out, err = run(root)
+    data = page_data(root)
+    check('a built entry is taken out once the last commit holds it', code == 0 and 'Took 1 built entry out of WORK/SYSTEM_VIEW/changes.json' in out
+          and json.loads(read(os.path.join(root, SV + 'changes.json'))) == [] and data['snap']['cc']['changes'] == [], out + err)
+    check('the note of its new file becomes the file\'s line',
+          json.loads(read(os.path.join(root, SV + 'lines.json'))).get('src/core/entries/dedupe.py') == 'recognises an entry already recorded'
+          and ['src/core/entries/dedupe.py', 'recognises an entry already recorded'] in data['files'])
+    code, out, err = run(root, '--from', 'base')
+    data = page_data(root)
+    tab = data['snap'].get('from', {})
+    check('a delta from an earlier commit still names the change, from changes.json as it was',
+          code == 0 and 'Keys are stable' in [data['changes'][i]['name'] for i in tab.get('changes', [])]
+          and tab.get('files', {}).get('src/core/entries/dedupe.py') == 'add' and (tab['lines'].get('src/core/entries/#add') or {}).get('s') == 'chg', out + err)
+
+    # ---- a renamed file is one line
+    for how in ('with git', 'without telling git'):
+        back(root)
+        if how == 'with git':
+            git(root, 'mv', MONTHLY_PY, 'src/core/reports/month.py')
+        else:
+            os.rename(os.path.join(root, MONTHLY_PY), os.path.join(root, 'src/core/reports/month.py'))
+        entries(root, {'name': 'A shorter name', 'line': 'month.py', 'files': {'src/core/reports/month.py': 'renamed'}})
+        code, out, err = run(root)
+        cc = page_data(root)['snap']['cc']
+        check('a file renamed %s is one changed line that keeps its old name' % how, code == 0 and cc.get('moved') == {'src/core/reports/month.py': MONTHLY_PY}
+              and cc['files'].get('src/core/reports/month.py') == 'chg' and cc['files'].get(MONTHLY_PY, '') is None, out + err + str(cc.get('files')))
+
+
+def empty(tmp):
+    for name, text in (('nothing', '{}\n'), ('seed', read(os.path.join(KIT, 'extras', 'tressoir-system-view', 'seeds', 'system.json')))):
+        root = os.path.join(tmp, 'empty-' + name)
+        write(root, 'src/app.py', 'x = 1\n')
+        write(root, SV + 'system.json', text)
+        write(root, SV + 'changes.json', '[]\n')
+        git(root, 'init', '-q')
+        code, out, err = run(root)
+        data = page_data(root) if code == 0 else {'files': []}
+        check('an empty system.json (%s) is not an error: the page says where to add boxes' % name,
+              code == 0 and 'ERROR' not in out and 'No boxes yet' in data.get('none', '') and data['files'] == [['src/app.py', '']]
+              and read(os.path.join(root, SV + 'system.json')) == text, out + err)
+
+
 def tally(tmp):
     root = repository(tmp, 'tally')
     code, out, err = run(root, '--check')
@@ -309,6 +569,8 @@ def main():
         tally(tmp)
         marlin(tmp)
         no_repository(tmp)
+        checks(tmp)
+        empty(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print('\nResult: %d passed, %d failed' % (len(PASS), len(FAIL)))
