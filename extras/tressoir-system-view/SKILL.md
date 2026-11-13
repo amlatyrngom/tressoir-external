@@ -104,10 +104,11 @@ A change deep in private code must show on the nearest function I can see.
 > private helper, a constant), name every listed function **of the same box** through which that
 > code is reached: the ones that call it, the first listed function on each path, or the one that
 > returns the object it belongs to. An edit to a row that registers a listed function (a command's
-> arguments, a route) names that function. Stop there, and never go into another box.
+> arguments, a route) names that function too. Stop there, and never go into another box.
 
 - If the box lists nothing that reaches the edit, name nothing: the change shows on the box's
-  `// internal:` line. Edits to data and prose files name nothing either.
+  `// internal:` line. Edits to data and prose files name nothing either, nor does a file that
+  only moved.
 - Do not ask whether behaviour changed. Edited means named.
 - A name is looked up in the boxes the entry's files belong to and the boxes around them. If two
   of them list it, write `"<box folder>: name"`.
@@ -204,7 +205,8 @@ Written with me. Four layers; each is optional and the page works without the la
   `"shared": true` marks the one box of helpers with no better home.
 - A box lists what other boxes call. An entry box lists its entry points: commands, routes.
   A function that callers reach through a module of the box is written with that name
-  (`youtube.minutes`). Constants and settings are not listed.
+  (`youtube.minutes`). A constant or the value of a setting is not listed; a function that
+  returns one is.
 - Names are spelt as in the code. Where the code has no single name (a command, a route), choose
   one; the note that it appears nowhere is then expected. The name of a line is its first word, so
   two routes cannot both start with `GET`: write `get_users  // GET /users, lists the users`.
@@ -226,12 +228,14 @@ component is spread out, give the box its main folder and list the rest under `a
 `changes.json` as `[]`. Do not move code to make the first figure look tidy.
 
 Where all the code is in one folder (`app/`, say), every region that applies gets that folder, and
-a box is a file or a folder directly in it, as in the `pocket/` example. The script then cannot
-tell which region a new box belongs to, so a new box is mine to place.
+a box's `folder` is a file or a folder directly in it, with its other files under `also`, as in
+the `pocket/` example. The script then cannot tell which region a new box belongs to, so a new
+box is mine to place.
 
-Write `lines.json` once at this point, a few words per source file; later the script adds a new
-file's words from its entry and follows renames. Commit the first figure, then run the script
-with `--seen`: the first figure is the first thing I have seen.
+Write `lines.json` once at this point, a few words per source file; later the script follows
+renames and adds a new file's words from its entry, when the entry leaves `changes.json`; a new
+folder's words are yours to add. Commit the first figure, then run the script with `--seen`: the
+first figure is the first thing I have seen. The `seen` file goes in with the next commit.
 
 ## Keep the code easy to draw
 

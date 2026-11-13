@@ -1042,6 +1042,7 @@ def trial(tmp):
           code == 1 and 'ERROR  The box src/core/reports/ has no file left, and its code is not gone' in out
           and '"moves": { "src/core/reports/": "src/core/summaries/" }' in out and 'is removed' not in out
           and read(os.path.join(root, SV + 'system.json')) == before, out + err)
+    check('and no note beside it says to take the box out', 'No file is in the box' not in out, out)
 
     root = renamed()
     entries(root, {'name': 'Reports become summaries', 'line': 'r', 'files': {summ + 'monthly.py': 'moved from reports/'}, 'moves': {rep: summ}})

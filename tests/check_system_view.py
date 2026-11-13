@@ -5,17 +5,17 @@
 # ///
 """Check built system view pages in headless Chrome, opened from disk.
 
-    uv run tests/check_system_view.py                  # builds the Tally, Marlin and Pocket examples, then checks them
+    uv run tests/check_system_view.py                  # builds the Tally, Marlin and Pocket examples and a page of unusual links, then checks them
     uv run tests/check_system_view.py <page>.html ...  # checks pages that are already built
 
 At 375, 705, 900 and 1440 pixels wide it goes through every tab, every view, every box (closed and
 with every line opened) and every flow step, and expects: no console error; no text of the figure
-on a box or on other text; no name larger than its box; no two regions picked by the same name; at 375 pixels, nothing wider than
-the screen. It then draws the page
+on a box or on other text; no name larger than its box; no two regions picked by the same name; every link between regions
+ends at the edge of both; at 375 pixels, nothing wider than the screen. It then draws the page
 inside a hidden frame, shows the frame, and expects the same figure as in a frame that was never
 hidden. Uses the Chrome already installed; downloads no browser.
 """
-import shutil, sys, tempfile
+import json, shutil, sys, tempfile
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
@@ -33,6 +33,12 @@ SWEEP = """(narrow) => { const bad = [], strip = document.getElementById('strip'
       .concat([...st.querySelectorAll('.rg b')].map(e => [e.textContent, R(e)]));
     st.querySelectorAll('.nd').forEach(e => { const s = e.querySelector('span'); if (!s) return; const a = R(s), b = R(e);
       if (a.left < b.left - 1 || a.right > b.right + 1 || a.top < b.top - 1 || a.bottom > b.bottom + 1) bad.push(where + ': the name "' + e.textContent + '" does not fit in its box'); });
+    const rg = {}; st.querySelectorAll('.rg').forEach(e => { rg[e.dataset.pick] = R(e); });
+    const meets = (a, b, d) => a.left < b.right + d && a.right > b.left - d && a.top < b.bottom + d && a.bottom > b.top - d;
+    st.querySelectorAll('.ed').forEach(e => { const ln = e.querySelector('.ln'), ends = [e.dataset.from, e.dataset.to]; if (!ln || !rg['region:' + ends[0]] || !rg['region:' + ends[1]]) return;
+      ends.forEach(id => { const g = rg['region:' + id];
+        if (!meets(R(ln), g, 2)) bad.push(where + ': the link ' + ends.join(' to ') + ' does not reach ' + id);
+        if (meets(R(ln), g, -3)) bad.push(where + ': the link ' + ends.join(' to ') + ' runs into ' + id); }); });
     const picks = [...st.querySelectorAll('.rg')].map(e => e.dataset.pick);
     if (new Set(picks).size !== picks.length) bad.push(where + ': two regions are picked by the same name (' + picks.join(', ') + ')');
     texts.forEach(([t, r]) => boxes.forEach(([n, b]) => { if (hit(r, b)) bad.push(where + ': "' + t + '" is on the box ' + n); }));
@@ -72,7 +78,19 @@ def build(tmp):
     if code != 0:
         sys.exit('could not build the pocket example:\n%s%s' % (out, err))
     shutil.copy(Path(root) / 'WORK' / 'SYSTEM_VIEW.html', Path(tmp) / 'pocket.html')
-    return pages + [Path(tmp) / 'pocket.html']
+    pages.append(Path(tmp) / 'pocket.html')
+    # links the examples do not have: past a row, upwards, and to the region at the side
+    root, _first = kit.pocket_repository(str(Path(tmp) / 'links'))
+    path = Path(root) / 'WORK' / 'SYSTEM_VIEW' / 'system.json'
+    system = json.loads(path.read_text(encoding='utf-8'))
+    system['links'] += [{'from': 'entry', 'to': 'external', 'label': 'addresses'}, {'from': 'external', 'to': 'core', 'label': 'pages back'},
+                        {'from': 'core', 'to': 'platform', 'label': 'notices'}]
+    path.write_text(json.dumps(system, ensure_ascii=False), encoding='utf-8')
+    code, out, err = kit.run(root)
+    if code != 0:
+        sys.exit('could not build the page of unusual links:\n%s%s' % (out, err))
+    shutil.copy(Path(root) / 'WORK' / 'SYSTEM_VIEW.html', Path(tmp) / 'links.html')
+    return pages + [Path(tmp) / 'links.html']
 
 
 def main():

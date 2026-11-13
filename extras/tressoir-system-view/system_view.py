@@ -1131,14 +1131,14 @@ def note_unseen_names(world, code, now_files, problems):
                 problems.note('Listed in %s and found nowhere in its files: %s.' % (folder, some(missing)))
 
 
-def note_empty_boxes(world, now_files, problems):
-    """A box none of whose paths holds a file."""
+def note_empty_boxes(world, now_files, problems, moved=()):
+    """A box none of whose paths holds a file. `moved` are the boxes whose files were renamed: an error already says what to do."""
     have = set(now_files)
     for p in now_files:
         parts = p.split('/')
         have.update('/'.join(parts[:k]) + '/' for k in range(1, len(parts)))
     for folder in world.boxes:
-        if not any(q in have or q.rstrip('/') in have or q.rstrip('/') + '/' in have for q in world.paths(folder)):
+        if folder not in moved and not any(q in have or q.rstrip('/') in have or q.rstrip('/') + '/' in have for q in world.paths(folder)):
             problems.note('No file is in the box %s. If its code is gone, the box goes too: take it out of system.json.' % folder)
 
 
@@ -1471,6 +1471,7 @@ def build(args):
         for old, new in (e.get('moves') or {}).items():
             if words.get(old) and not words.get(new):
                 words[new], new_words = words.pop(old), True
+    kept = {}
     if head_files is not None:
         folded, gone, kept = drop_removed(folded, head_files, now_files, moved)
         for f in gone:
@@ -1540,7 +1541,7 @@ def build(args):
                               % (e['name'], ', '.join(mine) or 'nothing', ', '.join(names) or 'nothing'))
     note_loose_files(current, now_files, problems, root)
     note_unseen_names(current, code, now_files, problems)
-    note_empty_boxes(current, now_files, problems)
+    note_empty_boxes(current, now_files, problems, kept)
     note_flows(folded, built, current, problems)
     note_dangling(folded, current, problems)
 
@@ -1696,7 +1697,7 @@ def build(args):
     out = os.path.join(work, 'SYSTEM_VIEW.html')
     with open(out, 'w', encoding='utf-8') as f:
         f.write(page)
-    print('Wrote %s/SYSTEM_VIEW.html.' % name)
+    print('Wrote %s/SYSTEM_VIEW.html: %d boxes, %d flows.' % (name, len(current.boxes), len(folded.get('flows') or [])))
     return 1 if problems.errors else 0
 
 

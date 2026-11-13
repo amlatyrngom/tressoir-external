@@ -287,9 +287,12 @@ function layout(v){ const side = (v.band && v.band.boxes.length) || (v.sep && v.
   if (v.band && v.band.boxes.length) { const to = out.regions[Math.max(0, out.regions.length - 2)], h = Math.max(to.y + to.h - first.y, 44 + v.band.boxes.length * 44 - 6);
     out.regions.push({ r:v.band, x:584, y:first.y, w:76, h }); v.band.boxes.forEach((b, k) => { out.pos[b.folder] = [592, first.y + 44 + k * 44, 60, 30]; }); }
   if (v.sep && v.sep.length) { out.labs.push({ text:'Separate', x:584, y:last.y + 4 }); v.sep.forEach((b, k) => { out.pos[b.folder] = [584, last.y + 22 + k * 38, 76, 30]; }); }
-  (v.links || []).forEach((l, i) => { const a = at(l.from), b = at(l.to); if (!a || !b) return;
-    if (v.band && l.from === v.band.id) out.edges.push({ id:'l' + i, from:l.from, to:l.to, p:[[584, b.y + b.h / 2], [572, b.y + b.h / 2]], both:true, says:l.says });
-    else out.edges.push({ id:'l' + i, from:l.from, to:l.to, p:[[spine - 38, a.y + a.h], [spine - 38, b.y]], label:l.label, says:l.says, dot:true }); });
+  // a link to or from the band is a tick at the row; a link between rows that are not neighbours, or one that goes up, runs beside the others with its word on the left
+  (v.links || []).forEach((l, i) => { const a = at(l.from), b = at(l.to); if (!a || !b || a === b) return;
+    const row = v.band && (l.from === v.band.id ? b : l.to === v.band.id ? a : null);
+    if (row) { out.edges.push({ id:'l' + i, from:l.from, to:l.to, p:[[584, row.y + row.h / 2], [572, row.y + row.h / 2]], both:true, says:l.says }); return; }
+    const down = b.y > a.y, far = !down || Math.abs(out.regions.indexOf(a) - out.regions.indexOf(b)) > 1, x = spine - 38 - (far ? 14 : 0), y0 = down ? a.y + a.h : a.y;
+    out.edges.push({ id:'l' + i, from:l.from, to:l.to, p:[[x, y0], [x, down ? b.y : b.y + b.h]], label:l.label, says:l.says, dot:true, l: far ? [x - 5, y0 + (down ? GAP : -GAP) / 2 + 3, 'end'] : undefined }); });
   if (near.uses) { out.edges.push({ id:'uses', from:last.r.id, to:'outside', p:[[spine, y], [spine, y + 28]], title:v.name + ' relies on', says:near.uses.says, dot:true }); y += 28; chips(near.uses.boxes, y, 'Uses'); y += 24; }
   out.H = y + 8; return out; }
 
