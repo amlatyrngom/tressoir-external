@@ -1,0 +1,17 @@
+[
+  { "name": "Notifier in its own package", "line": "one file per operating system behind the same notify",
+    "files": {
+      "pocket/notify/__init__.py": "offers notify and picks the file for this system",
+      "pocket/notify/macos.py": "moved here from pocket/notify.py",
+      "pocket/notify/linux.py": "notices on Linux"
+    },
+    "moves": { "pocket/notify.py": "pocket/notify/" },
+    "affects": ["notify"] },
+  { "name": "Common words skipped in search", "line": "a search ignores the words in a list",
+    "files": { "pocket/search.py": "drops the listed words before matching", "pocket/stopwords.txt": "the words a search ignores" },
+    "affects": ["find"],
+    "boxes": [
+      { "folder": "pocket/search.py",
+        "also": ["pocket/stopwords.txt"] }
+    ] }
+]

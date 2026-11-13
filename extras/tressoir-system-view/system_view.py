@@ -379,6 +379,8 @@ def fold(system, entries, problems, quiet=False):
     """system.json with these entries' boxes and lines written in. The entries keep them."""
     out = copy.deepcopy(system)
     for e in entries:
+        for old, new in (e.get('moves') or {}).items():
+            move_box(out, old, new, e.get('name', '?'), problems)
         world = World(out)
         for b in e.get('boxes') or []:
             folder = b.get('folder')
@@ -420,17 +422,82 @@ def fold(system, entries, problems, quiet=False):
     return out
 
 
-def drop_removed(system, had, has):
-    """A box whose files all existed before and are all gone is removed."""
+def move_box(out, old, new, name, problems):
+    """An entry says a box is now at another path. The box stays in its row with its name, its line and its interface;
+    the flow steps and the neighbours that named the old path follow. Anything more than that is architecture."""
+    world = World(out)
+    box = world.boxes.get(old)
+    if box is None:
+        # already true once the figure has the box at its new path
+        if new not in world.boxes:
+            problems.error('%s: "moves" names %s, which is not a box.' % (name, old))
+        return
+    if new == old:
+        return
+    owner = ' That is architecture: leave the figure alone and tell the owner.'
+    if new in world.boxes:
+        problems.error('%s: the box %s cannot move to %s, which is already a box. Joining two boxes is not a move.%s' % (name, old, new, owner))
+        return
+    if box.get('inside'):
+        problems.error('%s: the box %s has boxes inside it, so "moves" cannot carry it.%s' % (name, old, owner))
+        return
+    row, key = next(((r, k) for r, _parent, k in rows_of(out) if any(b is box for b in r.get('boxes') or [])), (None, None))
+    f = (row or {}).get('folder')
+    if f and (new == f or not under(f, new)):
+        problems.error('%s: the box %s cannot move to %s, which is not in %s, the folder of its %s. A box that changes row or region '
+                       'is not a move.%s' % (name, old, new, f, 'region' if key else 'row', owner))
+        return
+    for other in world.boxes:
+        if other != old and any(under(q, new) or under(new, q) for q in world.paths(other)):
+            problems.error('%s: the box %s cannot move to %s, which overlaps the box %s.%s' % (name, old, new, other, owner))
+            return
+    box['folder'] = new
+    if new in (box.get('also') or []):
+        box['also'] = [q for q in box['also'] if q != new]
+        if not box['also']:
+            del box['also']
+    for b in world.boxes.values():
+        for k in ('from', 'uses'):
+            if old in ((b.get(k) or {}).get('boxes') or []):
+                b[k]['boxes'] = [new if x == old else x for x in b[k]['boxes']]
+    for flow in out.get('flows') or []:
+        for step in flow.get('steps') or []:
+            if step.get('at') == old:
+                step['at'] = new
+
+
+def drop_removed(system, had, has, moved=None):
+    """A box whose files all existed before and are all gone is removed. Returns (the system, the boxes removed, the boxes
+    kept although empty). A box is kept when its files were renamed (`moved` is {new path: old path}): its code is not gone,
+    and where the box went is not the script's to say."""
     world = World(system)
     gone = [f for f in world.boxes
             if any(world.holds(f, p) for p in had) and not any(world.holds(f, p) for p in has)]
+    kept = {f: sorted(new for new, old in (moved or {}).items() if world.holds(f, old)) for f in gone}
+    kept = {f: went for f, went in kept.items() if went}
+    gone = [f for f in gone if f not in kept]
     if not gone:
-        return system, []
+        return system, [], kept
     out = copy.deepcopy(system)
     for row, _parent, _key in rows_of(out):
         row['boxes'] = [b for b in row.get('boxes') or [] if b['folder'] not in gone]
-    return out, gone
+    return out, gone, kept
+
+
+def moved_to(world, folder, went):
+    """Where a box whose files were all renamed seems to be now: (a path for "moves", None) or (None, the boxes that
+    took its files)."""
+    took = sorted(set(b for b in (world.box_of(p) for p in went) if b and b != folder))
+    if took:
+        return None, took
+    rows = set(r.get('folder') for r, _parent, _key in rows_of(world.sys) if r.get('folder'))
+    if folder.endswith('/') or len(went) > 1:
+        common = os.path.commonpath(went) if len(went) > 1 else os.path.dirname(went[0])
+        guess = common + '/' if common else None
+    else:
+        parent = os.path.dirname(went[0]) + '/'
+        guess = went[0] if parent in rows or parent == '/' else parent
+    return (None, []) if not guess or guess in rows else (guess, None)
 
 
 def pretty(v, ind='', width=150):
@@ -542,6 +609,10 @@ def hits_of(entry, world, problems=None, base=None):
     for b in entry.get('boxes') or []:
         if b.get('folder'):
             brought(b)
+    for old, new in (entry.get('moves') or {}).items():
+        hit.extend(world.order.get(new, []))
+        if base is not None:
+            hit.extend(base.order.get(old, []))
     if base is not None:
         for f in base.boxes:
             if f not in world.boxes and any(base.holds(f, p) for p in entry.get('files') or {}):
@@ -686,21 +757,31 @@ def emit_box(b):
     return out
 
 
+def region_key(system, said):
+    """The region a link of the overview names: its key (entry, core, ...), or the folder that one region alone has."""
+    regions = system.get('regions') or {}
+    if said in REGIONS:
+        return said if regions.get(said) else None
+    keys = [k for k in REGIONS if said and (regions.get(k) or {}).get('folder') == said]
+    return keys[0] if len(keys) == 1 else None
+
+
 def emit_views(system):
     regions = system.get('regions') or {}
     drawn = [k for k in ('entry', 'core', 'external') if (regions.get(k) or {}).get('boxes')]
 
     def region(k):
         r = regions[k]
-        return {'slot': SLOT[k], 'title': TITLE[k], 'dir': r.get('folder', ''), 'line': r.get('line', ''),
+        return {'id': k, 'slot': SLOT[k], 'title': TITLE[k], 'dir': r.get('folder', ''), 'line': r.get('line', ''),
                 'boxes': [emit_box(b) for b in r.get('boxes') or []]}
 
     over = {'id': '', 'name': 'Overview', 'line': 'the whole system', 'rows': [region(k) for k in drawn],
             'sep': [emit_box(b) for b in (regions.get('separate') or {}).get('boxes') or []]}
     if (regions.get('platform') or {}).get('boxes'):
         over['band'] = region('platform')
-    ends = set(r['dir'] for r in over['rows'] + ([over['band']] if 'band' in over else []))
-    over['links'] = [l for l in system.get('links') or [] if l.get('from') in ends and l.get('to') in ends]
+    ends = set(r['id'] for r in over['rows'] + ([over['band']] if 'band' in over else []))
+    links = [dict(l, **{'from': region_key(system, l.get('from')), 'to': region_key(system, l.get('to'))}) for l in system.get('links') or []]
+    over['links'] = [l for l in links if l['from'] in ends and l['to'] in ends]
     views = [over]
     for row, _parent, _key in rows_of(system):
         for b in row.get('boxes') or []:
@@ -708,7 +789,7 @@ def emit_views(system):
                 continue
             v = {'id': b['folder'], 'rows': [], 'links': b.get('links') or []}
             for i, r in enumerate(b['inside']):
-                v['rows'].append({'slot': INNER_SLOTS[i % len(INNER_SLOTS)], 'title': r.get('name', ''), 'dir': r.get('folder', ''),
+                v['rows'].append({'id': r.get('folder', ''), 'slot': INNER_SLOTS[i % len(INNER_SLOTS)], 'title': r.get('name', ''), 'dir': r.get('folder', ''),
                                   'line': r.get('line', ''), 'boxes': [emit_box(x) for x in r.get('boxes') or []]})
             for k in ('from', 'uses'):
                 if b.get(k):
@@ -840,10 +921,12 @@ def entry_fault(e):
           and isinstance(e.get('files', {}), dict) and all(isinstance(n, str) for n in e.get('files', {}).values())
           and texts(e.get('affects', []))
           and isinstance(e.get('interface', {}), dict) and all(texts(l) for l in e.get('interface', {}).values())
-          and isinstance(e.get('boxes', []), list))
+          and isinstance(e.get('boxes', []), list)
+          and isinstance(e.get('moves', {}), dict) and all(isinstance(n, str) and n for n in e.get('moves', {}).values()))
     if not ok:
         return ('%s is not in the shape the skill gives: "files" is an object of notes, "affects" a list of names, '
-                '"interface" an object of lists of lines, "boxes" a list of boxes' % name)
+                '"interface" an object of lists of lines, "boxes" a list of boxes, "moves" an object: a box\'s old path, '
+                'then its new one' % name)
     for b in e.get('boxes', []):
         fault = box_fault(b, name)
         if fault:
@@ -957,6 +1040,8 @@ def settled(built, at_head, raw):
         for b in e.get('boxes') or []:
             f = b.get('folder')
             ok = ok and f in at_head.boxes and f in after.boxes and plain(at_head.boxes[f]) == plain(after.boxes[f])
+        for old, new in (e.get('moves') or {}).items():
+            ok = ok and new in at_head.boxes and old not in at_head.boxes
         if ok:
             out.append(e)
     return out, same
@@ -1003,7 +1088,7 @@ def differs(a, b):
     return (a is None) != (b is None) or (a is not None and (a['sig'], a['words']) != (b['sig'], b['words']))
 
 
-def note_loose_files(world, now_files, problems):
+def note_loose_files(world, now_files, problems, root):
     regions = world.sys.get('regions') or {}
     if world.boxes and not any((regions.get(k) or {}).get('folder') for k in REGIONS):
         problems.note('No region gives its folder, so a changed file beside the boxes is not noticed. Write each region\'s "folder" '
@@ -1012,10 +1097,18 @@ def note_loose_files(world, now_files, problems):
         folder = ((world.sys.get('regions') or {}).get(key) or {}).get('folder')
         if not folder:
             continue
-        loose = sorted(p for p in now_files if under(folder, p) and world.box_of(p) is None)
+        loose = sorted(p for p in now_files if under(folder, p) and world.box_of(p) is None and not empty_file(root, p))
         if loose:
             problems.note('%d %s under %s belong%s to no box: %s.' % (len(loose), 'file' if len(loose) == 1 else 'files', folder,
                                                                       's' if len(loose) == 1 else '', some(loose)))
+
+
+def empty_file(root, path):
+    """A file with nothing in it, such as a package marker: it needs no box."""
+    try:
+        return os.path.getsize(os.path.join(root, path)) == 0
+    except OSError:
+        return False
 
 
 def note_unseen_names(world, code, now_files, problems):
@@ -1065,11 +1158,12 @@ def note_flows(system, built, world, problems):
 def note_dangling(system, world, problems):
     """A flow step, a link or a neighbour that points at nothing."""
     regions = system.get('regions') or {}
-    ends = set(r['folder'] for r in regions.values() if r and r.get('folder'))
     for l in system.get('links') or []:
         for k in ('from', 'to'):
-            if l.get(k) not in ends:
-                problems.note('A link of the overview points at %s, which is not a region\'s folder. It is not drawn.' % l.get(k))
+            if region_key(system, l.get(k)) is None:
+                shared = [r for r in REGIONS if l.get(k) and (regions.get(r) or {}).get('folder') == l.get(k)]
+                problems.note('A link of the overview points at %s, which %s. Name the region by its key: entry, core, external or '
+                              'platform. The link is not drawn.' % (l.get(k), 'is the folder of %s' % ' and '.join(shared) if shared else 'is not a region'))
     for folder, b in world.boxes.items():
         rows = set(r.get('folder') for r in b.get('inside') or [])
         for l in b.get('links') or []:
@@ -1084,7 +1178,9 @@ def note_dangling(system, world, problems):
         for n, s in enumerate(f.get('steps') or []):
             at = s.get('at')
             if at not in world.boxes:
-                problems.note('The flow "%s", step %d, is at %s, which is not a box.' % (f.get('name', '?'), n + 1, at))
+                problems.error('The flow "%s", step %d, is at %s, which is not a box. If the box moved, say so in the entry: "moves", '
+                               'its old path, then its new one. If it is gone, the flow is no longer true: that is architecture, '
+                               'so settle the flow with the owner.' % (f.get('name', '?'), n + 1, at))
             elif s.get('calls') and '%s#%s' % (at, s['calls']) not in world.lines:
                 problems.note('The flow "%s", step %d, calls %s, which %s does not list. The page draws the step without its call.'
                               % (f.get('name', '?'), n + 1, s['calls'], at))
@@ -1322,6 +1418,11 @@ def build(args):
                 if p in now_files and not words.get(p) and note_of(n) and (n.startswith('+ ') or added_by(e, p)):
                     words[p], new_words = note_of(n), True
 
+    # a renamed file keeps its few words
+    for new, old in moved.items():
+        if words.get(old) and not words.get(new):
+            words[new], new_words = words.pop(old), True
+
     # ---- then the others are folded, one entry at a time; an entry that fails a check is left out
     base = Problems()
     World(system, base)
@@ -1365,18 +1466,33 @@ def build(args):
     for t in notes:
         problems.note(t)
     rewritten = later_wins(passing, World(folded), problems)
+    for e in passing:
+        # a moved box's few words follow it
+        for old, new in (e.get('moves') or {}).items():
+            if words.get(old) and not words.get(new):
+                words[new], new_words = words.pop(old), True
     if head_files is not None:
-        folded, gone = drop_removed(folded, head_files, now_files)
+        folded, gone, kept = drop_removed(folded, head_files, now_files, moved)
         for f in gone:
             problems.note('The box %s is removed: every file it had at the last commit is gone.' % f)
+        for f, went in kept.items():
+            guess, took = moved_to(World(folded), f, went)
+            owner = 'that is architecture: leave the figure alone and tell the owner.'
+            problems.error('The box %s has no file left, and its code is not gone: it is now %s. %s' % (
+                f, some(went, 3),
+                'Its files went into %s. Joining boxes is not a move; %s' % (' and '.join(took), owner) if took
+                else 'If the box moved, say so in the entry: "moves": { "%s": "%s" }. If it was split or joined to another, %s' % (f, guess, owner) if guess
+                else 'If the box moved, say so in the entry: "moves", its old path, then its new one. If it was split or joined to another, %s' % owner))
     current = World(folded)
+    if not current.boxes:
+        problems.note('No box is written yet in %s. To start, follow "Starting in a project that already has code" in the skill.' % shown('system.json'))
     text = pretty(folded) + '\n'
     path = os.path.join(here, 'system.json')
     before = open(path, encoding='utf-8-sig').read() if os.path.exists(path) else ''
     if text != before and not args.check and system:
         with open(path, 'w', encoding='utf-8') as f:
             f.write(text)
-        print('Folded the built changes into %s.' % shown('system.json'))
+        print(('Folded the built changes into %s.' if folded != system else 'Set %s in the script\'s layout; nothing in it changed.') % shown('system.json'))
     if not args.check:
         if rewritten or dropped:
             with open(os.path.join(here, 'changes.json'), 'w', encoding='utf-8') as f:
@@ -1422,7 +1538,7 @@ def build(args):
                 problems.note('%s: "affects" has %s. Following its changed lines to the nearest listed functions gives %s. '
                               'Only said: correct the entry if the second is right.'
                               % (e['name'], ', '.join(mine) or 'nothing', ', '.join(names) or 'nothing'))
-    note_loose_files(current, now_files, problems)
+    note_loose_files(current, now_files, problems, root)
     note_unseen_names(current, code, now_files, problems)
     note_empty_boxes(current, now_files, problems)
     note_flows(folded, built, current, problems)
@@ -1433,7 +1549,7 @@ def build(args):
         mine = [e for e in entries if e.get('plan') == pl]
         files = changed_by_plan(mine, now_files, problems)
         after = (now_files | set(p for p, s in files.items() if s == 'add')) - set(p for p, s in files.items() if s == 'del')
-        psys, _gone = drop_removed(fold(folded, mine, problems, quiet=True), now_files, after)
+        psys, _gone, _kept = drop_removed(fold(folded, mine, problems, quiet=True), now_files, after)
         plan_worlds.append((pl, mine, World(psys), files, after))
         for e in mine:
             done = [p for p, n in (e.get('files') or {}).items()
@@ -1563,6 +1679,8 @@ def build(args):
         print('\nPrepared for the changed files no entry explains. Put it in %s, name it, and correct it:' % shown('changes.json'))
         print(pretty(prepared[0], '  ').join(['  ', '']))
         print('\n'.join(prepared[1]))
+        if prepared[0].get('affects'):
+            print('  A name under "affects" whose signature or words changed goes under "interface" instead, written as it is now.')
     if problems.errors:
         print('%d %s.%s Fix %s and run again.' % (
             len(problems.errors), 'error' if len(problems.errors) == 1 else 'errors',

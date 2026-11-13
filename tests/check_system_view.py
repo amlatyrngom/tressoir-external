@@ -5,12 +5,13 @@
 # ///
 """Check built system view pages in headless Chrome, opened from disk.
 
-    uv run tests/check_system_view.py                  # builds the Tally and Marlin examples, then checks both
+    uv run tests/check_system_view.py                  # builds the Tally, Marlin and Pocket examples, then checks them
     uv run tests/check_system_view.py <page>.html ...  # checks pages that are already built
 
 At 375, 705, 900 and 1440 pixels wide it goes through every tab, every view, every box (closed and
 with every line opened) and every flow step, and expects: no console error; no text of the figure
-on a box or on other text; at 375 pixels, nothing wider than the screen. It then draws the page
+on a box or on other text; no two regions picked by the same name; at 375 pixels, nothing wider than
+the screen. It then draws the page
 inside a hidden frame, shows the frame, and expects the same figure as in a frame that was never
 hidden. Uses the Chrome already installed; downloads no browser.
 """
@@ -30,6 +31,8 @@ SWEEP = """(narrow) => { const bad = [], strip = document.getElementById('strip'
     const boxes = [...st.querySelectorAll('.nd')].map(e => [e.textContent, R(e)]);
     const texts = [...st.querySelectorAll('.ed text')].filter(e => e.style.display !== 'none').map(e => [e.textContent, R(e)])
       .concat([...st.querySelectorAll('.rg b')].map(e => [e.textContent, R(e)]));
+    const picks = [...st.querySelectorAll('.rg')].map(e => e.dataset.pick);
+    if (new Set(picks).size !== picks.length) bad.push(where + ': two regions are picked by the same name (' + picks.join(', ') + ')');
     texts.forEach(([t, r]) => boxes.forEach(([n, b]) => { if (hit(r, b)) bad.push(where + ': "' + t + '" is on the box ' + n); }));
     texts.forEach(([t, r], i) => texts.slice(i + 1).forEach(([u, q]) => { if (hit(r, q)) bad.push(where + ': "' + t + '" is on "' + u + '"'); })); });
   const wide = where => { states++; if (narrow && document.documentElement.scrollWidth > innerWidth + 1) bad.push(where + ': the page is ' + document.documentElement.scrollWidth + ' pixels wide'); };
@@ -38,7 +41,8 @@ SWEEP = """(narrow) => { const bad = [], strip = document.getElementById('strip'
     for (const t of TABS) { mode = t.id;
       for (const v of S.views) { go(v.id); where = t.label + ', ' + (v.name || v.id); overlaps(where);
         for (const p of [null, ...own(v).map(b => 'node:' + b.folder)]) { pin = p; openT = []; show(); wide(where + ', ' + p);
-          openT = [...strip.querySelectorAll('[data-fold]')].map(e => e.dataset.fold); show(); wide(where + ', ' + p + ', opened'); } }
+          openT = [...strip.querySelectorAll('[data-fold]')].map(e => e.dataset.fold); show(); wide(where + ', ' + p + ', opened'); }
+        for (const r of regionsOf(v)) { pin = 'region:' + r.id; openT = []; show(); wide(where + ', region ' + r.id); } }
       for (let f = 0; f < S.flows.length; f++) { goFlow(f); where = t.label + ', flow ' + S.flows[f].name; pin = null; show(); wide(where);
         for (let k = 0; k < S.flows[f].steps.length; k++) { pin = 'step:' + k; show(); wide(where + ', step ' + (k + 1)); } }
       go(''); only = !only; render(); wide(t.label + ', the other setting of Changes only'); only = !only; render(); }
@@ -61,7 +65,12 @@ def build(tmp):
         page = Path(tmp) / (example + '.html')
         shutil.copy(Path(root) / 'WORK' / 'SYSTEM_VIEW.html', page)
         pages.append(page)
-    return pages
+    root, _first = kit.pocket_repository(tmp)
+    code, out, err = kit.run(root)
+    if code != 0:
+        sys.exit('could not build the pocket example:\n%s%s' % (out, err))
+    shutil.copy(Path(root) / 'WORK' / 'SYSTEM_VIEW.html', Path(tmp) / 'pocket.html')
+    return pages + [Path(tmp) / 'pocket.html']
 
 
 def main():

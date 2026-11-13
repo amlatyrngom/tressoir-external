@@ -307,17 +307,17 @@
     }
   },
   "links": [
-    { "from": "src/platform/", "to": "src/entry/", "says": "each operating system supplies its own sockets and terminal" },
-    { "from": "src/platform/", "to": "src/core/", "says": "the same core runs on Linux and macOS" },
+    { "from": "platform", "to": "entry", "says": "each operating system supplies its own sockets and terminal" },
+    { "from": "platform", "to": "core", "says": "the same core runs on Linux and macOS" },
     {
-      "from": "src/entry/",
-      "to": "src/core/",
+      "from": "entry",
+      "to": "core",
       "label": "statements in, rows out",
       "says": "Every entry point hands a statement to the SQL front end and gets rows back from Execution."
     },
     {
-      "from": "src/core/",
-      "to": "src/connectors/",
+      "from": "core",
+      "to": "external",
       "label": "backups, files, log shipping",
       "says": "Storage writes backups to the Object store. Execution reads and writes File formats. Transactions ships the log to Replicas."
     }

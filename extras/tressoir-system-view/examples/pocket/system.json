@@ -1,0 +1,58 @@
+{ "name": "Pocket",
+  "regions": {
+    "entry": { "folder": "pocket/", "line": "how you use it",
+      "boxes": [
+        { "name": "Command line", "folder": "pocket/cli.py", "line": "add, read, find",
+          "also": ["pocket/__main__.py"],
+          "interface": [
+            "main(argv: [Text]) → ExitCode  // reads the command line and runs one command",
+            "cmd_add(url: Text)  // pocket add: saves one page",
+            "cmd_read(id: PageId)  // pocket read: prints a saved page",
+            "cmd_find(words: Text)  // pocket find: lists the pages that match"
+          ] }
+      ] },
+    "core": { "folder": "pocket/", "line": "what Pocket does",
+      "boxes": [
+        { "name": "Pages", "folder": "pocket/pages.py", "line": "saving and reading pages",
+          "interface": [
+            "save(url: Text) → PageId  // fetches, cleans and stores one page",
+            "read(id: PageId) → Page?  // one saved page",
+            "Page = { id: PageId, url: Text, title: Text, text: Text }  // one saved page"
+          ] },
+        { "name": "Cleaning", "folder": "pocket/clean.py", "line": "keeps the article, drops the rest",
+          "interface": ["clean(html: Text) → Text  // the readable text of a page"] },
+        { "name": "Search", "folder": "pocket/search.py", "line": "finds saved pages by their words",
+          "also": ["pocket/stopwords.txt"],
+          "interface": ["find(words: Text) → [Page]  // the pages that hold every word, best first"] },
+        { "name": "Store", "folder": "pocket/store.py", "line": "one SQLite file",
+          "interface": ["put(page: Page) → PageId  // stores one page", "get(id: PageId) → Page?  // one page, or nothing", "all() → [Page]  // every page"] }
+      ] },
+    "external": { "folder": "pocket/", "line": "what it reads from outside",
+      "boxes": [
+        { "name": "Fetching", "folder": "pocket/fetch.py", "line": "downloads a page",
+          "interface": ["fetch(url: Text) → Text  // the HTML of one page, with a time limit"] }
+      ] },
+    "platform": { "folder": "pocket/", "line": "differs per operating system",
+      "boxes": [
+        { "name": "Notifier", "folder": "pocket/notify/", "line": "says when a page is saved",
+          "interface": ["notify(title: Text)  // shows a desktop notice"] }
+      ] },
+    "separate": { "folder": "", "line": "",
+      "boxes": [] }
+  },
+  "links": [
+    { "from": "entry", "to": "core", "label": "commands", "says": "Every command calls Pages or Search." },
+    { "from": "core", "to": "external", "label": "pages", "says": "Saving a page downloads it through Fetching." }
+  ],
+  "flows": [
+    { "name": "Saving a page", "line": "from the command to the stored page",
+      "steps": [
+        { "at": "pocket/cli.py", "does": "receives the add command and the address", "calls": "cmd_add" },
+        { "at": "pocket/pages.py", "gets": "the address", "does": "saves the page", "calls": "save" },
+        { "at": "pocket/fetch.py", "gets": "the address", "does": "downloads the page", "calls": "fetch" },
+        { "at": "pocket/clean.py", "gets": "HTML", "does": "keeps the article", "calls": "clean" },
+        { "at": "pocket/store.py", "gets": "the page", "does": "stores it", "calls": "put" },
+        { "at": "pocket/notify/", "gets": "the title", "does": "shows a notice", "calls": "notify" },
+        { "at": "pocket/cli.py", "gets": "the page's number", "does": "prints it" }
+      ] }
+  ] }

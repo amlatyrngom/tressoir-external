@@ -128,11 +128,13 @@ check "it says in three lines that this is experimental and where feedback goes"
   '[ "$(tail -n 4 "$TMP/out.txt" | head -n 3)" = "The system view is experimental.
 Feedback goes in WORK/SYSTEM_VIEW/FEEDBACK.md.
 It is applied to the kit from time to time." ]'
+check "the page the script builds is ignored by git" 'grep -qx "SYSTEM_VIEW.html" WORK/.gitignore && grep -qx "TMP/" WORK/.gitignore'
 check "the starting files are the kit's seeds" 'diff -q "$KIT/extras/tressoir-system-view/seeds/system.json" WORK/SYSTEM_VIEW/system.json >/dev/null && [ "$(cat WORK/SYSTEM_VIEW/changes.json)" = "[]" ]'
 snapshot > "$TMP/before.txt"
 install --experimental-system-view; snapshot > "$TMP/after.txt"
 check "a second run with the option changes nothing" 'cmp -s "$TMP/before.txt" "$TMP/after.txt" && grep -q "nothing to do" "$TMP/out.txt"'
 install; snapshot > "$TMP/after.txt"
+check "a second run with the option adds the ignore line only once" '[ "$(grep -cx "SYSTEM_VIEW.html" WORK/.gitignore)" = "1" ]'
 check "a run without the option leaves the system view in place" 'cmp -s "$TMP/before.txt" "$TMP/after.txt" && ! grep -qi "experimental" "$TMP/out.txt"'
 echo '{ "name": "Mine" }' > WORK/SYSTEM_VIEW/system.json; echo "2026-01-01 a remark" >> WORK/SYSTEM_VIEW/FEEDBACK.md
 rm WORK/SYSTEM_VIEW/changes.json; echo "edited" >> WORK/skills/tressoir-system-view/system_view.py

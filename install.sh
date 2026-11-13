@@ -115,6 +115,11 @@ if [ "$SYSTEM_VIEW" -eq 1 ]; then
   for file in system.json changes.json FEEDBACK.md; do
     seed "extras/tressoir-system-view/seeds/$file" "WORK/SYSTEM_VIEW/$file"
   done
+  # The page is rebuilt by the script from files that are committed, so it is not committed itself.
+  if ! grep -qx 'SYSTEM_VIEW.html' WORK/.gitignore 2>/dev/null; then
+    printf '\n# The system view page; its script rebuilds it\nSYSTEM_VIEW.html\n' >> WORK/.gitignore
+    did "added SYSTEM_VIEW.html to WORK/.gitignore"
+  fi
 fi
 
 # What the first kit left behind. Part of migrating; delete this block with tressoir-migrate.

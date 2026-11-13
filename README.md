@@ -91,6 +91,8 @@ change.
   ```
 
 - The script needs only Python 3 and git; `python3` works in place of `uv run`.
+- `WORK/SYSTEM_VIEW/` is committed with the code. The page is not: the installer adds it to
+  `WORK/.gitignore`, and anyone rebuilds it with the script.
 - It is a trial. What gets in the way goes in `WORK/SYSTEM_VIEW/FEEDBACK.md`, and is applied to the
   kit from time to time.
 

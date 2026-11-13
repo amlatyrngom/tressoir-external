@@ -13,7 +13,7 @@ looked, and what each plan would change.
 
 ```text
 WORK/
-  SYSTEM_VIEW.html      the page; the script rebuilds it
+  SYSTEM_VIEW.html      the page; the script rebuilds it, git ignores it
   SYSTEM_VIEW/
     system.json         the architecture             written with me, rarely
     changes.json        named changes and plans      yours, for every task
@@ -22,9 +22,10 @@ WORK/
     FEEDBACK.md         what got in the way
 ```
 
-Commit `WORK/SYSTEM_VIEW/` together with the code, never separately. Two worked examples are in
-`WORK/skills/tressoir-system-view/examples/`: `tally/` (one view) and `marlin/` (views inside
-boxes). Copy their shape.
+Commit `WORK/SYSTEM_VIEW/` together with the code, never separately. The page is not committed:
+anyone rebuilds it with the script. Three worked examples are in
+`WORK/skills/tressoir-system-view/examples/`: `tally/` (one view), `marlin/` (views inside boxes)
+and `pocket/` (all the code in one folder). Copy the shape of the one nearest to the project.
 
 ## Two phases
 
@@ -33,7 +34,7 @@ interface listing are decided together and change rarely. They live in `system.j
 
 **Mechanical, on your own.** For every task you write entries in `changes.json` and run the
 script. You decide nothing about the figure, you ask me nothing, and you do not edit
-`system.json`: the script writes the entries' lines and boxes into it.
+`system.json`: the script writes the entries' lines, boxes and moves into it.
 
 **The files say what is true. They never say what changed.** The script finds what changed by
 comparing git, `system.json` at an earlier commit, and the planned entries. So never write a
@@ -63,13 +64,15 @@ The same shape for work that is planned and work that is done.
 | `affects` | listed functions whose signature is the same but whose code this change reaches | when there are any |
 | `interface` | a listed line as it is now, under its box's folder | when its signature or its words are new or different |
 | `boxes` | a box as it is now | when it is new, or its `line` changed, or it gains a path (`also`) |
+| `moves` | a box's old path, then its new one | when its code moved and it is otherwise the same box |
 | `plan` | the plan's name | only while it is not built |
 
 An entry restates whatever is no longer true, and nothing else:
 
 - A line under `interface` replaces the line of that name in that box, or is added last. Leave the
   words out to keep them. `- name` removes a line. A rename is `- old` and the new line. A changed
-  signature goes here and not also in `affects`. A new type goes under the box that owns it.
+  signature goes here and not also in `affects`; so does a line whose words are no longer true
+  while its signature stays. A new type goes under the box that owns it.
 - When two built entries state the same line, the later one in the file stands. The script takes
   the line out of the earlier entry, puts its name under that entry's `affects`, and says so.
 - A box under `boxes` is matched by `folder`. Write a new one whole, with its `interface`. For an
@@ -77,11 +80,19 @@ An entry restates whatever is no longer true, and nothing else:
 - A new box is a folder directly in a row's or a region's folder. The script does not place any
   other: a folder inside a box is not a box, and where two regions share the folder (a flat
   project) the region is mine to choose. Leave such a box out of `boxes` and tell me.
+- A box whose folder or file was renamed is said under `moves`: `"moves": { "app/notify.py":
+  "app/notify/" }`. The box keeps its region, name, line and interface, and the flow steps that
+  were at the old path follow. The new path stays in the same row or region and outside every
+  other box. Until it is said, the script keeps the box and gives an error that proposes the
+  line. A box that changes region, splits, or joins another is not a move.
+- A renamed file is written once under `files`, with its new path.
 - A planned entry also says what git cannot know yet: a note that starts with `+ ` is a file the
   plan adds, `- ` one it removes.
 
 How many entries: with a plan, one per plan step, with the same names. Without a plan, one per
-task I asked for, written before the task's first commit. Every entry has its own name: two built
+task I asked for, in place before the task's first commit. Write it before or after the code:
+run with `--check` and no entry, and the script prepares one from the diff for you to name and
+correct. Every entry has its own name: two built
 entries, or two of one plan, with the same name stop the script. Do not rebuild entries later from
 an old diff.
 
@@ -110,9 +121,10 @@ A change deep in private code must show on the nearest function I can see.
 2. **As each step is built.** Correct its entry to what was built (file names, signatures), then
    delete its `plan` key. There is no other command for building a plan.
 3. **A task ends**, planned or not. Run the script. Answer every error; read every note; run again
-   until no error is left.
-4. **Then commit**, code and `WORK/SYSTEM_VIEW/` together. If the page changed, say so in one line
-   of the hand-off.
+   until no error is left, except one that is architecture (see below).
+4. **Then commit**, code and `WORK/SYSTEM_VIEW/` together. If the figure, a flow or a listed line
+   changed, say so in one line of the hand-off. Do not run the script again after the commit: the
+   committed entry stays in `changes.json` until the next task's first run takes it out.
 
 ```bash
 uv run WORK/skills/tressoir-system-view/system_view.py            # fold, check, build the page
@@ -126,7 +138,8 @@ built entry, the next run takes it out of `changes.json` by itself: a built and 
 reads as if it was always there. "Holds" means the commit has the entry unchanged and its
 `system.json` already says what the entry states, so an entry committed before the script ran
 stays for one more commit. Work that goes on in the same files after that commit needs an entry
-of its own. Move Seen only when a planned task starts, or when I say so.
+of its own. Move Seen only when a planned task starts, when the first figure is committed, or
+when I say so.
 
 A file in a shape the script cannot read (a list where an object belongs, text where a list
 belongs, a file not saved as UTF-8) stops it with one sentence that says what to write. Nothing
@@ -142,8 +155,10 @@ What the script prints:
 | a built entry with a `+ ` file that does not exist | a flow passing a box an entry changes: check it still reads true |
 | a planned path that does not exist and has no `+ ` | an open plan restates a line that has changed since the last commit |
 | a name twice in a box; a path in two boxes; a bare name with no single match | an entry replaced a line: what it was, what it is |
-| a new box the script will not place: inside a box, deeper than a row, or where regions share the folder | a flow step, a link or a neighbour that points at nothing |
-| | a box with no file; a figure whose regions give no folder |
+| a new box the script will not place: inside a box, deeper than a row, or where regions share the folder | a link or a neighbour that points at nothing |
+| a box with no file left whose files were renamed (it proposes the `moves` line) | a box with no file; a figure whose regions give no folder |
+| a flow step at a path that is not a box | a box removed because its files were deleted |
+| `moves` to another region or row, onto or into another box, or of a box with boxes inside | no box written yet |
 
 Reading a diff:
 
@@ -153,13 +168,17 @@ Reading a diff:
 | an edit inside a listed function, or in private code a listed function reaches | the name in `affects` |
 | a listed signature changed, a new function another box calls, a new command | the line under `interface` |
 | a listed line's words, or a box's `line`, no longer true | restate it |
+| a box's folder or file renamed, the box otherwise the same | `moves`, old path then new path |
 | a new folder inside a box | nothing |
 | a new folder directly in a row or a region | a box under `boxes`, with a name and a line |
 | a new file in a flat project | `also` on the only box that imports it |
 
-**Architecture is never decided mechanically:** a new row or region; a box that moves, splits or
-merges; in a flat project, a new folder, or a file that two boxes import; a flow step that has
-become false. Leave the figure and the flows alone and tell me in your report.
+**Architecture is never decided mechanically:** a new row or region; a box that changes region,
+splits or merges; in a project whose code is one folder, a new box, or a file that two boxes
+import; a flow step that has become false. Leave the figure and the flows alone and tell me in
+your report. An error that is architecture stays until I have answered: commit the code with the
+error left, and put it first in the hand-off. Once I have answered, write my answer into
+`system.json`.
 
 ## `system.json`: the architecture
 
@@ -169,8 +188,8 @@ Written with me. Four layers; each is optional and the page works without the la
    does), `external` (services it calls), `platform` (what differs per platform), `separate`
    (another product in the same repository). A region has a `folder`, a `line` and `boxes`; leave
    it empty when it does not apply. Where the code sits at the top of the repository, the folder
-   is written `"./"`. `links` between regions have `from`, `to` (region folders), a short `label`
-   and a sentence, `says`.
+   is written `"./"`. `links` between regions have `from`, `to` (the regions' keys, such as
+   `entry` and `core`), a short `label` and a sentence, `says`.
 2. **Inside a box.** `inside` lists its rows; a row is a folder and its boxes are folders in it.
    A box with an inside may give `links` between its rows, and `from` and `uses`: the outside
    boxes it works with, each with a sentence.
@@ -184,6 +203,8 @@ Written with me. Four layers; each is optional and the page works without the la
   belongs to the box with the longest matching path; a path belongs to one box only.
   `"shared": true` marks the one box of helpers with no better home.
 - A box lists what other boxes call. An entry box lists its entry points: commands, routes.
+  A function that callers reach through a module of the box is written with that name
+  (`youtube.minutes`). Constants and settings are not listed.
 - Names are spelt as in the code. Where the code has no single name (a command, a route), choose
   one; the note that it appears nowhere is then expected. The name of a line is its first word, so
   two routes cannot both start with `GET`: write `get_users  // GET /users, lists the users`.
@@ -196,10 +217,19 @@ Written with me. Four layers; each is optional and the page works without the la
 ### Starting in a project that already has code
 
 Propose the regions and boxes from the code as it is, and settle them with me before going
-further: around a dozen boxes, each a component I would name when describing the project. Add the
-inside of the larger boxes, the interface and one or two flows once the figure is agreed. Where a
+further: around a dozen boxes, each a component I would name when describing the project. Once the
+figure is agreed, add the interface and one or two flows. Give a box an inside only when it has
+folders of its own that I would name; a box that is one file or one flat folder has none. Where a
 component is spread out, give the box its main folder and list the rest under `also`. Leave
 `changes.json` as `[]`. Do not move code to make the first figure look tidy.
+
+Where all the code is in one folder (`app/`, say), every region that applies gets that folder, and
+a box is a file or a folder directly in it, as in the `pocket/` example. The script then cannot
+tell which region a new box belongs to, so a new box is mine to place.
+
+Write `lines.json` once at this point, a few words per source file; later the script adds a new
+file's words from its entry and follows renames. Commit the first figure, then run the script
+with `--seen`: the first figure is the first thing I have seen.
 
 ## Keep the code easy to draw
 

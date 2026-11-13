@@ -841,8 +841,10 @@ def review(tmp):
     entries(root, {'name': 'No entries', 'line': 'gone', 'files': {ENTRIES_PY: 'removed'}, 'interface': {ent: ['- add', '- listing', '- NewEntry']}})
     code, out, err = run(root)
     code2, out2, err2 = run(root)
+    flow_error = 'ERROR  The flow "Adding an entry", step 2, is at src/core/entries/, which is not a box.'
     check('an entry that removes the lines of a box whose files are gone gives the same result on a second run',
-          code == 0 and code2 == 0 and 'The box src/core/entries/ is removed' in out and 'ERROR' not in out + out2, out + err + out2 + err2)
+          code == code2 and 'The box src/core/entries/ is removed' in out and out.count('ERROR') == 1 and out2.count('ERROR') == 1, out + err + out2 + err2)
+    check('a flow step left at a box that is gone is an error, on every run', code == 1 and flow_error in out and flow_error in out2, out + out2)
     cc = page_data(root)['snap']['cc']
     check('and its lines are marked as the entry\'s', cc['boxes'].get(ent) == 'del' and 'src/core/entries/#add' in cc['hits']['0'] and 'NewEntry' in cc['hits']['0'], cc['hits'])
 
@@ -986,6 +988,239 @@ def no_repository(tmp):
           [t['id'] for t in data['tabs']] == ['current', 'plan:0'] and any('not a git repository' in t for t in data['built']), out + err)
 
 
+def flat_app(tmp, name, links=None):
+    """A project whose code is one folder, app/: its regions share it and its boxes are files."""
+    root = os.path.join(tmp, name)
+    box = lambda n, f, line: {'name': n, 'folder': f, 'line': 'does ' + n, 'interface': [line]}
+    write(root, SV + 'system.json', json.dumps({'name': 'Flat app', 'regions': {
+        'entry': {'folder': 'app/', 'line': 'in', 'boxes': [box('CLI', 'app/cli.py', 'main(argv: [Text])  // runs')]},
+        'core': {'folder': 'app/', 'line': 'does', 'boxes': [box('Store', 'app/store.py', 'save(x: Text)  // saves')]},
+        'platform': {'folder': 'app/', 'line': 'one system only', 'boxes': [box('Blocker', 'app/block.py', 'block(seconds: Int)  // blocks')]}},
+        'links': links or [],
+        'flows': [{'name': 'Blocking', 'line': 'from the command to the block', 'steps': [
+            {'at': 'app/cli.py', 'does': 'reads the command', 'calls': 'main'},
+            {'at': 'app/block.py', 'gets': 'seconds', 'does': 'blocks', 'calls': 'block'}]}]}))
+    for path, text in {'app/__init__.py': '', 'app/cli.py': 'def main(argv):\n    return block(save(argv))\n',
+                       'app/store.py': 'def save(x):\n    return x\n', 'app/block.py': 'def block(seconds):\n    return seconds\n'}.items():
+        write(root, path, text)
+    write(root, SV + 'changes.json', '[]\n')
+    write(root, SV + 'lines.json', json.dumps({'app/block.py': 'keeps the apps closed', 'app/cli.py': 'the commands'}))
+    git(root, 'init', '-q')
+    git(root, 'config', 'user.email', 'tests@example.com')
+    git(root, 'config', 'user.name', 'Tests')
+    return root
+
+
+def trial(tmp):
+    """What the first trial by an agent that had never seen the system view found (2026-11-13), one case each."""
+    count = [0]
+
+    def new():
+        count[0] += 1
+        return mini(tmp, 'trial-%d' % count[0])
+
+    ent, rep, summ = 'src/core/entries/', 'src/core/reports/', 'src/core/summaries/'
+    box_at = lambda root, folder: next((b for r in system(root)['regions'].values() for b in (r or {}).get('boxes', []) if b['folder'] == folder), None)
+
+    # ---- a box that moves, in a project with one folder per box
+    def renamed():
+        root = new()
+        s = system(root)
+        s['flows'].append({'name': 'A monthly report', 'line': 'totals', 'steps': [{'at': rep, 'does': 'totals the month', 'calls': 'monthly'}]})
+        write(root, SV + 'system.json', json.dumps(s, ensure_ascii=False))
+        write(root, SV + 'lines.json', json.dumps({rep: 'the reports', MONTHLY_PY: 'the monthly total'}))
+        run(root)
+        commit(root, 'a flow and a few words')
+        git(root, 'mv', 'src/core/reports', 'src/core/summaries')
+        return root
+
+    root = renamed()
+    entries(root, {'name': 'Reports become summaries', 'line': 'r', 'files': {summ + 'monthly.py': 'moved from reports/'}})
+    before = read(os.path.join(root, SV + 'system.json'))
+    code, out, err = run(root)
+    check('a box whose files were all renamed is not removed: an error that says how to state the move',
+          code == 1 and 'ERROR  The box src/core/reports/ has no file left, and its code is not gone' in out
+          and '"moves": { "src/core/reports/": "src/core/summaries/" }' in out and 'is removed' not in out
+          and read(os.path.join(root, SV + 'system.json')) == before, out + err)
+
+    root = renamed()
+    entries(root, {'name': 'Reports become summaries', 'line': 'r', 'files': {summ + 'monthly.py': 'moved from reports/'}, 'moves': {rep: summ}})
+    code, out, err = run(root)
+    moved, s = box_at(root, summ), system(root)
+    check('"moves" carries the box to its new path, with its name, line and interface',
+          code == 0 and 'ERROR' not in out and box_at(root, rep) is None and moved is not None and moved['name'] == 'Reports'
+          and moved['interface'] == ['monthly(month: Month) → Report  // one month'], out + err)
+    check('the flow step that was at the box follows it', s['flows'][1]['steps'][0]['at'] == summ, s['flows'])
+    words = json.loads(read(os.path.join(root, SV + 'lines.json')))
+    check('the few words of the folder and of its renamed file follow too',
+          words == {summ: 'the reports', summ + 'monthly.py': 'the monthly total'}, words)
+    cc = page_data(root)['snap']['cc']
+    check('the page shows the old box removed and the new one added, both marked as the change\'s',
+          cc['boxes'].get(rep) == 'del' and cc['boxes'].get(summ) == 'add'
+          and summ + '#monthly' in cc['hits']['0'] and rep + '#monthly' in cc['hits']['0'], cc['hits'])
+    commit(root, 'the move')
+    code, out, err = run(root)
+    code2, out2, err2 = run(root)
+    check('once committed, an entry with "moves" leaves the list like any other',
+          code == 0 and 'Took 1 built entry out' in out and changes(root) == [] and code2 == 0 and 'ERROR' not in out + out2
+          and box_at(root, summ) is not None, out + err + out2 + err2)
+
+    # ---- what "moves" refuses: anything more than the same box at another path
+    for what, target, said in (
+            ('to another region', 'src/entry/reports/', 'which is not in src/core/, the folder of its region'),
+            ('onto another box', ent, 'which is already a box'),
+            ('into another box', ent + 'reports/', 'which overlaps the box src/core/entries/')):
+        root = new()
+        before = read(os.path.join(root, SV + 'system.json'))
+        entries(root, {'name': 'Move', 'line': 'm', 'files': {}, 'moves': {rep: target}})
+        code, out, err = run(root, '--check')
+        check('"moves" does not carry a box %s: that is architecture' % what,
+              code == 1 and said in out and 'tell the owner' in out and read(os.path.join(root, SV + 'system.json')) == before, out + err)
+    root = new()
+    entries(root, {'name': 'Move', 'line': 'm', 'files': {}, 'moves': {'src/core/nothing/': summ}})
+    code, out, err = run(root, '--check')
+    check('"moves" that names no box is an error', code == 1 and 'Move: "moves" names src/core/nothing/, which is not a box.' in out, out + err)
+    root = new()
+    entries(root, {'name': 'Move', 'line': 'm', 'files': {}, 'moves': [rep, summ]})
+    code, out, err = run(root, '--check')
+    check('"moves" in a wrong shape stops the script with one sentence', code == 2 and '"moves" an object' in err, out + err)
+
+    # ---- the same in a project whose code is one folder: a file that becomes a package
+    def packaged(name):
+        root = flat_app(tmp, name)
+        run(root)
+        commit(root, 'the base')
+        os.makedirs(os.path.join(root, 'app/blocking'))
+        git(root, 'mv', 'app/block.py', 'app/blocking/block.py')
+        write(root, 'app/blocking/__init__.py', '')
+        return root
+
+    root = packaged('trial-flat-1')
+    files = {'app/blocking/block.py': 'moved here', 'app/blocking/__init__.py': 'the package'}
+    entries(root, {'name': 'Blocker in its own package', 'line': 'b', 'files': files})
+    code, out, err = run(root)
+    check('a one-file box whose file moved into a new folder: the error proposes that folder',
+          code == 1 and '"moves": { "app/block.py": "app/blocking/" }' in out and box_at(root, 'app/block.py') is not None, out + err)
+    entries(root, {'name': 'Blocker in its own package', 'line': 'b', 'files': files, 'moves': {'app/block.py': 'app/blocking/'}})
+    code, out, err = run(root)
+    s = system(root)
+    check('with "moves" the box stays in its region although the regions share the folder',
+          code == 0 and 'ERROR' not in out and [b['folder'] for b in s['regions']['platform']['boxes']] == ['app/blocking/']
+          and s['flows'][0]['steps'][1]['at'] == 'app/blocking/', out + err)
+    check('an empty file, such as a package marker, is not said to belong to no box', 'belong' not in out, out)
+    check('the renamed file keeps its few words', json.loads(read(os.path.join(root, SV + 'lines.json'))).get('app/blocking/block.py') == 'keeps the apps closed')
+
+    # ---- regions that share a folder are told apart by their key
+    root = flat_app(tmp, 'trial-flat-2', links=[{'from': 'entry', 'to': 'core', 'label': 'saves', 'says': 'The commands save through the store.'}])
+    code, out, err = run(root)
+    over = page_data(root)['views'][0]
+    check('a link between regions is written with their keys, and drawn where they share a folder',
+          code == 0 and 'note' not in out and [(l['from'], l['to']) for l in over['links']] == [('entry', 'core')]
+          and [r['id'] for r in over['rows']] == ['entry', 'core'] and over['band']['id'] == 'platform', out + err + str(over['links']))
+    page = read(os.path.join(root, 'WORK', 'SYSTEM_VIEW.html'))
+    check('the page picks a region by its key, not by its folder', 'data-pick="region:${g.r.id}"' in page and 'region:${g.r.dir}' not in page)
+    root = flat_app(tmp, 'trial-flat-3', links=[{'from': 'app/', 'to': 'core', 'says': 's'}])
+    code, out, err = run(root)
+    check('a link that names a folder several regions share is said, with what to write',
+          code == 0 and 'points at app/, which is the folder of entry and core and platform. Name the region by its key' in out
+          and page_data(root)['views'][0]['links'] == [], out + err)
+
+    # ---- a flow step at nothing
+    root = new()
+    s = system(root)
+    s['flows'][0]['steps'][1]['at'] = 'src/core/nothing/'
+    write(root, SV + 'system.json', json.dumps(s, ensure_ascii=False))
+    code, out, err = run(root, '--check')
+    check('a flow step at a path that is not a box is an error', code == 1 and 'step 2, is at src/core/nothing/, which is not a box' in out, out + err)
+
+    # ---- a renamed file keeps its words; what the script says of itself
+    root = new()
+    write(root, SV + 'lines.json', json.dumps({ENTRIES_PY: 'add and list'}))
+    commit(root, 'words')
+    git(root, 'mv', ENTRIES_PY, ent + 'records.py')
+    entries(root, {'name': 'Renamed', 'line': 'r', 'files': {ent + 'records.py': 'renamed'}})
+    code, out, err = run(root)
+    check('a renamed file keeps its few words in lines.json',
+          code == 0 and json.loads(read(os.path.join(root, SV + 'lines.json'))) == {ent + 'records.py': 'add and list'}, out + err)
+    root = new()
+    write(root, SV + 'system.json', json.dumps(system(root), ensure_ascii=False))
+    code, out, err = run(root)
+    check('a system.json that is only set in the script\'s layout is not said to be folded',
+          code == 0 and 'Folded' not in out and 'nothing in it changed' in out, out + err)
+    root = os.path.join(tmp, 'trial-seed')
+    write(root, 'src/app.py', 'x = 1\n')
+    write(root, SV + 'system.json', read(os.path.join(KIT, 'extras', 'tressoir-system-view', 'seeds', 'system.json')))
+    write(root, SV + 'changes.json', '[]\n')
+    git(root, 'init', '-q')
+    code, out, err = run(root, '--check')
+    check('with no box written yet, the script says where to start', code == 0 and 'note   No box is written yet' in out and 'Starting in a project' in out, out + err)
+    root = new()
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    code, out, err = run(root, '--check')
+    check('the prepared entry says where a changed signature goes', code == 1 and '"affects": ["add"]' in out and 'goes under "interface" instead' in out, out + err)
+
+
+def pocket_repository(tmp):
+    """The third example, a project whose code is one folder, rebuilt as a repository: the last commit has the notifier
+    as one file and no word list; the working tree has the example's two built changes. Returns the folder and what the
+    script said on the last commit's state."""
+    ex = os.path.join(EXAMPLES, 'pocket')
+    want, words = json.loads(read(os.path.join(ex, 'system.json'))), json.loads(read(os.path.join(ex, 'lines.json')))
+    root = os.path.join(tmp, 'pocket')
+    was = json.loads(json.dumps(want))
+    for b in was['regions']['platform']['boxes']:
+        b['folder'] = 'pocket/notify.py'
+    for b in was['regions']['core']['boxes']:
+        b.pop('also', None)
+    for step in was['flows'][0]['steps']:
+        if step['at'] == 'pocket/notify/':
+            step['at'] = 'pocket/notify.py'
+    code_of = {'pocket/search.py': 'def find(words):\n    return []\n', 'pocket/notify.py': 'def notify(title):\n    return title\n'}
+    for path, w in words.items():
+        if not path.endswith('/') and not path.startswith('pocket/notify/') and path != 'pocket/stopwords.txt':
+            write(root, path, code_of.get(path, '# ' + w + '\n'))
+    write(root, 'pocket/notify.py', code_of['pocket/notify.py'])
+    write(root, SV + 'system.json', json.dumps(was, ensure_ascii=False))
+    write(root, SV + 'changes.json', '[]\n')
+    before = {p: w for p, w in words.items() if not p.startswith('pocket/notify/') and p != 'pocket/stopwords.txt'}
+    write(root, SV + 'lines.json', json.dumps(dict(before, **{'pocket/notify.py': words['pocket/notify/macos.py']})))
+    git(root, 'init', '-q')
+    git(root, 'config', 'user.email', 'tests@example.com')
+    git(root, 'config', 'user.name', 'Tests')
+    first = run(root)
+    commit(root, 'the last commit')
+    os.makedirs(os.path.join(root, 'pocket/notify'))
+    git(root, 'mv', 'pocket/notify.py', 'pocket/notify/macos.py')
+    write(root, 'pocket/notify/__init__.py', 'from .macos import notify\n')
+    write(root, 'pocket/notify/linux.py', 'def notify(title):\n    return title\n')
+    write(root, 'pocket/stopwords.txt', 'the\na\n')
+    write(root, 'pocket/search.py', 'def find(words):\n    return [w for w in words if w]\n')
+    write(root, SV + 'changes.json', read(os.path.join(ex, 'changes.json')))
+    return root, first
+
+
+def pocket(tmp):
+    ex = os.path.join(EXAMPLES, 'pocket')
+    want, words = json.loads(read(os.path.join(ex, 'system.json'))), json.loads(read(os.path.join(ex, 'lines.json')))
+    root, (code, out, err) = pocket_repository(tmp)
+    check('pocket: the figure of a one-folder project builds with no error, and every file is in a box',
+          code == 0 and 'ERROR' not in out and 'belong' not in out and 'points at' not in out, out + err)
+    code, out, err = run(root)
+    check('pocket: the example\'s two changes, one of them a moved box, fold with no error', code == 0 and 'ERROR' not in out, out + err)
+    check('pocket: system.json becomes the example\'s', unordered(system(root)) == unordered(want))
+    data = page_data(root)
+    over, cc = data['views'][0], data['snap']['cc']
+    check('pocket: four regions on one folder are four regions on the page, with their links',
+          [r['id'] for r in over['rows']] + [over['band']['id']] == ['entry', 'core', 'external', 'platform']
+          and [(l['from'], l['to']) for l in over['links']] == [('entry', 'core'), ('core', 'external')], over['links'])
+    check('pocket: the moved box is marked as its change\'s', 'pocket/notify/#notify' in cc['hits']['0'] and cc['boxes'].get('pocket/notify/') == 'add', cc['hits'])
+    got = json.loads(read(os.path.join(root, SV + 'lines.json')))
+    check('pocket: the moved file keeps its few words', got.get('pocket/notify/macos.py') == words['pocket/notify/macos.py'] and 'pocket/notify.py' not in got, got)
+    commit(root, 'the two changes')
+    code, out, err = run(root)
+    check('pocket: once committed both entries leave the list', code == 0 and 'Took 2 built entries out' in out and changes(root) == [], out + err)
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix='tressoir-system-view-tests.')
     try:
@@ -995,6 +1230,8 @@ def main():
         checks(tmp)
         empty(tmp)
         review(tmp)
+        trial(tmp)
+        pocket(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print('\nResult: %d passed, %d failed' % (len(PASS), len(FAIL)))

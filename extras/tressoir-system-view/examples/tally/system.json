@@ -40,8 +40,8 @@
     "separate": { "boxes": [] }
   },
   "links": [
-    { "from": "src/entry/", "to": "src/core/", "label": "commands and edits", "says": "Both entry points call the same core." },
-    { "from": "src/core/", "to": "src/connectors/", "label": "bank exports", "says": "An import reads a bank file through Bank files." }
+    { "from": "entry", "to": "core", "label": "commands and edits", "says": "Both entry points call the same core." },
+    { "from": "core", "to": "external", "label": "bank exports", "says": "An import reads a bank file through Bank files." }
   ],
   "flows": [
     { "name": "Importing a bank file", "line": "from the file to recorded entries",

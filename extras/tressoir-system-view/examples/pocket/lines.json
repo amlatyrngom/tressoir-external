@@ -1,0 +1,18 @@
+{
+  "pocket/": "all the code; a box is a file or a folder in it",
+  "tests/": "unit tests",
+  "pocket/__main__.py": "starts the command line",
+  "pocket/cli.py": "the commands",
+  "pocket/pages.py": "save and read",
+  "pocket/clean.py": "the article out of a page",
+  "pocket/search.py": "matching and ranking",
+  "pocket/stopwords.txt": "the words a search ignores",
+  "pocket/store.py": "the SQLite file",
+  "pocket/fetch.py": "one download",
+  "pocket/notify/__init__.py": "offers notify and picks the file for this system",
+  "pocket/notify/macos.py": "notices on macOS",
+  "pocket/notify/linux.py": "notices on Linux",
+  "tests/test_clean.py": "cleaning",
+  "tests/test_search.py": "search",
+  "README.md": "how to use it"
+}

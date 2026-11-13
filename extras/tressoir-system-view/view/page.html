@@ -161,7 +161,9 @@ S.views.forEach(v => { if (v.id) { const b = S.views.flatMap(w => [...w.rows.fla
 const own = v => [...v.rows.flatMap(r => r.boxes), ...(v.band ? v.band.boxes : []), ...(v.sep || [])];
 const regionsOf = v => [...v.rows, ...(v.band ? [v.band] : [])];
 const boxAt = folder => { for (const v of S.views) { const b = own(v).find(x => x.folder === folder); if (b) return b; } };
-const regionAt = dir => { for (const v of S.views) { const r = regionsOf(v).find(x => x.dir === dir); if (r) return r; } };
+const regionAt = id => { for (const v of S.views) { const r = regionsOf(v).find(x => x.id === id); if (r) return r; } };
+// a folder stands for a region only when one region alone has it
+const regionOfDir = dir => { const all = S.views.flatMap(regionsOf).filter(x => x.dir === dir); return all.length === 1 ? all[0] : undefined; };
 const viewOf = folder => S.views.find(v => v.id === folder && v.id);          // the view a box opens, if it has one
 const homeOf = folder => S.views.find(v => own(v).some(b => b.folder === folder));
 const isSep = b => S.views.some(v => (v.sep || []).includes(b));
@@ -270,7 +272,7 @@ const W = 668, GAP = 38;
 function layout(v){ const side = (v.band && v.band.boxes.length) || (v.sep && v.sep.length), RW = side ? 568 : 660, spine = 4 + RW / 2, out = { regions:[], pos:{}, edges:[], labs:[], near:[] };
   const near = v; let y = 8;
   const chips = (list, yy, word) => { const cw = 112, total = list.length * cw + (list.length - 1) * 8; out.labs.push({ text:word, x:8, y:yy + 7 }); list.forEach((f, k) => out.near.push({ folder:f, pos:[Math.round(spine - total / 2 + k * (cw + 8)), yy, cw, 24] })); };
-  if (near.from) { chips(near.from.boxes, y, 'From'); out.edges.push({ id:'from', from:'outside', to:v.rows[0].dir, p:[[spine, y + 24], [spine, y + 24 + 28]], title:'Into ' + v.name, says:near.from.says }); y += 24 + 28; }
+  if (near.from) { chips(near.from.boxes, y, 'From'); out.edges.push({ id:'from', from:'outside', to:v.rows[0].id, p:[[spine, y + 24], [spine, y + 24 + 28]], title:'Into ' + v.name, says:near.from.says }); y += 24 + 28; }
   v.rows.forEach(r => { const slots = [];   // a planned box listed right after the box it replaces takes that box's place
     r.boxes.forEach((b, j) => { const p = r.boxes[j - 1]; if (j && TABS.some(t => t.delta && bstIn(t.id, b) === 'add' && bstIn(t.id, p) === 'del')) slots[slots.length - 1].push(b); else slots.push([b]); });
     const n = slots.length, iw = RW - 16; let lines = 1, per = n, bw = (iw - 8 * (n - 1)) / n;
@@ -279,14 +281,14 @@ function layout(v){ const side = (v.band && v.band.boxes.length) || (v.sep && v.
     for (let l = 0; l < lines; l++) { const part = slots.slice(l * per, (l + 1) * per), c = part.length, x0 = 12 + (iw - c * bw - (c - 1) * gap) / 2;
       part.forEach((slot, k) => slot.forEach(b => { out.pos[b.folder] = [Math.round(x0 + k * (bw + gap)), y + 22 + l * 38, bw, 30]; })); }
     out.regions.push({ r, x:4, y, w:RW, h }); y += h + GAP; });
-  y -= GAP; const first = out.regions[0], last = out.regions[out.regions.length - 1], at = dir => out.regions.find(g => g.r.dir === dir);
+  y -= GAP; const first = out.regions[0], last = out.regions[out.regions.length - 1], at = id => out.regions.find(g => g.r.id === id);
   if (v.band && v.band.boxes.length) { const to = out.regions[Math.max(0, out.regions.length - 2)], h = Math.max(to.y + to.h - first.y, 44 + v.band.boxes.length * 44 - 6);
     out.regions.push({ r:v.band, x:584, y:first.y, w:76, h }); v.band.boxes.forEach((b, k) => { out.pos[b.folder] = [592, first.y + 44 + k * 44, 60, 30]; }); }
   if (v.sep && v.sep.length) { out.labs.push({ text:'Separate', x:584, y:last.y + 4 }); v.sep.forEach((b, k) => { out.pos[b.folder] = [584, last.y + 22 + k * 38, 76, 30]; }); }
   (v.links || []).forEach((l, i) => { const a = at(l.from), b = at(l.to); if (!a || !b) return;
-    if (v.band && l.from === v.band.dir) out.edges.push({ id:'l' + i, from:l.from, to:l.to, p:[[584, b.y + b.h / 2], [572, b.y + b.h / 2]], both:true, says:l.says });
+    if (v.band && l.from === v.band.id) out.edges.push({ id:'l' + i, from:l.from, to:l.to, p:[[584, b.y + b.h / 2], [572, b.y + b.h / 2]], both:true, says:l.says });
     else out.edges.push({ id:'l' + i, from:l.from, to:l.to, p:[[spine - 38, a.y + a.h], [spine - 38, b.y]], label:l.label, says:l.says, dot:true }); });
-  if (near.uses) { out.edges.push({ id:'uses', from:last.r.dir, to:'outside', p:[[spine, y], [spine, y + 28]], title:v.name + ' relies on', says:near.uses.says, dot:true }); y += 28; chips(near.uses.boxes, y, 'Uses'); y += 24; }
+  if (near.uses) { out.edges.push({ id:'uses', from:last.r.id, to:'outside', p:[[spine, y], [spine, y + 28]], title:v.name + ' relies on', says:near.uses.says, dot:true }); y += 28; chips(near.uses.boxes, y, 'Uses'); y += 24; }
   out.H = y + 8; return out; }
 
 // ============ figure ============
@@ -297,7 +299,7 @@ function stage(){ const L = LAY = layout(V);
   const st = b => { const s = bst(b); return s === null ? null : s || 'same'; }, boxes = own(V), over = (a, c) => a[0] < c[0] + c[2] && a[0] + a[2] > c[0] && a[1] < c[1] + c[3] && a[1] + a[3] > c[1];
   // a removed box keeps its place if nothing else needs it; otherwise it goes to a row under the figure
   const live = boxes.filter(b => st(b) && st(b) !== 'del'), tray = boxes.filter(b => st(b) === 'del' && live.some(o => over(L.pos[b.folder], L.pos[o.folder]))), full = L.H + (tray.length ? 42 : 0);
-  const regions = L.regions.map(g => `<div class="rg ${g.r.slot}" data-pick="region:${g.r.dir}" style="left:${g.x}px;top:${g.y}px;width:${g.w}px;height:${g.h}px"><b style="left:8px;top:6px">${g.r.title}</b></div>`).join('');
+  const regions = L.regions.map(g => `<div class="rg ${g.r.slot}" data-pick="region:${g.r.id}" style="left:${g.x}px;top:${g.y}px;width:${g.w}px;height:${g.h}px"><b style="left:8px;top:6px">${g.r.title}</b></div>`).join('');
   const nd = (b, pos, extra) => { const c = st(b); if (c === null) return '';
     return `<div class="nd ${c} ${b.shared ? 'util' : ''} ${viewOf(b.folder) && !extra ? 'has' : ''} ${extra || ''}" data-pick="node:${b.folder}" style="left:${pos[0]}px;top:${pos[1]}px;width:${pos[2]}px;height:${pos[3]}px"><span>${esc(b.name)}</span></div>`; };
   const nodes = boxes.map(b => { const t = tray.indexOf(b); return nd(b, t < 0 ? L.pos[b.folder] : [76 + t * 124, L.H + 4, L.pos[b.folder][2], 30]); }).join('') + L.near.map(n => nd(boxAt(n.folder), n.pos, 'near')).join('')
@@ -309,7 +311,7 @@ function flowLanes(f){ const root = S.views[0], lanes = own(root).filter(b => f.
   const cx = i => Math.round(12 + lw / 2 + (n > 1 ? i * (W - 24 - lw) / (n - 1) : (W - 24 - lw) / 2)), top = 68, y = i => top + 30 + i * 40, H = y(f.steps.length - 1) + 26, L = LAY = { edges:[], segs:[] };
   const st = b => bst(b) || 'same', groups = [], lane = s => lanes.indexOf(rootBox(s[0])), pw = Math.min(lw, 104);
   lanes.forEach((b, i) => { const r = regionsOf(root).find(x => x.boxes.includes(b)), g = groups[groups.length - 1]; if (g && g.r === r) g.to = i; else groups.push({ r, from:i, to:i }); });
-  const regions = groups.map(g => g.r ? `<div class="rg ${g.r.slot}" data-pick="region:${g.r.dir}" style="left:${cx(g.from) - lw / 2 - 6}px;top:8px;width:${cx(g.to) - cx(g.from) + lw + 12}px;height:60px"><b style="left:8px;top:6px">${g.r.title.replace('<br>', '')}</b></div>` : '').join('');
+  const regions = groups.map(g => g.r ? `<div class="rg ${g.r.slot}" data-pick="region:${g.r.id}" style="left:${cx(g.from) - lw / 2 - 6}px;top:8px;width:${cx(g.to) - cx(g.from) + lw + 12}px;height:60px"><b style="left:8px;top:6px">${g.r.title.replace('<br>', '')}</b></div>` : '').join('');
   let nodes = lanes.map((b, i) => `<div class="nd ${st(b)} ${viewOf(b.folder) ? 'has' : ''}" data-pick="node:${b.folder}" style="left:${cx(i) - lw / 2}px;top:30px;width:${lw}px;height:30px"><span>${esc(b.name)}</span></div>`).join('');
   const lines = lanes.map((b, i) => { L.segs.push({ id:'life' + i, x1:cx(i), x2:cx(i), y1:top, y2:H - 8 }); return `<line class="life" x1="${cx(i)}" y1="${top}" x2="${cx(i)}" y2="${H - 8}"/>`; }).join('');
   f.steps.forEach((s, i) => { const k = lane(s), x = cx(k), b = boxAt(sf(s)), pill = b !== lanes[k], half = pill ? pw / 2 : 8;
@@ -367,7 +369,7 @@ function describe(pick){ const d = delta(), row = c => { const m = cmark(c); ret
   if (type === 'region') { const r = regionAt(id); return `<p class="t"><b>${r.title.replace('<br>', '')}</b> <span class="m">${esc(r.line)}</span></p>${wholeApi(r)}${also(inDelta().filter(c => r.boxes.some(b => touches(c, b.folder))), r.boxes.map(b => card(b.folder)))}`; }
   // a line of the file view
   const mono = t => `<b style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600">${esc(t)}</b>`, short = p => p.replace(/\/$/, '').split('/').pop() + (p.endsWith('/') ? '/' : '');
-  if (boxAt(id)) return describe('node:' + id); if (regionAt(id)) return describe('region:' + id);
+  if (boxAt(id)) return describe('node:' + id); if (regionOfDir(id)) return describe('region:' + regionOfDir(id).id);
   const lines = f => { const s = d ? fst(f) : ''; if (!s) return []; const cs = inDelta().filter(c => c.files[f.path]); return cs.length ? cs.map(c => ({ m:s, name:c.name, text:c.files[f.path] })) : [{ m:s, text:s === 'add' ? 'new file' : s === 'del' ? 'removed' : movedFrom(f.path) ? 'renamed from ' + movedFrom(f.path) : 'changed; no named change explains it' }]; };
   const line = (l, who) => `<div class="dl ${l.m}"><span class="g">${mark[l.m]}</span><span>${l.name ? `<b>${esc(l.name)}</b> ` : ''}${who ? mono(who) + ' ' : ''}<span class="m">${esc(l.text)}</span></span></div>`;
   const none = d ? `<p class="m" style="margin:0">Nothing changed here.</p>` : '', f = S.files.find(x => x.path === id);
@@ -401,7 +403,7 @@ $('strip').addEventListener('click', e => { const g = e.target.closest('[data-go
 function entries(){ const out = [], seen = new Set();
   S.files.forEach(f => { const parts = f.path.replace(/\/$/, '').split('/'); let parent = '';
     for (let i = 0; i < parts.length - 1; i++) { const p = parts.slice(0, i + 1).join('/') + '/';
-      if (!seen.has(p)) { seen.add(p); const b = boxAt(p), r = regionAt(p); out.push({ path:p, parent, name:parts[i] + '/', line: r ? (r.short || r.line) : b ? b.line : S.dirs[p] || '', slot: r ? r.slot : b && isSep(b) ? 'sep' : null, box:b }); }
+      if (!seen.has(p)) { seen.add(p); const b = boxAt(p), r = regionOfDir(p); out.push({ path:p, parent, name:parts[i] + '/', line: r ? (r.short || r.line) : b ? b.line : S.dirs[p] || '', slot: r ? r.slot : b && isSep(b) ? 'sep' : null, box:b }); }
       parent = p; }
     const b = boxAt(f.path); out.push({ path:f.path, parent, name:parts[parts.length - 1] + (f.path.endsWith('/') ? '/' : ''), line:f.line, file:f, box:b, slot: b && isSep(b) ? 'sep' : null }); });
   return out; }
