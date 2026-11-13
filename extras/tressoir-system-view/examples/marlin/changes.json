@@ -1,0 +1,82 @@
+[
+  { "name": "Parallel hash join", "line": "joins build and probe on every core",
+    "files": {
+      "src/core/execution/operators/joins/hash_join.rs": "partitioned build, parallel probe",
+      "src/core/execution/operators/joins/partition.rs": "splits the build side by hash",
+      "src/core/execution/pipelines/scheduler/scheduler.rs": "build and probe run as separate pipelines",
+      "src/core/optimizer/search/physical/physical.rs": "picks the parallel join above a row threshold"
+    },
+    "affects": ["implement", "run", "open"] },
+  { "name": "Index-only scans", "line": "answer from the index when it holds every column asked for",
+    "files": {
+      "src/core/storage/access/btree/btree.rs": "leaf pages say when the table need not be checked",
+      "src/core/execution/operators/scans/index_only_scan.rs": "answers from the index alone",
+      "src/core/optimizer/estimates/cost/cost.rs": "prices a scan that never touches the table",
+      "src/core/optimizer/search/physical/physical.rs": "considers the index-only path"
+    },
+    "affects": ["implement", "cost", "open"],
+    "interface": {
+      "src/core/storage/access/btree/": [
+        "lookup(index: IndexId, key: Key) → IndexEntry?",
+        "range(index: IndexId, from: Key, to: Key) → [IndexEntry]",
+        "IndexEntry = { key: Key, row: RowId, all_visible: Bool }  // what an index holds for one key"
+      ],
+      "src/core/optimizer/": ["PlanNode = { op: Scan | IndexScan | IndexOnlyScan | Join | Aggregate | Sort, inputs: [PlanNode], rows: RowEstimate }"]
+    } },
+  { "name": "Group commit", "line": "many commits share one flush",
+    "files": {
+      "src/core/transactions/durability/commit/commit.rs": "waits briefly to share a flush",
+      "src/core/transactions/durability/commit/group.rs": "the queue of waiting commits",
+      "src/core/storage/disk/wal/wal.rs": "one flush for the whole group"
+    },
+    "affects": ["commit"],
+    "interface": { "src/core/storage/disk/wal/": ["flush_group(upto: Lsn)  // flushes once for every commit waiting below this position"] } },
+  { "name": "Backups to object storage", "line": "BACKUP and RESTORE to any S3-compatible store",
+    "files": {
+      "src/connectors/object-store/s3.rs": "upload and download",
+      "src/connectors/object-store/backup.rs": "writes and restores backups",
+      "src/core/storage/disk/checkpoint/checkpoint.rs": "a backup starts from a fresh checkpoint",
+      "src/entry/shell/commands.rs": "BACKUP and RESTORE commands",
+      "docs/OPERATIONS.md": "a section on backups"
+    },
+    "affects": ["run"],
+    "interface": { "src/core/storage/disk/checkpoint/": ["begin_backup() → Lsn  // takes a checkpoint that a backup can start from"] },
+    "boxes": [
+      { "name": "Object store", "folder": "src/connectors/object-store/", "line": "any S3-compatible store, for backups",
+        "interface": ["put(key: Text, bytes: Bytes)  // stores one object", "get(key: Text) → Bytes  // fetches one object"] }
+    ] },
+  { "name": "Statistics refresh on load", "line": "a bulk load leaves fresh statistics",
+    "files": {
+      "src/core/optimizer/estimates/statistics/sample.rs": "samples while loading",
+      "src/core/catalog/tables.rs": "records when statistics were taken"
+    },
+    "affects": ["refresh"] },
+  { "name": "Prepared statement cache", "line": "a repeated statement skips parsing and planning",
+    "files": {
+      "src/core/sql/prepared.rs": "looks in the cache first",
+      "src/core/sql/plan_cache.rs": "plans kept per session",
+      "src/entry/wire/session.rs": "owns the cache"
+    },
+    "affects": ["handle"],
+    "interface": { "src/core/sql/": ["cached_plan(session: Session, sql: Text) → Plan?  // returns the plan kept from an earlier run of the same text, if any"] } },
+  { "name": "Columnar tables", "line": "tables stored by column, for scans over few columns", "plan": "Storage for analytics",
+    "files": {
+      "src/core/storage/access/columnar/segment.rs": "+ compressed chunks of one column",
+      "src/core/storage/access/columnar/encoding.rs": "+ dictionary and run-length encodings",
+      "src/core/execution/operators/scans/column_scan.rs": "+ reads only the columns asked for",
+      "src/core/optimizer/estimates/cost/cost.rs": "prices column scans",
+      "src/core/catalog/tables.rs": "records how a table is stored"
+    },
+    "affects": ["cost", "open"],
+    "interface": {
+      "src/core/storage/": ["scan_columns"],
+      "src/core/catalog/": ["TableInfo = { id: TableId, columns: [Text], indexes: [IndexId], storage: Heap | Columnar }"]
+    },
+    "boxes": [
+      { "name": "Column segments", "folder": "src/core/storage/access/columnar/", "line": "tables stored by column",
+        "interface": ["scan_columns(table: TableId, columns: [ColumnId], snapshot: Snapshot) → RowStream  // reads only the columns asked for"] }
+    ] },
+  { "name": "Row cache retired", "line": "the buffer pool serves hot rows well enough", "plan": "Storage for analytics",
+    "files": { "src/core/storage/memory/row-cache/row_cache.rs": "- removed", "src/core/storage/access/heap/heap.rs": "reads go straight to the buffer pool" },
+    "affects": ["fetch"] }
+]

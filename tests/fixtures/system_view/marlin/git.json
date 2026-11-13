@@ -1,0 +1,33 @@
+{
+ "added": [
+  "src/core/sql/plan_cache.rs",
+  "src/core/execution/operators/scans/index_only_scan.rs",
+  "src/core/execution/operators/joins/partition.rs",
+  "src/core/transactions/durability/commit/group.rs",
+  "src/connectors/object-store/s3.rs",
+  "src/connectors/object-store/backup.rs"
+ ],
+ "changed": [
+  "src/entry/wire/session.rs",
+  "src/entry/shell/commands.rs",
+  "src/core/sql/prepared.rs",
+  "src/core/optimizer/search/physical/physical.rs",
+  "src/core/optimizer/estimates/statistics/sample.rs",
+  "src/core/optimizer/estimates/cost/cost.rs",
+  "src/core/execution/pipelines/scheduler/scheduler.rs",
+  "src/core/execution/operators/joins/hash_join.rs",
+  "src/core/transactions/durability/commit/commit.rs",
+  "src/core/storage/access/btree/btree.rs",
+  "src/core/storage/disk/wal/wal.rs",
+  "src/core/storage/disk/checkpoint/checkpoint.rs",
+  "src/core/catalog/tables.rs",
+  "docs/ARCHITECTURE.md",
+  "docs/OPERATIONS.md"
+ ],
+ "removed": [],
+ "later": [
+  "src/core/execution/operators/scans/column_scan.rs",
+  "src/core/storage/access/columnar/segment.rs",
+  "src/core/storage/access/columnar/encoding.rs"
+ ]
+}

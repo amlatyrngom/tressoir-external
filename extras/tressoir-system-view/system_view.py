@@ -386,9 +386,10 @@ def note_of(text):
     return re.sub(r'^[+-] ', '', text)
 
 
-def hits_of(entry, world, problems=None):
-    """The listed lines a change marks: the names under `affects`, the lines it states, and the lines of a box it brings.
-    A name is looked up in the boxes the entry's files belong to and the boxes around them."""
+def hits_of(entry, world, problems=None, base=None):
+    """The listed lines a change marks: the names under `affects`, the lines it states, the lines of a box it brings,
+    and the lines of a box that goes with its files. A name is looked up in the boxes the entry's files belong to
+    and the boxes around them. `world` is the state the change leads to, `base` the one it starts from."""
     name = entry.get('name', '?')
     near = []
     for p in entry.get('files') or {}:
@@ -431,10 +432,14 @@ def hits_of(entry, world, problems=None):
     for b in entry.get('boxes') or []:
         if b.get('folder'):
             brought(b)
+    if base is not None:
+        for f in base.boxes:
+            if f not in world.boxes and any(base.holds(f, p) for p in entry.get('files') or {}):
+                hit.extend(base.order.get(f, []))
     # a box that lists a function of a box inside it shows the same line
     out = []
     for i in hit:
-        target = world.lines[i]['alias'] or i if i in world.lines else i
+        target = (world.lines[i]['alias'] or i) if i in world.lines else i
         for j in [i, target] + [k for k, q in world.lines.items() if q['alias'] == target]:
             if j not in out:
                 out.append(j)
@@ -748,21 +753,21 @@ def build(args):
         tabs.append({'id': 'cc', 'label': 'Committed → Current', 'delta': True})
         s = delta_snap(lists, committed, current, head_files, now_files, changed, all_files)
         s['changes'] = [change(e) for e in built]
-        s['hits'] = {str(change(e)): hits_of(e, current) for e in built}
+        s['hits'] = {str(change(e)): hits_of(e, current, base=committed) for e in built}
         snap['cc'] = s
     for tab, label, c, w, files, ch in start_worlds:
         tabs.append({'id': tab, 'label': label, 'delta': True})
         s = delta_snap(lists, w, current, files, now_files, ch, all_files)
         since = built + [e for e in entries_since(git, name, c) if (e.get('name', ''), '') not in set((b.get('name', ''), '') for b in built)]
         s['changes'] = [change(e) for e in since]
-        s['hits'] = {str(change(e)): hits_of(e, current) for e in since}
+        s['hits'] = {str(change(e)): hits_of(e, current, base=w) for e in since}
         snap[tab] = s
     for k, (pl, mine, w, files, after) in enumerate(plan_worlds):
         tab = 'plan:%d' % k
         tabs.append({'id': tab, 'label': 'Current → Plan' if len(plan_worlds) == 1 else 'Current → Plan: ' + pl, 'delta': True})
         s = delta_snap(lists, current, w, now_files, after, files, all_files)
         s['changes'] = [change(e) for e in mine]
-        s['hits'] = {str(change(e)): hits_of(e, w, problems) for e in mine}
+        s['hits'] = {str(change(e)): hits_of(e, w, problems, base=current) for e in mine}
         snap[tab] = s
 
     # ---- the file view: a line of words per file; a new file's line is its change note

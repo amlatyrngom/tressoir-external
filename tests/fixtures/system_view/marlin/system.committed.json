@@ -1,0 +1,360 @@
+{ "name": "Marlin",
+  "regions": {
+    "entry": { "folder": "src/entry/", "line": "how statements get in",
+      "boxes": [
+        { "name": "Wire protocol", "folder": "src/entry/wire/", "line": "network clients; one session each",
+          "interface": [
+            "handle(session: Session, message: Message) → Reply  // handles one message from a client",
+            "send(session: Session, batch: Batch)  // sends rows back to the client",
+            "Session = { id: Int, user: Text, txn: TxnId? }  // one connected client"
+          ] },
+        { "name": "Shell", "folder": "src/entry/shell/", "line": "the interactive prompt and its commands",
+          "interface": ["run(input: Reader)  // reads statements until the input ends"] },
+        { "name": "Embedded API", "folder": "src/entry/embedded/", "line": "the engine as a library, for C and Python",
+          "interface": ["open(path: Path) → Database  // opens or creates a database", "query(db: Database, sql: Text) → RowStream  // runs one statement"] }
+      ] },
+    "core": { "folder": "src/core/", "line": "what the engine does, the same everywhere",
+      "boxes": [
+        { "name": "SQL front end", "folder": "src/core/sql/", "line": "text to a checked, bound statement",
+          "interface": [
+            "compile(sql: Text, catalog: Catalog) → Statement  // parses, binds names, checks types",
+            "Statement = { kind: Select | Insert | Update | Delete, tables: [TableId], columns: [Expr], filter: Expr? }  // a parsed, bound, type-checked statement",
+            "Expr = Column | Constant | Call { function: Text, args: [Expr] }  // an expression over columns"
+          ] },
+        { "name": "Optimizer", "folder": "src/core/optimizer/", "line": "chooses how to run a statement",
+          "interface": [
+            "optimize(stmt: Statement, catalog: Catalog) → Plan  // chooses a plan for a statement",
+            "Plan = { root: PlanNode, cost: Cost, workers: Int }  // what Execution runs",
+            "PlanNode = { op: Scan | IndexScan | Join | Aggregate | Sort, inputs: [PlanNode], rows: RowEstimate }  // one step of a plan"
+          ],
+          "inside": [
+            { "name": "Rewrites", "folder": "src/core/optimizer/rewrites/", "line": "the statement made simpler before any search",
+              "boxes": [
+                { "name": "Rules", "folder": "src/core/optimizer/rewrites/rules/", "line": "filters pushed down, constants folded",
+                  "interface": ["rewrite(stmt: Statement) → Statement  // applies every rule until nothing changes"] },
+                { "name": "Subqueries", "folder": "src/core/optimizer/rewrites/unnesting/", "line": "subqueries turned into joins",
+                  "interface": ["unnest(stmt: Statement) → Statement  // turns subqueries into joins"] }
+              ] },
+            { "name": "Search", "folder": "src/core/optimizer/search/", "line": "the choice among ways to run it",
+              "boxes": [
+                { "name": "Join order", "folder": "src/core/optimizer/search/join-order/", "line": "which tables to join first",
+                  "interface": [
+                    "order(stmt: Statement) → JoinTree  // finds the cheapest join order",
+                    "JoinTree = Table(TableId) | Join { left: JoinTree, right: JoinTree }  // a join order, before algorithms are chosen"
+                  ] },
+                { "name": "Physical plan", "folder": "src/core/optimizer/search/physical/", "line": "an algorithm for each step, and how parallel",
+                  "interface": ["implement(tree: JoinTree) → Plan  // picks an algorithm for every step"] }
+              ] },
+            { "name": "Estimates", "folder": "src/core/optimizer/estimates/", "line": "the numbers the search relies on",
+              "boxes": [
+                { "name": "Statistics", "folder": "src/core/optimizer/estimates/statistics/", "line": "samples and value distributions",
+                  "interface": [
+                    "stats(table: TableId) → TableStats  // returns what is known about a table",
+                    "refresh(table: TableId)  // takes a new sample",
+                    "TableStats = { rows: Int, taken: Timestamp, distinct: [Int] }  // what a sample said about a table"
+                  ] },
+                { "name": "Cardinality", "folder": "src/core/optimizer/estimates/cardinality/", "line": "how many rows each step should yield",
+                  "interface": [
+                    "estimate(node: PlanNode) → RowEstimate  // estimates the rows a step yields",
+                    "RowEstimate = { rows: Float, width: Int }  // how many rows, and how wide"
+                  ] },
+                { "name": "Cost model", "folder": "src/core/optimizer/estimates/cost/", "line": "what a plan costs",
+                  "interface": [
+                    "cost(node: PlanNode) → Cost  // estimates what a step costs",
+                    "Cost = { cpu: Float, io: Float }  // in the cost model’s own units"
+                  ] }
+              ] }
+          ],
+          "links": [
+            {
+              "from": "src/core/optimizer/rewrites/",
+              "to": "src/core/optimizer/search/",
+              "label": "a simpler statement",
+              "says": "Search starts from the rewritten statement."
+            },
+            {
+              "from": "src/core/optimizer/search/",
+              "to": "src/core/optimizer/estimates/",
+              "label": "how many rows, at what cost",
+              "says": "Every candidate plan is priced with the estimates."
+            }
+          ],
+          "from": { "boxes": ["src/core/sql/"], "says": "The SQL front end hands over a bound statement." },
+          "uses": {
+            "boxes": ["src/core/catalog/", "src/core/execution/"],
+            "says": "Statistics are kept in the Catalog. The finished plan goes to Execution."
+          } },
+        { "name": "Execution", "folder": "src/core/execution/", "line": "runs the chosen plan",
+          "interface": [
+            "run  // runs a plan to the end",
+            "RowStream = a sequence of Batch, pulled one at a time  // the result of running anything",
+            "Operator = { next() → Batch? }  // anything that produces batches"
+          ],
+          "inside": [
+            { "name": "Pipelines", "folder": "src/core/execution/pipelines/", "line": "a plan cut into pieces that run in parallel",
+              "boxes": [
+                { "name": "Scheduler", "folder": "src/core/execution/pipelines/scheduler/", "line": "splits a plan into pipelines and runs them on worker threads",
+                  "interface": ["run(plan: Plan, snapshot: Snapshot) → RowStream  // cuts the plan into pipelines and starts them"] },
+                { "name": "Results", "folder": "src/core/execution/pipelines/results/", "line": "rows back to the client, in batches",
+                  "interface": ["next(stream: RowStream) → Batch?  // returns the next batch, or nothing when done"] }
+              ] },
+            { "name": "Operators", "folder": "src/core/execution/operators/", "line": "the steps of a plan",
+              "boxes": [
+                { "name": "Scans", "folder": "src/core/execution/operators/scans/", "line": "read a table or an index",
+                  "interface": ["open(node: PlanNode, snapshot: Snapshot) → Operator  // opens a scan ready to produce batches"] },
+                { "name": "Joins", "folder": "src/core/execution/operators/joins/", "line": "hash, merge and nested loop",
+                  "interface": ["open(node: PlanNode, left: Operator, right: Operator) → Operator  // opens a join over two inputs"] },
+                { "name": "Aggregates", "folder": "src/core/execution/operators/aggregates/", "line": "grouping and window functions",
+                  "interface": ["open(node: PlanNode, input: Operator) → Operator  // opens a grouping over one input"] },
+                { "name": "Sorts", "folder": "src/core/execution/operators/sorts/", "line": "ordering, and the first few rows of an ordering",
+                  "interface": ["open(node: PlanNode, input: Operator) → Operator  // opens a sort over one input"] }
+              ] },
+            { "name": "Expressions", "folder": "src/core/execution/expressions/", "line": "what is computed on each batch of rows",
+              "boxes": [
+                { "name": "Vectors", "folder": "src/core/execution/expressions/vectors/", "line": "a batch of column values",
+                  "interface": [
+                    "slice(batch: Batch, selection: Selection) → Batch  // keeps the live rows of a batch",
+                    "Batch = { columns: [Vector], selection: Selection, len: Int }  // up to 2,048 rows, stored by column",
+                    "Vector = { values: [Value], nulls: Bitmap }  // one column of a batch",
+                    "Selection = [Int]  // which rows of a batch are live"
+                  ] },
+                { "name": "Functions", "folder": "src/core/execution/expressions/functions/", "line": "arithmetic, text, dates",
+                  "interface": ["eval(expr: Expr, batch: Batch) → Vector  // evaluates one expression over one batch"] }
+              ] }
+          ],
+          "links": [
+            {
+              "from": "src/core/execution/pipelines/",
+              "to": "src/core/execution/operators/",
+              "label": "batches of rows",
+              "says": "A pipeline pushes batches through its operators."
+            },
+            {
+              "from": "src/core/execution/operators/",
+              "to": "src/core/execution/expressions/",
+              "label": "evaluate",
+              "says": "Operators evaluate expressions one batch at a time."
+            }
+          ],
+          "from": { "boxes": ["src/core/optimizer/"], "says": "The Optimizer hands over the plan to run." },
+          "uses": {
+            "boxes": ["src/core/storage/", "src/core/transactions/", "src/connectors/formats/"],
+            "says": "Scans read from Storage. Transactions decides which row versions are visible. File formats reads and writes external files."
+          } },
+        { "name": "Transactions", "folder": "src/core/transactions/", "line": "who sees what, and what survives a crash",
+          "interface": [
+            "begin(session: Session) → TxnId  // starts a transaction",
+            "snapshot",
+            "commit  // makes its changes durable and visible",
+            "TxnId = Int  // names a transaction",
+            "Timestamp = Int  // commit order"
+          ],
+          "inside": [
+            { "name": "Isolation", "folder": "src/core/transactions/isolation/", "line": "what concurrent transactions see of each other",
+              "boxes": [
+                { "name": "Snapshots", "folder": "src/core/transactions/isolation/snapshots/", "line": "which versions a transaction sees",
+                  "interface": [
+                    "snapshot(txn: TxnId) → Snapshot  // returns what this transaction may see",
+                    "visible(row: RowId, snapshot: Snapshot) → Bool  // says whether this transaction may see this version",
+                    "Snapshot = { txn: TxnId, as_of: Timestamp }  // what one transaction may see"
+                  ] },
+                { "name": "Locks", "folder": "src/core/transactions/isolation/locks/", "line": "row and table locks; deadlock detection",
+                  "interface": ["lock(txn: TxnId, row: RowId, mode: LockMode)  // takes a lock; waits, or fails on a deadlock"] },
+                { "name": "Conflicts", "folder": "src/core/transactions/isolation/conflicts/", "line": "write-write checks at commit",
+                  "interface": ["check(txn: TxnId)  // fails when another transaction wrote the same row first"] }
+              ] },
+            { "name": "Durability", "folder": "src/core/transactions/durability/", "line": "what survives a crash",
+              "boxes": [
+                { "name": "Commit", "folder": "src/core/transactions/durability/commit/", "line": "the commit path",
+                  "interface": ["commit(txn: TxnId) → Timestamp  // returns once the log is flushed"] },
+                { "name": "Recovery", "folder": "src/core/transactions/durability/recovery/", "line": "replays the log after a crash",
+                  "interface": ["recover() → Lsn  // replays the log; returns where it ended"] }
+              ] },
+            { "name": "Cleanup", "folder": "src/core/transactions/cleanup/", "line": "what is removed once nobody can see it",
+              "boxes": [
+                { "name": "Vacuum", "folder": "src/core/transactions/cleanup/vacuum/", "line": "removes versions nobody can see",
+                  "interface": ["vacuum(table: TableId)  // removes versions older than every snapshot"] }
+              ] }
+          ],
+          "links": [
+            {
+              "from": "src/core/transactions/isolation/",
+              "to": "src/core/transactions/durability/",
+              "label": "commit",
+              "says": "A transaction that passes its checks goes to the commit path."
+            },
+            {
+              "from": "src/core/transactions/durability/",
+              "to": "src/core/transactions/cleanup/",
+              "label": "old versions",
+              "says": "Committed changes leave old versions behind for Vacuum."
+            }
+          ],
+          "from": {
+            "boxes": ["src/entry/wire/", "src/core/execution/"],
+            "says": "Sessions begin and end transactions. Execution asks which row versions it may see."
+          },
+          "uses": {
+            "boxes": ["src/core/storage/", "src/connectors/replicas/"],
+            "says": "Commit appends to the log in Storage. The log is shipped to Replicas."
+          } },
+        { "name": "Storage", "folder": "src/core/storage/", "line": "tables and indexes, in memory and on disk",
+          "interface": [
+            "scan(table: TableId, snapshot: Snapshot) → RowStream  // reads every visible row",
+            "lookup",
+            "insert",
+            "append  // appends to the write-ahead log"
+          ],
+          "inside": [
+            { "name": "Access methods", "folder": "src/core/storage/access/", "line": "how rows and keys are found",
+              "boxes": [
+                { "name": "Heap tables", "folder": "src/core/storage/access/heap/", "line": "rows in pages",
+                  "interface": [
+                    "fetch(row: RowId, snapshot: Snapshot) → Row?  // fetches one row version, if visible",
+                    "insert(table: TableId, row: Row, txn: TxnId) → RowId  // inserts a new row version",
+                    "RowId = { page: PageId, slot: Int }  // where a row version lives",
+                    "Row = [Value]  // one row, decoded"
+                  ] },
+                { "name": "B-tree", "folder": "src/core/storage/access/btree/", "line": "ordered indexes",
+                  "interface": [
+                    "lookup(index: IndexId, key: Key) → RowId?  // looks up one key",
+                    "range(index: IndexId, from: Key, to: Key) → [RowId]  // reads a range of keys in order",
+                    "Key = [Value]  // the indexed columns of a row"
+                  ] }
+              ] },
+            { "name": "In memory", "folder": "src/core/storage/memory/", "line": "pages kept close at hand",
+              "boxes": [
+                { "name": "Buffer pool", "folder": "src/core/storage/memory/buffer-pool/", "line": "pages held in memory, and which to drop",
+                  "interface": [
+                    "pin(page: PageId) → Page  // returns the page, read from disk if needed; it stays until unpinned",
+                    "unpin(page: PageId, dirty: Bool)  // lets the page go"
+                  ] },
+                { "name": "Row cache", "folder": "src/core/storage/memory/row-cache/", "line": "hot rows kept decoded",
+                  "interface": ["cached_row(row: RowId) → Row?  // returns a decoded row, if it is hot"] }
+              ] },
+            { "name": "On disk", "folder": "src/core/storage/disk/", "line": "what survives a restart",
+              "boxes": [
+                { "name": "Page files", "folder": "src/core/storage/disk/pages/", "line": "table and index files",
+                  "interface": [
+                    "read(page: PageId) → Page  // reads a page from the file",
+                    "write(page: Page)  // writes a page to the file",
+                    "PageId = { file: FileId, number: Int }  // names a page",
+                    "Page = { id: PageId, lsn: Lsn, bytes: Bytes }  // eight kilobytes of a file"
+                  ] },
+                { "name": "Write-ahead log", "folder": "src/core/storage/disk/wal/", "line": "every change, appended before it counts",
+                  "interface": [
+                    "append(records: [LogRecord]) → Lsn  // appends records; returns the position written",
+                    "Lsn = Int  // a position in the log",
+                    "LogRecord = { txn: TxnId, page: PageId, change: Bytes }  // one change, as logged"
+                  ] },
+                { "name": "Checkpoints", "folder": "src/core/storage/disk/checkpoint/", "line": "dirty pages written; the log trimmed",
+                  "interface": ["checkpoint() → Lsn  // writes dirty pages; returns where the log may be trimmed"] }
+              ] }
+          ],
+          "links": [
+            {
+              "from": "src/core/storage/access/",
+              "to": "src/core/storage/memory/",
+              "label": "pages",
+              "says": "Access methods ask the Buffer pool for pages; they never read files themselves."
+            },
+            {
+              "from": "src/core/storage/memory/",
+              "to": "src/core/storage/disk/",
+              "label": "read, write, flush",
+              "says": "The Buffer pool reads and writes Page files. Changes reach the Write-ahead log first."
+            }
+          ],
+          "from": { "boxes": ["src/core/execution/", "src/core/transactions/"], "says": "Execution reads and writes rows. Transactions appends to the log." },
+          "uses": {
+            "boxes": ["src/platform/linux/", "src/platform/macos/", "src/connectors/object-store/"],
+            "says": "File access goes through the platform. Backups go to the Object store."
+          } },
+        { "name": "Catalog", "folder": "src/core/catalog/", "line": "what exists: tables, indexes, functions",
+          "interface": [
+            "table(id: TableId) → TableInfo  // returns everything known about a table",
+            "resolve(name: Text) → TableId?  // resolves a name to a table",
+            "TableId = Int  // names a table",
+            "TableInfo = { id: TableId, columns: [Text], indexes: [IndexId] }  // everything known about a table"
+          ] },
+        { "name": "Shared", "folder": "src/core/shared/", "line": "helpers with no better home; 2 files today", "shared": true }
+      ] },
+    "external": { "folder": "src/connectors/", "line": "what the engine reaches outside itself; our side of each lives in connectors/",
+      "boxes": [
+        { "name": "File formats", "folder": "src/connectors/formats/", "line": "Parquet and CSV, read and written",
+          "interface": [
+            "read(path: Path, format: Format) → RowStream  // reads an external file as rows",
+            "write(path: Path, rows: RowStream, format: Format)  // writes rows to an external file"
+          ] },
+        { "name": "Replicas", "folder": "src/connectors/replicas/", "line": "the other nodes; they receive the log",
+          "interface": ["ship(from: Lsn)  // sends the log from this position on"] }
+      ] },
+    "platform": { "folder": "src/platform/", "line": "what differs between operating systems; it sits under everything",
+      "boxes": [
+        { "name": "Linux", "folder": "src/platform/linux/", "line": "asynchronous file access, thread placement",
+          "interface": [
+            "read_at(file: FileId, offset: Int, len: Int) → Bytes  // reads without blocking a worker",
+            "flush(file: FileId)  // flushes; returns when the data is on disk"
+          ] },
+        { "name": "macOS", "folder": "src/platform/macos/", "line": "event notification, a flush that reaches the disk",
+          "interface": [
+            "read_at(file: FileId, offset: Int, len: Int) → Bytes  // reads without blocking a worker",
+            "flush(file: FileId)  // flushes; returns when the data is on disk"
+          ] }
+      ] },
+    "separate": {
+      "boxes": [{ "name": "Bench", "folder": "bench/", "line": "benchmark runner; a separate program" }]
+    }
+  },
+  "links": [
+    { "from": "src/platform/", "to": "src/entry/", "says": "each operating system supplies its own sockets and terminal" },
+    { "from": "src/platform/", "to": "src/core/", "says": "the same core runs on Linux and macOS" },
+    {
+      "from": "src/entry/",
+      "to": "src/core/",
+      "label": "statements in, rows out",
+      "says": "Every entry point hands a statement to the SQL front end and gets rows back from Execution."
+    },
+    {
+      "from": "src/core/",
+      "to": "src/connectors/",
+      "label": "backups, files, log shipping",
+      "says": "Storage writes backups to the Object store. Execution reads and writes File formats. Transactions ships the log to Replicas."
+    }
+  ],
+  "flows": [
+    { "name": "A read query", "line": "one SELECT, from the client and back",
+      "steps": [
+        { "at": "src/entry/wire/", "does": "receives the statement" },
+        { "at": "src/core/sql/", "gets": "SQL text", "does": "parses it and binds its names", "calls": "compile" },
+        { "at": "src/core/optimizer/", "gets": "statement", "does": "chooses a plan", "calls": "optimize" },
+        {
+          "at": "src/core/execution/pipelines/scheduler/",
+          "gets": "plan",
+          "does": "cuts the plan into pipelines and runs them on worker threads",
+          "calls": "run"
+        },
+        {
+          "at": "src/core/storage/memory/buffer-pool/",
+          "gets": "page requests",
+          "does": "hands out pages, reading them from disk when needed",
+          "calls": "pin"
+        },
+        { "at": "src/core/execution/pipelines/results/", "gets": "rows", "does": "gathers the rows into batches" },
+        { "at": "src/entry/wire/", "gets": "batches", "does": "streams them to the client", "calls": "send" }
+      ] },
+    { "name": "A commit", "line": "between COMMIT and the reply",
+      "steps": [
+        { "at": "src/entry/wire/", "does": "receives COMMIT" },
+        { "at": "src/core/transactions/isolation/conflicts/", "gets": "request", "does": "checks for write-write conflicts", "calls": "check" },
+        {
+          "at": "src/core/transactions/durability/commit/",
+          "gets": "passed",
+          "does": "picks the commit time and joins the waiting group",
+          "calls": "commit"
+        },
+        { "at": "src/core/storage/disk/wal/", "gets": "log records", "does": "appends them; one flush for the whole group", "calls": "append" },
+        { "at": "src/connectors/replicas/", "gets": "log", "does": "receives the shipped log", "calls": "ship" },
+        { "at": "src/entry/wire/", "gets": "done", "does": "acknowledges" }
+      ] }
+  ] }

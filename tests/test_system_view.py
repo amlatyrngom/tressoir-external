@@ -4,9 +4,10 @@ in a temporary folder.
 
     python3 tests/test_system_view.py
 
-Tally, the simple example, is rebuilt as a real repository: the state of the last commit comes
-from tests/fixtures/system_view/tally/ (system.json as it was, and which files are new), the rest
-from extras/tressoir-system-view/examples/tally/. The page the script builds must then carry the
+Tally, the simple example, and Marlin, the one with views inside boxes, are rebuilt as real
+repositories: the state of the last commit comes from tests/fixtures/system_view/<example>/
+(system.json as it was, and which files are new, changed or not there yet), the rest from
+extras/tressoir-system-view/examples/<example>/. The page the script builds must then carry the
 marks listed in the fixture's expect.json, which were worked out separately.
 """
 import json
@@ -61,7 +62,7 @@ def repository(tmp, example, commit=True):
     words, new = json.loads(read(os.path.join(ex, 'lines.json'))), json.loads(read(os.path.join(fx, 'git.json')))
     entries = json.loads(read(os.path.join(ex, 'changes.json')))
     for p, w in words.items():
-        if not p.endswith('/') and p not in new['added']:
+        if not p.endswith('/') and p not in new['added'] and p not in new.get('later', []):
             write(root, p, '# ' + w + '\n')
     write(root, 'WORK/SYSTEM_VIEW/system.json', read(os.path.join(fx, 'system.committed.json')))
     write(root, 'WORK/SYSTEM_VIEW/changes.json', '[]\n')
@@ -72,10 +73,11 @@ def repository(tmp, example, commit=True):
         git(root, 'config', 'user.name', 'Tests')
         git(root, 'add', '-A')
         git(root, 'commit', '-q', '-m', 'the last commit')
-    for e in entries:
-        if not e.get('plan'):
-            for p, n in e['files'].items():
-                write(root, p, '# ' + words.get(p, '') + '\n# ' + n + '\n')
+    touched = new.get('changed') or [p for e in entries if not e.get('plan') for p in e['files']]
+    for p in list(new['added']) + list(touched):
+        write(root, p, '# ' + words.get(p, '') + '\n# changed\n')
+    for p in new.get('removed') or []:
+        os.remove(os.path.join(root, p))
     write(root, 'WORK/SYSTEM_VIEW/changes.json', read(os.path.join(ex, 'changes.json')))
     return root
 
@@ -142,6 +144,98 @@ def compare(data, want):
         eq('tab of ' + c['name'], k in tab['changes'], True)
         eq('lines marked by ' + c['name'], sorted(tab['hits'].get(str(k), [])), sorted(want['hits'][c['name']]))
     return out
+
+
+def compare_marks(data, want):
+    """The same comparison for a fixture that lists marks by id: files, boxes, lines, and the lines each change marks."""
+    out = []
+
+    def eq(what, a, b):
+        if a != b:
+            out.append('%s: got %r, expected %r' % (what, a, b))
+
+    plan = next((t['id'] for t in data['tabs'] if t['id'].startswith('plan')), None)
+    cc, pl = data['snap']['cc'], data['snap'][plan]
+    files = [f for f in want['files'] if not f[0].endswith('/')]
+    eq('files', sorted(f[0] for f in data['files']), sorted(f[0] for f in files))
+    for p, c, q in files:
+        eq('file, committed to current: ' + p, cc['files'].get(p, ''), None if q == 'add' else c)
+        eq('file, plan: ' + p, pl['files'].get(p, ''), q)
+    boxes = [b['folder'] for v in data['views']
+             for b in [x for r in v['rows'] for x in r['boxes']] + (v.get('band') or {}).get('boxes', []) + v.get('sep', [])]
+    eq('boxes', sorted(boxes), sorted(b[0] for b in want['boxes']))
+    for f, c, q in want['boxes']:
+        x, y = cc['boxes'].get(f, ''), pl['boxes'].get(f, '')
+        eq('box, committed to current: ' + f, None if x is None else x if x in ('add', 'del') else '', None if q == 'add' else c)
+        eq('box, plan: ' + f, y if y in ('add', 'del') else '', q)
+    default = {}
+    for folder, fns in data['api'].items():
+        for sig, _words in fns:
+            default[folder + '#' + re.match(r'[\w.]+', sig).group(0)] = sig
+    for t, v in data['types'].items():
+        default[t] = v[0]
+    eq('lines', sorted(default), sorted(a['id'] for a in want['api'] + want['types']))
+    for a in want['api'] + want['types']:
+        i = a['id']
+        c, p = cc['lines'].get(i, {}), pl['lines'].get(i, {})
+        eq('line, committed to current: ' + i, None if c is None else c.get('s', ''), None if a['plan'] == 'add' else a['cc'])
+        eq('line, plan: ' + i, None if p is None else p.get('s', ''), a['plan'])
+        eq('signature in the plan: ' + i, (p or {}).get('sig') or default.get(i), a['sig'])
+        if a['plan'] == 'chg':
+            eq('what it was, plan: ' + i, p.get('was'), a['was'])
+        elif a['cc'] == 'chg':
+            eq('what it was: ' + i, c.get('was'), a['was'])
+    names = [c['name'] for c in data['changes']]
+    eq('named changes', names, list(want['plans']))
+    for name, ids in want['hits'].items():
+        if name not in names:
+            continue
+        k = names.index(name)
+        tab = pl if want['plans'][name] else cc
+        eq('tab of ' + name, k in tab['changes'], True)
+        eq('lines marked by ' + name, sorted(tab['hits'].get(str(k), [])), sorted(ids))
+    return out
+
+
+def unordered(v):
+    """system.json with the order of boxes in a row and of lines in a box left out: a folded box or line is added last."""
+    if isinstance(v, list):
+        return [unordered(x) for x in v]
+    if not isinstance(v, dict):
+        return v
+    out = {k: unordered(x) for k, x in v.items()}
+    if isinstance(out.get('interface'), list):
+        out['interface'] = sorted(out['interface'])
+    if isinstance(out.get('boxes'), list):
+        out['boxes'] = sorted(out['boxes'], key=lambda b: b.get('folder', '') if isinstance(b, dict) else str(b))
+    return out
+
+
+def marlin(tmp):
+    root = repository(tmp, 'marlin')
+    code, out, err = run(root)
+    check('marlin: the page is built with no error', code == 0 and 'ERROR' not in out, out + err)
+    got = json.loads(read(os.path.join(root, 'WORK/SYSTEM_VIEW/system.json')))
+    want = json.loads(read(os.path.join(EXAMPLES, 'marlin', 'system.json')))
+    check('marlin: the built changes are folded into system.json', unordered(got) == unordered(want))
+    check('marlin: a box that came with a change is added last in its row',
+          [b['folder'] for b in got['regions']['external']['boxes']][-1] == 'src/connectors/object-store/', got['regions']['external'])
+    data = page_data(root)
+    check('marlin: one view per box that has boxes inside, after the overview',
+          [v['id'] for v in data['views']] == ['', 'src/core/optimizer/', 'src/core/execution/', 'src/core/transactions/', 'src/core/storage/'],
+          [v['id'] for v in data['views']])
+    check('marlin: tabs are Committed, Current, Committed → Current, Current → Plan',
+          [t['label'] for t in data['tabs']] == ['Committed', 'Current', 'Committed → Current', 'Current → Plan'], data['tabs'])
+    diffs = compare_marks(data, json.loads(read(os.path.join(FIXTURES, 'marlin', 'expect.json'))))
+    check('marlin: every mark on the page is the expected one', not diffs, '\n      '.join(diffs[:8]))
+    cc = data['snap']['cc']['files']
+    count = lambda s: sum(1 for v in cc.values() if v == s)
+    check('marlin: Committed → Current counts +6 ~15 −0', (count('add'), count('chg'), count('del')) == (6, 15, 0), (count('add'), count('chg'), count('del')))
+    check('marlin: flows are carried as written', [f['name'] for f in data['flows']] == [f['name'] for f in want.get('flows', [])] and data['flows'])
+    before = read(os.path.join(root, 'WORK/SYSTEM_VIEW/system.json'))
+    code, out, err = run(root)
+    check('marlin: a second run changes nothing in system.json', code == 0 and 'Folded' not in out
+          and read(os.path.join(root, 'WORK/SYSTEM_VIEW/system.json')) == before, out + err)
 
 
 def tally(tmp):
@@ -213,6 +307,7 @@ def main():
     tmp = tempfile.mkdtemp(prefix='tressoir-system-view-tests.')
     try:
         tally(tmp)
+        marlin(tmp)
         no_repository(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
