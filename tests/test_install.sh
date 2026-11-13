@@ -41,7 +41,7 @@ done
 check "the guide is the kit's guide" 'cmp -s WORK/WORK_AREA_GUIDE.md "$KIT/guide/WORK_AREA_GUIDE.md"'
 check "AGENTS.md is the three-line pointer" '[ "$(wc -l < AGENTS.md | tr -d " ")" = 3 ] && grep -q "WORK/WORK_AREA_GUIDE.md" AGENTS.md && grep -q "WORK/STATE.md" AGENTS.md && grep -q "WORK/MEMORY/ROOT_MEMORY.md" AGENTS.md'
 check "CLAUDE.md is the single line @AGENTS.md" '[ "$(cat CLAUDE.md)" = "@AGENTS.md" ]'
-check "optional extras are not installed" '[ ! -e WORK/skills/tressoir-isolation ] && [ ! -e WORK/skills/tressoir-structured-review ]'
+check "the optional extra is not installed" '[ ! -e WORK/skills/tressoir-structured-review ]'
 check "nothing from the first kit is installed" '! find . -name "*.tressoir.*" -o -name "interactions.json" -o -name "TRESSOIR.md" | grep -q .'
 
 # 2. A second run changes nothing, with or without --override.
@@ -89,15 +89,14 @@ project renamed
 OLD_POINTER=$(printf '# Tressoir Guidance\n\nBefore substantial work, read and follow `IB/TRESSOIR.md`.\nRead current status and open decisions in `IB/STATE.md`.\nRead durable project decisions in `IB/CANON/ROOT_CANON.md`.')
 printf '%s\n' "$OLD_POINTER" > CLAUDE.md; printf '# Mine\n\nKeep this.\n\n%s\n' "$OLD_POINTER" > AGENTS.md
 mkdir -p WORK/MEMORY .claude/skills .agents/skills; echo kept > WORK/STATE.md; echo kept > WORK/MEMORY/ROOT_MEMORY.md
-for name in tressoir-working-area tressoir-canon tressoir-artifact-md tressoir-artifact-html tressoir-plan tressoir-isolation slidev; do
+for name in tressoir-working-area tressoir-canon tressoir-artifact-md tressoir-artifact-html tressoir-isolation tressoir-plan tressoir-structured-review slidev; do
   mkdir -p "WORK/skills/$name"; echo "old $name" > "WORK/skills/$name/SKILL.md"
   ln -s "../../IB/skills/$name" ".claude/skills/$name"; ln -s "../../WORK/skills/$name" ".agents/skills/$name"
 done
 install --override
-check "retired skills and their links are removed" '! ls WORK/skills .claude/skills .agents/skills | grep -qE "working-area|canon|artifact"'
+check "retired skills and their links are removed" '! ls WORK/skills .claude/skills .agents/skills | grep -qE "working-area|canon|artifact|isolation"'
 check "the plan skill is replaced by the current one" 'cmp -s WORK/skills/tressoir-plan/SKILL.md "$KIT/skills/tressoir-plan/SKILL.md"'
-check "an extra the project already had is refreshed" 'cmp -s WORK/skills/tressoir-isolation/SKILL.md "$KIT/extras/tressoir-isolation/SKILL.md" && [ -d WORK/skills/tressoir-isolation/templates ]'
-check "an extra the project did not have is not added" '[ ! -e WORK/skills/tressoir-structured-review ]'
+check "an extra the project already had is refreshed" 'cmp -s WORK/skills/tressoir-structured-review/SKILL.md "$KIT/extras/tressoir-structured-review/SKILL.md"'
 check "kit links pointing into IB/ are re-pointed" '[ "$(readlink .claude/skills/tressoir-plan)" = "../../WORK/skills/tressoir-plan" ]'
 check "my own skill and its link are left as they were" '[ "$(cat WORK/skills/slidev/SKILL.md)" = "old slidev" ] && [ "$(readlink .claude/skills/slidev)" = "../../IB/skills/slidev" ] && grep -q "kept .claude/skills/slidev" "$TMP/out.txt"'
 check "the old pointer is gone from AGENTS.md, my text stays, the new pointer is added" '! grep -q "IB/" AGENTS.md && grep -q "Keep this." AGENTS.md && grep -q "WORK/WORK_AREA_GUIDE.md" AGENTS.md'

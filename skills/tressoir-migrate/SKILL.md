@@ -72,10 +72,9 @@ only moves it and keeps one pointer line for it in `STATE.md`.
 ## 6. Swap the skills
 
 Run the kit's installer with `--override` from the project root. It installs the guide and the
-current skills, removes the first kit's four retired skills and their links, replaces the first
+current skills, removes the first kit's five retired skills and their links, replaces the first
 kit's pointer in `AGENTS.md` and `CLAUDE.md` with the new one, and leaves everything else in those
-files. It refreshes `tressoir-structured-review` and `tressoir-isolation` only where the project
-already has them.
+files. It refreshes `tressoir-structured-review` only where the project already has it.
 
 ## 7. Rewrite the kit's part of `STATE.md`
 

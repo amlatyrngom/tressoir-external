@@ -59,9 +59,9 @@ alone. Any skill you add under `WORK/skills/` gets its two links the next time t
 | `tressoir-present` | briefings: writing the slides file, building it, handing it off |
 | `tressoir-migrate` | moving a project from the first kit's `IB/` layout; temporary |
 
-Two optional extras live in `extras/`: `tressoir-structured-review` and `tressoir-isolation`. To
-use one, copy its folder into the project's `WORK/skills/` and run the installer again, which links
-it. From then on `--override` refreshes it with the rest.
+One optional extra lives in `extras/`: `tressoir-structured-review`. To use it, copy its folder
+into the project's `WORK/skills/` and run the installer again, which links it. From then on
+`--override` refreshes it with the rest.
 
 ## Briefings
 
@@ -93,7 +93,6 @@ which commits and tags the old files before retiring them.
 
 ```bash
 bash tests/test_install.sh                 # installer: layout, repeat runs, --override, migration swap
-bash tests/test_isolation.sh               # the isolation extra's container helper
 uv run skills/tressoir-present/present.py tests/fixtures/three-choices.slides.html
 uv run tests/check_player.py tests/fixtures/three-choices.html    # player, headless Chrome
 ```

@@ -21,9 +21,9 @@ set -euo pipefail
 REPOSITORY="amlatyrngom/tressoir-external"
 ARCHIVE_URL="${TRESSOIR_ARCHIVE_URL:-https://codeload.github.com/$REPOSITORY/tar.gz/refs/heads/main}"
 CORE_SKILLS="tressoir-memory tressoir-plan tressoir-present tressoir-migrate"
-EXTRA_SKILLS="tressoir-structured-review tressoir-isolation"
+EXTRA_SKILLS="tressoir-structured-review"
 # Skills of the first kit. --override removes them; they stay in the project's git history.
-RETIRED_SKILLS="tressoir-working-area tressoir-canon tressoir-artifact-md tressoir-artifact-html"
+RETIRED_SKILLS="tressoir-working-area tressoir-canon tressoir-artifact-md tressoir-artifact-html tressoir-isolation"
 OVERRIDE=0
 TEMP=""
 CHANGED=0
