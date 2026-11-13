@@ -585,6 +585,23 @@ def review(tmp):
     check('and a second run says and changes the same', code == 0 and 'ERROR' not in out and changes(root) == now, out + err)
 
     root = new()
+    edit(root, ENTRIES_PY, 'return 1', 'return 2\n\n\ndef count():\n    return 0')
+    edit(root, MONTHLY_PY, 'return 0', 'return count()')
+    pair = [{'name': 'A', 'line': 'a', 'files': {ENTRIES_PY: 'count'}, 'interface': {ent: ['count() → Int  // how many']}},
+            {'name': 'B', 'line': 'b', 'files': {MONTHLY_PY: 'uses count'}, 'affects': ['yearly'], 'interface': {ent: ['count(month: Month) → Int']}}]
+    entries(root, *pair)
+    code, out, err = run(root)
+    check('when the later of two entries fails a check, the earlier one keeps its line and is folded',
+          code == 1 and 'Nothing was folded from: B.' in out and changes(root) == pair and 'count() → Int  // how many' in lines_of(root, ent), out + err)
+    back(root)
+    edit(root, ENTRIES_PY, 'return 1', 'return 2\n\n\ndef count():\n    return 0')
+    edit(root, MONTHLY_PY, 'return 0', 'return count()')
+    entries(root, {'name': 'A', 'line': 'a', 'files': {ENTRIES_PY: 'count'}, 'affects': ['count']},
+            {'name': 'B', 'line': 'b', 'files': {MONTHLY_PY: 'uses count'}, 'affects': ['monthly'], 'interface': {ent: ['count() → Int  // how many']}})
+    code, out, err = run(root)
+    check('a name under affects may be of a line a later entry brings', code == 0 and 'ERROR' not in out, out + err)
+
+    root = new()
     write(root, 'src/core/tags/tags.py', 'def tag(x):\n    return x\n\n\ndef untag(x):\n    return x\n')
     edit(root, MONTHLY_PY, 'return 0', 'return 7')
     entries(root, {'name': 'A', 'line': 'a', 'files': {'src/core/tags/tags.py': 'tags'}, 'boxes': [
@@ -644,11 +661,11 @@ def review(tmp):
     edit(root, MONTHLY_PY, 'return 0', 'return 5')
     entries(root, {'name': 'A', 'line': 'a', 'files': {ENTRIES_PY: 'x'}, 'interface': {ent: ['add(a: Int) → EntryId', 'add(a: Int, b: Int) → EntryId']}},
             {'name': 'B', 'line': 'b', 'files': {MONTHLY_PY: 'y'}, 'affects': ['monthly'], 'interface': {ent: ['add(a: Int, b: Int, c: Int) → EntryId']}})
-    run(root)
+    code, out, err = run(root)
     now = changes(root)
     run(root)
-    check('an entry that states a name twice, restated by a later one, is settled in one run',
-          now == changes(root) and 'interface' not in now[0] and now[0].get('affects') == ['add'], now)
+    check('an entry that states a name twice, restated by a later one, is settled in one run, and it is said',
+          now == changes(root) and 'interface' not in now[0] and now[0].get('affects') == ['add'] and '"A" states add twice' in out, str(now) + out)
 
     root = new()
     edit(root, ENTRIES_PY, 'return 1', 'return 2')

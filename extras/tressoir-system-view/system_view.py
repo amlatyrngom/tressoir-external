@@ -899,6 +899,8 @@ def later_wins(built, world, problems):
                 old_lines.remove(old_text)
                 rewritten = True
                 if old is e:            # the same entry said it twice: the last one stands
+                    problems.note('"%s" states %s twice in %s. The last one stands, and the other is taken out of the entry.'
+                                  % (e.get('name', '?'), name, folder))
                     continue
                 if not gone and not old_text.startswith('- '):
                     lid = stated_ids(folder, text)[0]
