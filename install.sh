@@ -2,8 +2,8 @@
 
 # Installs the Tressoir starter kit into a project. It asks nothing.
 #
-#   From a checkout:   /path/to/tressoir-external/install.sh [--override]
-#   Without one:       curl -fsSL <raw address of this file> | bash -s -- [--override]
+#   From a checkout:   /path/to/tressoir-external/install.sh [options]
+#   Without one:       curl -fsSL <raw address of this file> | bash -s -- [options]
 #
 # The project is the current directory, or TRESSOIR_ROOT when set.
 #
@@ -15,16 +15,20 @@
 #
 # --override refreshes what the kit owns: the guide, the kit's skills and their scripts. It never
 # touches STATE.md, TASK.md, anything in MEMORY/ or ARTIFACTS/, or skills the kit did not ship.
+#
+# --experimental-system-view adds the system view, an experimental extra: the skill
+# WORK/skills/tressoir-system-view and, created once and then never touched, WORK/SYSTEM_VIEW/.
 
 set -euo pipefail
 
 REPOSITORY="amlatyrngom/tressoir-external"
 ARCHIVE_URL="${TRESSOIR_ARCHIVE_URL:-https://codeload.github.com/$REPOSITORY/tar.gz/refs/heads/main}"
 CORE_SKILLS="tressoir-memory tressoir-plan tressoir-present tressoir-migrate"
-EXTRA_SKILLS="tressoir-structured-review"
+EXTRA_SKILLS="tressoir-structured-review tressoir-system-view"
 # Skills of the first kit. --override removes them; they stay in the project's git history.
 RETIRED_SKILLS="tressoir-working-area tressoir-canon tressoir-artifact-md tressoir-artifact-html tressoir-isolation"
 OVERRIDE=0
+SYSTEM_VIEW=0
 TEMP=""
 CHANGED=0
 
@@ -37,8 +41,9 @@ trap cleanup EXIT
 for arg in "$@"; do
   case "$arg" in
     --override) OVERRIDE=1 ;;
-    -h|--help) sed -n '3,17p' "${BASH_SOURCE[0]:-/dev/null}" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) fatal "unknown option: $arg (the only option is --override)" ;;
+    --experimental-system-view) SYSTEM_VIEW=1 ;;
+    -h|--help) sed -n '3,20p' "${BASH_SOURCE[0]:-/dev/null}" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) fatal "unknown option: $arg (the options are --override and --experimental-system-view)" ;;
   esac
 done
 
@@ -104,6 +109,13 @@ for skill in $CORE_SKILLS; do own "skills/$skill" "WORK/skills/$skill"; done
 for skill in $EXTRA_SKILLS; do
   if [ -d "WORK/skills/$skill" ]; then own "extras/$skill" "WORK/skills/$skill"; fi
 done
+# The system view is the one extra the installer adds, and only when asked. Its data is the project's.
+if [ "$SYSTEM_VIEW" -eq 1 ]; then
+  if [ ! -e WORK/skills/tressoir-system-view ]; then own extras/tressoir-system-view WORK/skills/tressoir-system-view; fi
+  for file in system.json changes.json FEEDBACK.md; do
+    seed "extras/tressoir-system-view/seeds/$file" "WORK/SYSTEM_VIEW/$file"
+  done
+fi
 
 # What the first kit left behind. Part of migrating; delete this block with tressoir-migrate.
 if [ "$OVERRIDE" -eq 1 ]; then
@@ -172,4 +184,9 @@ elif ! grep -q '"autoMemoryEnabled"' .claude/settings.json; then
 fi
 
 if [ "$CHANGED" -eq 0 ]; then say "  nothing to do"; fi
+if [ "$SYSTEM_VIEW" -eq 1 ]; then
+  say "The system view is experimental."
+  say "Feedback goes in WORK/SYSTEM_VIEW/FEEDBACK.md."
+  say "It is applied to the kit from time to time."
+fi
 say "Done. Agents start from AGENTS.md; the guide is WORK/WORK_AREA_GUIDE.md."

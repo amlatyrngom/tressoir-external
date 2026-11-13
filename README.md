@@ -24,9 +24,13 @@ curl -fsSL https://raw.githubusercontent.com/amlatyrngom/tressoir-external/main/
 ```
 
 The installer asks nothing. It always sets up Claude and the shared agents convention together.
-Its only option is `--override`, which refreshes the files the kit owns: the guide, the kit's
-skills and their scripts. It never touches `STATE.md`, `TASK.md`, anything in `MEMORY/` or
-`ARTIFACTS/`, or skills the kit did not ship. Running it again changes nothing.
+Running it again changes nothing. It has two options:
+
+- `--override` refreshes the files the kit owns: the guide, the kit's skills and their scripts. It
+  never touches `STATE.md`, `TASK.md`, anything in `MEMORY/` or `ARTIFACTS/`, or skills the kit
+  did not ship.
+- `--experimental-system-view` adds the system view, described below. Without it nothing about the
+  system view is installed.
 
 ## What a project gets
 
@@ -59,9 +63,36 @@ alone. Any skill you add under `WORK/skills/` gets its two links the next time t
 | `tressoir-present` | briefings: writing the slides file, building it, handing it off |
 | `tressoir-migrate` | moving a project from the first kit's `IB/` layout; temporary |
 
-One optional extra lives in `extras/`: `tressoir-structured-review`. To use it, copy its folder
-into the project's `WORK/skills/` and run the installer again, which links it. From then on
-`--override` refreshes it with the rest.
+Two optional extras live in `extras/`. Once a project has one, `--override` refreshes it with the
+rest.
+
+- `tressoir-structured-review`: to use it, copy its folder into the project's `WORK/skills/` and
+  run the installer again, which links it.
+- `tressoir-system-view`, experimental: installed with `--experimental-system-view`.
+
+## System view (experimental)
+
+```bash
+/path/to/tressoir-external/install.sh --experimental-system-view
+```
+
+This adds the skill `tressoir-system-view` and a folder, `WORK/SYSTEM_VIEW/`, with empty starting
+files that are created once and never overwritten. The skill keeps one page current,
+`WORK/SYSTEM_VIEW.html`: a figure of the project's major parts with views inside the larger ones,
+flows, the interface each part offers, a file view, and tabs for the last commit, the current
+state, what changed between them, what changed since you last looked, and what each plan would
+change.
+
+- The architecture is written once with you, in `system.json`. For every task the agent writes
+  named changes in `changes.json`. A script works out every mark from git and builds the page:
+
+  ```bash
+  uv run WORK/skills/tressoir-system-view/system_view.py
+  ```
+
+- The script needs only Python 3 and git; `python3` works in place of `uv run`.
+- It is a trial. What gets in the way goes in `WORK/SYSTEM_VIEW/FEEDBACK.md`, and is applied to the
+  kit from time to time.
 
 ## Briefings
 
@@ -92,7 +123,8 @@ which commits and tags the old files before retiring them.
 ## Tests
 
 ```bash
-bash tests/test_install.sh                 # installer: layout, repeat runs, --override, migration swap
+bash tests/test_install.sh                 # installer: layout, repeat runs, --override, the system view option, migration swap
+python3 tests/test_system_view.py          # system view script, on temporary git repositories
 uv run skills/tressoir-present/present.py tests/fixtures/three-choices.slides.html
 uv run tests/check_player.py tests/fixtures/three-choices.html    # player, headless Chrome
 ```

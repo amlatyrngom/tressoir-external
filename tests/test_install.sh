@@ -42,6 +42,7 @@ check "the guide is the kit's guide" 'cmp -s WORK/WORK_AREA_GUIDE.md "$KIT/guide
 check "AGENTS.md is the three-line pointer" '[ "$(wc -l < AGENTS.md | tr -d " ")" = 3 ] && grep -q "WORK/WORK_AREA_GUIDE.md" AGENTS.md && grep -q "WORK/STATE.md" AGENTS.md && grep -q "WORK/MEMORY/ROOT_MEMORY.md" AGENTS.md'
 check "CLAUDE.md is the single line @AGENTS.md" '[ "$(cat CLAUDE.md)" = "@AGENTS.md" ]'
 check "the optional extra is not installed" '[ ! -e WORK/skills/tressoir-structured-review ]'
+check "without its option nothing of the system view is installed" '[ ! -e WORK/skills/tressoir-system-view ] && [ ! -e WORK/SYSTEM_VIEW ] && [ ! -e .claude/skills/tressoir-system-view ] && ! grep -qi "system view" "$TMP/out.txt"'
 check "nothing from the first kit is installed" '! find . -name "*.tressoir.*" -o -name "interactions.json" -o -name "TRESSOIR.md" | grep -q .'
 
 # 2. A second run changes nothing, with or without --override.
@@ -112,6 +113,41 @@ check "the piped form installs from a download" '[ $? -eq 0 ] && diff -rq "$TMP/
 # 8. Options.
 project options
 install --claude; check "an unknown option is refused" '[ $? -ne 0 ] && [ ! -e WORK ]'
+
+# 9. The system view, an experimental extra added only with its option.
+project system-view
+install --experimental-system-view; check "the system view option installs" '[ $? -eq 0 ]'
+for path in WORK/skills/tressoir-system-view/SKILL.md WORK/skills/tressoir-system-view/system_view.py \
+            WORK/skills/tressoir-system-view/view/page.html WORK/skills/tressoir-system-view/examples/tally/system.json \
+            WORK/SYSTEM_VIEW/system.json WORK/SYSTEM_VIEW/changes.json WORK/SYSTEM_VIEW/FEEDBACK.md WORK/STATE.md AGENTS.md; do
+  check "with the option there is $path" '[ -f "$path" ]'
+done
+check "the system view skill is linked for Claude and for agents" \
+  '[ -f .claude/skills/tressoir-system-view/SKILL.md ] && [ "$(readlink .agents/skills/tressoir-system-view)" = "../../WORK/skills/tressoir-system-view" ]'
+check "it says in three lines that this is experimental and where feedback goes" \
+  '[ "$(tail -n 4 "$TMP/out.txt" | head -n 3)" = "The system view is experimental.
+Feedback goes in WORK/SYSTEM_VIEW/FEEDBACK.md.
+It is applied to the kit from time to time." ]'
+check "the starting files are the kit's seeds" 'diff -q "$KIT/extras/tressoir-system-view/seeds/system.json" WORK/SYSTEM_VIEW/system.json >/dev/null && [ "$(cat WORK/SYSTEM_VIEW/changes.json)" = "[]" ]'
+snapshot > "$TMP/before.txt"
+install --experimental-system-view; snapshot > "$TMP/after.txt"
+check "a second run with the option changes nothing" 'cmp -s "$TMP/before.txt" "$TMP/after.txt" && grep -q "nothing to do" "$TMP/out.txt"'
+install; snapshot > "$TMP/after.txt"
+check "a run without the option leaves the system view in place" 'cmp -s "$TMP/before.txt" "$TMP/after.txt" && ! grep -qi "experimental" "$TMP/out.txt"'
+echo '{ "name": "Mine" }' > WORK/SYSTEM_VIEW/system.json; echo "2026-01-01 a remark" >> WORK/SYSTEM_VIEW/FEEDBACK.md
+rm WORK/SYSTEM_VIEW/changes.json; echo "edited" >> WORK/skills/tressoir-system-view/system_view.py
+install --experimental-system-view
+check "files that exist in WORK/SYSTEM_VIEW/ are never overwritten, and a missing one is created again" \
+  '[ "$(cat WORK/SYSTEM_VIEW/system.json)" = "{ \"name\": \"Mine\" }" ] && grep -q "a remark" WORK/SYSTEM_VIEW/FEEDBACK.md && [ "$(cat WORK/SYSTEM_VIEW/changes.json)" = "[]" ]'
+check "without --override an edited script is kept and reported" 'grep -q "edited" WORK/skills/tressoir-system-view/system_view.py && grep -q "kept WORK/skills/tressoir-system-view" "$TMP/out.txt"'
+install --override
+check "--override refreshes the system view skill and leaves its data alone" \
+  'diff -rq "$KIT/extras/tressoir-system-view" WORK/skills/tressoir-system-view >/dev/null && [ "$(cat WORK/SYSTEM_VIEW/system.json)" = "{ \"name\": \"Mine\" }" ] && grep -q "a remark" WORK/SYSTEM_VIEW/FEEDBACK.md'
+if command -v python3 >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
+  cp "$KIT/extras/tressoir-system-view/seeds/system.json" WORK/SYSTEM_VIEW/system.json
+  python3 WORK/skills/tressoir-system-view/system_view.py > "$TMP/out.txt" 2>&1
+  check "the installed script builds the page from the starting files" '[ $? -eq 0 ] && [ -f WORK/SYSTEM_VIEW.html ] && grep -q "No boxes yet" WORK/SYSTEM_VIEW.html'
+fi
 
 printf '\nResult: %s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
