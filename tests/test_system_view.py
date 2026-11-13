@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(KIT, 'extras', 'tressoir-system-view', 'system_view.py')
@@ -268,8 +269,8 @@ ENTRIES_PY, MONTHLY_PY = 'src/core/entries/entries.py', 'src/core/reports/monthl
 SV = 'WORK/SYSTEM_VIEW/'
 
 
-def mini(tmp):
-    root = os.path.join(tmp, 'mini')
+def mini(tmp, name='mini'):
+    root = os.path.join(tmp, name)
     for path, text in MINI_FILES.items():
         write(root, path, text)
     write(root, SV + 'system.json', json.dumps(MINI, ensure_ascii=False))
@@ -498,6 +499,411 @@ def empty(tmp):
               and read(os.path.join(root, SV + 'system.json')) == text, out + err)
 
 
+def commit(root, message):
+    git(root, 'add', '-A')
+    git(root, 'commit', '-q', '-m', message)
+
+
+def changes(root):
+    return json.loads(read(os.path.join(root, SV + 'changes.json')))
+
+
+def review(tmp):
+    """What an independent review of the script found (2026-11-13), one case each."""
+    count = [0]
+
+    def new():
+        count[0] += 1
+        return mini(tmp, 'review-%d' % count[0])
+
+    ent, rep = 'src/core/entries/', 'src/core/reports/'
+
+    # ---- an entry the last commit holds, and the next task
+    root = new()
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    edit(root, MONTHLY_PY, 'return 0', 'return 5')
+    a = {'name': 'A', 'line': 'a', 'files': {ENTRIES_PY: 'key 2', MONTHLY_PY: 'total 5'}, 'affects': ['add', 'monthly']}
+    entries(root, a)
+    run(root)
+    commit(root, 'task A, code and SYSTEM_VIEW together')
+    edit(root, ENTRIES_PY, 'return 2', 'return 3')
+    b = {'name': 'B', 'line': 'b', 'files': {ENTRIES_PY: 'key 3'}, 'affects': ['add']}
+    entries(root, a, b)
+    code, out, err = run(root)
+    data = page_data(root)
+    check('a committed entry is taken out when the next task touches one of its files, with no error',
+          code == 0 and 'ERROR' not in out and 'Took 1 built entry out' in out and [e['name'] for e in changes(root)] == ['B']
+          and [data['changes'][i]['name'] for i in data['snap']['cc']['changes']] == ['B'], out + err)
+    check('the note of a file that was only changed does not become its line', json.loads(read(os.path.join(root, SV + 'lines.json'))) == {})
+
+    root = new()
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    a = {'name': 'A', 'line': 'a', 'files': {ENTRIES_PY: 'x'}, 'interface': {ent: ['add(entry: NewEntry, at: Date) → EntryId']}}
+    entries(root, a)
+    run(root)
+    commit(root, 'task A')
+    edit(root, MONTHLY_PY, 'return 0', 'return 5')
+    b = {'name': 'B', 'line': 'b', 'files': {MONTHLY_PY: 'y'}, 'affects': ['monthly'],
+         'interface': {ent: ['add(entry: NewEntry, at: Date, by: Text) → EntryId']}}
+    entries(root, a, b)
+    code, out, err = run(root)
+    data = page_data(root)
+    check('a committed entry is taken out, not rewritten, when the next task restates a line it stated',
+          code == 0 and 'both state' not in out and changes(root) == [b]
+          and [data['changes'][i]['name'] for i in data['snap']['cc']['changes']] == ['B'], out + err)
+
+    root = new()
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    entries(root, {'name': 'A', 'line': 'a', 'files': {ENTRIES_PY: 'the key is 2 now'}, 'affects': ['add']})
+    run(root)
+    commit(root, 'A')
+    code, out, err = run(root)
+    check('the note of a changed file does not become its line when its entry goes',
+          code == 0 and 'Took 1 built entry' in out and json.loads(read(os.path.join(root, SV + 'lines.json'))) == {}, out + err)
+
+    root = new()
+    git(root, 'mv', MONTHLY_PY, rep + 'month.py')
+    entries(root, {'name': 'A shorter name', 'line': 'month.py', 'files': {rep + 'month.py': 'renamed'}})
+    run(root)
+    commit(root, 'renamed')
+    code, out, err = run(root)
+    check('the note of a renamed file does not become its line',
+          code == 0 and 'Took 1 built entry' in out and json.loads(read(os.path.join(root, SV + 'lines.json'))) == {}, out + err)
+
+    # ---- a line stated by two built entries
+    root = new()
+    edit(root, ENTRIES_PY, 'return 1', 'return 2\n\n\ndef count():\n    return 0')
+    edit(root, MONTHLY_PY, 'return 0', 'return count()')
+    entries(root, {'name': 'A', 'line': 'a', 'files': {ENTRIES_PY: 'count'}, 'interface': {ent: ['count() → Int  // how many']}},
+            {'name': 'B', 'line': 'b', 'files': {MONTHLY_PY: 'uses count'}, 'affects': ['monthly'], 'interface': {ent: ['count(month: Month) → Int']}})
+    code, out, err = run(root)
+    now = changes(root)
+    check('two new entries may state a line system.json does not have yet: both are folded',
+          code == 0 and 'ERROR' not in out and 'count(month: Month) → Int  // how many' in lines_of(root, ent)
+          and now[0].get('affects') == ['count'] and 'interface' not in now[0], out + err + str(now))
+    code, out, err = run(root)
+    check('and a second run says and changes the same', code == 0 and 'ERROR' not in out and changes(root) == now, out + err)
+
+    root = new()
+    write(root, 'src/core/tags/tags.py', 'def tag(x):\n    return x\n\n\ndef untag(x):\n    return x\n')
+    edit(root, MONTHLY_PY, 'return 0', 'return 7')
+    entries(root, {'name': 'A', 'line': 'a', 'files': {'src/core/tags/tags.py': 'tags'}, 'boxes': [
+                {'name': 'Tags', 'folder': 'src/core/tags/', 'line': 'tags', 'interface': ['tag(x: Text) → Tag  // tags one', 'untag(x: Text)  // removes']}]},
+            {'name': 'B', 'line': 'b', 'files': {MONTHLY_PY: 'uses tag'}, 'affects': ['monthly'], 'interface': {'src/core/tags/': ['tag(x: Text, y: Text) → Tag']}})
+    code, out, err = run(root)
+    now = changes(root)
+    check('an entry brings a box and a later one restates a line of it: the box is folded with the later line',
+          code == 0 and 'ERROR' not in out and lines_of(root, 'src/core/tags/') == ['tag(x: Text, y: Text) → Tag  // tags one', 'untag(x: Text)  // removes']
+          and now[0]['boxes'][0]['interface'] == ['untag(x: Text)  // removes'] and now[0].get('affects') == ['tag'], out + err + str(now))
+    code, out, err = run(root)
+    check('and a second run says and changes the same (a box brought by an entry)', code == 0 and 'ERROR' not in out and changes(root) == now, out + err)
+
+    root = new()
+    both = system(root)
+    both['regions']['core']['boxes'][0]['interface'].append('export() → Text  // dumps entries')
+    both['regions']['core']['boxes'][1]['interface'].append('export() → Text  // dumps reports')
+    write(root, SV + 'system.json', json.dumps(both, ensure_ascii=False))
+    run(root)
+    commit(root, 'two boxes list export')
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    edit(root, MONTHLY_PY, 'return 0', 'return 5')
+    edit(root, 'src/entry/cli/main.py', 'add(argv)', 'add(argv[0])')
+    entries(root, {'name': 'A', 'line': 'a', 'files': {ENTRIES_PY: 'x', MONTHLY_PY: 'y'}, 'affects': ['add', 'monthly'], 'interface': {ent: ['export(fmt: Text) → Text']}},
+            {'name': 'B', 'line': 'b', 'files': {'src/entry/cli/main.py': 'z'}, 'affects': ['main'], 'interface': {ent: ['export(fmt: Text, to: Path) → Text']}})
+    code, out, err = run(root)
+    check('a name the script puts under affects is written with its box when two boxes list it',
+          code == 0 and 'ERROR' not in out and changes(root)[0].get('affects') == ['add', 'monthly', 'src/core/entries/: export'], out + err)
+
+    root = new()
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    edit(root, MONTHLY_PY, 'return 0', 'return 5')
+    entries(root, {'name': 'A', 'line': 'a', 'files': {MONTHLY_PY: 'y'}, 'affects': ['monthly'], 'interface': {ent: ['count() → Int  // how many']}},
+            {'name': 'B', 'line': 'b', 'files': {ENTRIES_PY: 'x'}, 'affects': ['add'], 'interface': {ent: ['count(month: Month) → Int']}})
+    code, out, err = run(root)
+    now = changes(root)
+    code2, out2, err2 = run(root)
+    check('and with its box when the earlier entry has no file in that box',
+          code == 0 and code2 == 0 and 'ERROR' not in out + out2 and now[0].get('affects') == ['monthly', 'src/core/entries/: count'], out + err + out2)
+
+    for runs in (1, 2):
+        root = new()
+        edit(root, ENTRIES_PY, 'return 1', 'return 2')
+        edit(root, MONTHLY_PY, 'return 0', 'return 5')
+        a = {'name': 'A', 'line': 'a', 'files': {ENTRIES_PY: 'x'}, 'interface': {ent: ['add(a: Int) → EntryId  // records it, with better words']}}
+        b = {'name': 'B', 'line': 'b', 'files': {MONTHLY_PY: 'y'}, 'affects': ['monthly'], 'interface': {ent: ['add(a: Int, b: Int) → EntryId']}}
+        if runs == 2:
+            entries(root, a)
+            run(root)
+        entries(root, a, b)
+        run(root)
+        check('words the earlier entry gives are kept when the later one leaves them out (the script run %s)' % ('once for both' if runs == 1 else 'after each'),
+              lines_of(root, ent)[0] == 'add(a: Int, b: Int) → EntryId  // records it, with better words', lines_of(root, ent)[0])
+
+    root = new()
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    edit(root, MONTHLY_PY, 'return 0', 'return 5')
+    entries(root, {'name': 'A', 'line': 'a', 'files': {ENTRIES_PY: 'x'}, 'interface': {ent: ['add(a: Int) → EntryId', 'add(a: Int, b: Int) → EntryId']}},
+            {'name': 'B', 'line': 'b', 'files': {MONTHLY_PY: 'y'}, 'affects': ['monthly'], 'interface': {ent: ['add(a: Int, b: Int, c: Int) → EntryId']}})
+    run(root)
+    now = changes(root)
+    run(root)
+    check('an entry that states a name twice, restated by a later one, is settled in one run',
+          now == changes(root) and 'interface' not in now[0] and now[0].get('affects') == ['add'], now)
+
+    root = new()
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    edit(root, MONTHLY_PY, 'return 0', 'return 5')
+    entries(root, {'name': 'A', 'line': 'a', 'files': {ENTRIES_PY: 'x'}, 'affects': ['add'], 'interface': {ent: ['NewEntry = { text: Text, at: Date }']}},
+            {'name': 'B', 'line': 'b', 'files': {MONTHLY_PY: 'y'}, 'affects': ['monthly'], 'interface': {ent: ['- NewEntry']}})
+    code, out, err = run(root)
+    now = changes(root)
+    check('a later "- Name" takes the earlier line of a type out too, and leaves no name under affects',
+          code == 0 and 'interface' not in now[0] and now[0]['affects'] == ['add'] and not any(l.startswith('NewEntry') for l in lines_of(root, ent)), out + err + str(now))
+
+    # ---- removing a type
+    root = new()
+    edit(root, ENTRIES_PY, 'class NewEntry:\n    pass\n\n\n', '')
+    gone = {'name': 'A', 'line': 'a', 'files': {ENTRIES_PY: 'gone'}, 'interface': {ent: ['- NewEntry']}}
+    entries(root, gone)
+    code, out, err = run(root)
+    cc = page_data(root)['snap']['cc']
+    check('an entry that removes a type marks the type', code == 0 and cc['lines'].get('NewEntry') == {'s': 'del'} and cc['hits']['0'] == ['NewEntry'], cc['hits'])
+    git(root, 'checkout', 'HEAD', '--', SV + 'system.json')
+    commit(root, 'committed with system.json not folded')
+    code, out, err = run(root)
+    check('and stays while system.json at the last commit still has the type', code == 0 and 'Took' not in out and changes(root) == [gone], out + err)
+
+    # ---- a plan that names a file in two entries
+    p1 = {'name': 'P1', 'line': 'a', 'plan': 'X', 'files': {rep + 'yearly.py': '+ yearly totals'}, 'interface': {rep: ['yearly(y: Int) → Report  // one year']}}
+    p2 = {'name': 'P2', 'line': 'b', 'plan': 'X', 'files': {rep + 'yearly.py': 'caches the totals'}, 'affects': ['yearly']}
+    for order in ([p1, p2], [p2, p1]):
+        root = new()
+        entries(root, *order)
+        code, out, err = run(root)
+        data = page_data(root)
+        check('a planned file one entry adds and another changes is shown as added (%s first)' % order[0]['name'],
+              code == 0 and data['snap']['plan:0']['files'].get(rep + 'yearly.py') == 'add' and rep + 'yearly.py' in [f[0] for f in data['files']], out + err)
+
+    # ---- hand-written files in a shape the script cannot read: a sentence, never a traceback, and nothing folded
+    root = new()
+    changed_entries = MINI_FILES[ENTRIES_PY].replace('return 1', 'return 2')
+    core = lambda s: s['regions']['core']
+    box = lambda s: core(s)['boxes'][0]
+
+    def at(get, k, v):
+        def f(s):
+            get(s)[k] = v
+        return f
+
+    def entry(**kw):
+        return dict({'name': 'A', 'line': 'a', 'files': {ENTRIES_PY: 'x'}}, **kw)
+
+    def stops(sysmod=None, es=None, raw=None):
+        back(root)
+        if sysmod:
+            bad = json.loads(json.dumps(MINI))
+            sysmod(bad)
+            write(root, SV + 'system.json', json.dumps(bad, ensure_ascii=False))
+        if es is not None:
+            write(root, ENTRIES_PY, changed_entries)
+            entries(root, *es)
+        if raw:
+            with open(os.path.join(root, SV + raw[0]), 'wb') as f:
+                f.write(raw[1])
+        before = read(os.path.join(root, SV + 'system.json'))
+        code, out, err = run(root)
+        ok = (code == 2 and 'Traceback' not in err and err.startswith('system_view.py: WORK/SYSTEM_VIEW/') and len(err.strip().split('\n')) == 1
+              and read(os.path.join(root, SV + 'system.json')) == before)
+        return '' if ok else 'exit %d: %s' % (code, (err or out).strip().split('\n')[-1][:160])
+
+    top = lambda s: s
+    shapes = {
+        'regions null': at(top, 'regions', None), 'name a number': at(top, 'name', 5), 'region folder a number': at(core, 'folder', 5),
+        'region boxes null': at(core, 'boxes', None), 'region boxes an object': at(core, 'boxes', {}), 'also a number': at(box, 'also', 5),
+        'also holds null': at(box, 'also', [None]), 'also a text': at(box, 'also', 'src/util.py'), 'inside a number': at(box, 'inside', 5),
+        'links of a box hold text': at(box, 'links', ['x']), 'from a list': at(box, 'from', [rep]),
+        'links an object': at(top, 'links', {'from': 'src/entry/', 'to': 'src/core/'}), 'links hold text': at(top, 'links', ['a']),
+        'flows an object': at(top, 'flows', {'name': 'x', 'steps': []}), 'steps hold text': at(top, 'flows', [{'name': 'x', 'steps': [ent]}]),
+        'a step at a list': at(top, 'flows', [{'name': 'x', 'steps': [{'at': [ent]}]}]), 'a line a number': at(box, 'interface', [5]),
+        'a region folder "."': at(core, 'folder', '.')}
+    wrong = ['%s (%s)' % (k, r) for k, r in ((k, stops(sysmod=f)) for k, f in shapes.items()) if r]
+    check('a system.json in a wrong shape stops with one sentence: %d shapes' % len(shapes), not wrong, '; '.join(wrong))
+    shapes = {
+        'box folder a number': [entry(boxes=[{'folder': 5, 'name': 'x'}])], 'box interface holds a number': [entry(boxes=[{'folder': ent, 'interface': [5]}])],
+        'box interface null': [entry(boxes=[{'folder': ent, 'interface': None}])], 'box also null': [entry(boxes=[{'folder': ent, 'also': None}])],
+        'box also a number': [entry(boxes=[{'folder': ent, 'also': 5}])], 'box also a text': [entry(boxes=[{'folder': ent, 'also': 'src/core/x.py'}])],
+        'new box inside holds text': [entry(boxes=[{'folder': 'src/core/n/', 'inside': ['x']}])],
+        'inner box without folder': [entry(boxes=[{'folder': 'src/core/n/', 'inside': [{'folder': 'src/core/n/r/', 'boxes': [{'name': 'z'}]}]}])],
+        'plan a list': [entry(plan=['p'])], 'plan true': [entry(plan=True), entry(name='B', plan='x')], 'files a list': [entry(files=[ENTRIES_PY])],
+        'affects a text': [entry(affects='add')], 'an entry that is text': ['A']}
+    wrong = ['%s (%s)' % (k, r) for k, r in ((k, stops(es=v)) for k, v in shapes.items()) if r]
+    check('a changes.json in a wrong shape stops with one sentence, and nothing of it is folded: %d shapes' % len(shapes), not wrong, '; '.join(wrong))
+    wrong = [k for k, raw in (('changes.json as Latin-1', ('changes.json', '[{"name":"Café","line":"é","files":{}}]'.encode('latin-1'))),
+                              ('lines.json as UTF-16', ('lines.json', '{}'.encode('utf-16'))),
+                              ('lines.json holds a list', ('lines.json', b'{"a.py": ["x"]}'))) if stops(raw=raw)]
+    check('a file not saved as UTF-8, or a lines.json that is not paths and words, stops with one sentence', not wrong, wrong)
+    back(root)
+    with open(os.path.join(root, SV + 'seen'), 'wb') as f:
+        f.write(b'\x00\x01')
+    code, out, err = run(root)
+    check('a seen file that holds no commit is said, and the page is built', code == 0 and 'Traceback' not in err and 'which is not a commit here' in out, out + err)
+    os.remove(os.path.join(root, SV + 'seen'))
+    back(root)
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    entries(root, {'name': 'Fix', 'line': 'a', 'files': {ENTRIES_PY: 'x'}, 'affects': ['add']}, {'name': 'Fix', 'line': 'b', 'files': {ENTRIES_PY: 'y'}})
+    code, out, err = run(root)
+    check('two entries with the same name stop the script, which says to rename one',
+          code == 2 and 'two entries are named "Fix"' in err and 'rename one' in err, out + err)
+
+    # ---- an entry that cannot be read, in an earlier commit
+    root = new()
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    write(root, SV + 'changes.json', '[{"name":"A","line":"a","files":["src/core/entries/entries.py"]}]')
+    commit(root, 'committed without running the script')
+    entries(root)
+    commit(root, 'the entry taken out')
+    code, out, err = run(root, '--from', 'base')
+    check('an entry that cannot be read in an earlier commit is left out of a delta, and said',
+          code == 0 and 'Traceback' not in err and 'has an entry that cannot be read; it is left out' in out
+          and 'from' in [t['id'] for t in page_data(root)['tabs']], out + err)
+    write(root, SV + 'seen', subprocess.check_output(['git', 'rev-parse', 'base'], cwd=root).decode())
+    code, out, err = run(root)
+    check('and of Seen → Current', code == 0 and 'Traceback' not in err and 'seen' in [t['id'] for t in page_data(root)['tabs']], out + err)
+
+    # ---- flat projects
+    def flat(folder, at_top):
+        count[0] += 1
+        root = os.path.join(tmp, 'flat-%d' % count[0])
+        pre = '' if at_top else folder
+        write(root, SV + 'system.json', json.dumps({'name': 'Flat', 'regions': {
+            'entry': {'folder': folder, 'line': 'in', 'boxes': [{'name': 'CLI', 'folder': pre + 'cli.py', 'line': 'commands', 'interface': ['main(argv: [Text])  // runs']}]},
+            'core': {'folder': folder, 'line': 'does', 'boxes': [{'name': 'Store', 'folder': pre + 'store.py', 'line': 'keeps', 'interface': ['save(x: Text)  // saves']}]}}}))
+        for path, text in {'cli.py': 'def main(argv):\n    return save(argv)\n', 'store.py': 'def save(x):\n    return x\n', 'util.py': 'def norm(x):\n    return x\n'}.items():
+            write(root, pre + path, text)
+        write(root, SV + 'changes.json', '[]\n')
+        git(root, 'init', '-q')
+        git(root, 'config', 'user.email', 'tests@example.com')
+        git(root, 'config', 'user.name', 'Tests')
+        run(root)
+        commit(root, 'the base')
+        return root
+
+    root = flat('./', True)
+    edit(root, 'util.py', 'return x', 'return x.strip()')
+    write(root, 'newmod.py', 'def helper():\n    return 2\n')
+    code, out, err = run(root, '--check')
+    check('regions at the top of the repository are written "./": a changed file in no entry is an error there too',
+          code == 1 and 'ERROR  2 changed files under the figure are in no entry: newmod.py, util.py' in out
+          and 'note   2 files under ./ belong to no box: newmod.py, util.py.' in out, out + err)
+    edit(root, 'cli.py', 'save(argv)', 'save(argv[0])')
+    entries(root, {'name': 'B', 'line': 'b', 'files': {'cli.py': 'the first word', 'util.py': 'strips', 'newmod.py': 'helper'}, 'affects': ['main']})
+    code, out, err = run(root)
+    check('and an entry there is folded and drawn', code == 0 and 'ERROR' not in out and page_data(root)['views'][0]['rows'][0]['dir'] == './', out + err)
+    root = flat('', True)
+    code, out, err = run(root, '--check')
+    check('a figure whose regions give no folder is said, with how the top of the repository is written',
+          code == 0 and 'note   No region gives its folder' in out and '"./"' in out, out + err)
+    root = flat('.', True)
+    code, out, err = run(root, '--check')
+    check('"." as a region\'s folder stops the script, which says to write "./"', code == 2 and 'The top of the repository is written "./"' in err, out + err)
+    for folder in ('./', 'src/'):
+        root = flat(folder, folder == './')
+        pre = '' if folder == './' else folder
+        write(root, pre + 'rates.py', 'def rate():\n    return 1\n')
+        before = read(os.path.join(root, SV + 'system.json'))
+        entries(root, {'name': 'Rates', 'line': 'r', 'files': {pre + 'rates.py': '+ exchange rates'},
+                       'boxes': [{'name': 'Exchange rates', 'folder': pre + 'rates.py', 'line': 'daily rates'}]})
+        code, out, err = run(root)
+        check('a new box where regions share the folder %s is not placed by the script: an error that names the regions' % folder,
+              code == 1 and 'Rates: the new box %srates.py could go in more than one region (entry, core): they share the folder %s' % (pre, folder) in out
+              and read(os.path.join(root, SV + 'system.json')) == before, out + err)
+
+    # ---- boxes that come and go
+    root = new()
+    shutil.rmtree(os.path.join(root, ent))
+    entries(root, {'name': 'No entries', 'line': 'gone', 'files': {ENTRIES_PY: 'removed'}, 'interface': {ent: ['- add', '- listing', '- NewEntry']}})
+    code, out, err = run(root)
+    code2, out2, err2 = run(root)
+    check('an entry that removes the lines of a box whose files are gone gives the same result on a second run',
+          code == 0 and code2 == 0 and 'The box src/core/entries/ is removed' in out and 'ERROR' not in out + out2, out + err + out2 + err2)
+    cc = page_data(root)['snap']['cc']
+    check('and its lines are marked as the entry\'s', cc['boxes'].get(ent) == 'del' and 'src/core/entries/#add' in cc['hits']['0'] and 'NewEntry' in cc['hits']['0'], cc['hits'])
+
+    root = new()
+    write(root, ent + 'index/index.py', 'def find(x):\n    return x\n')
+    inner = {'name': 'Index', 'folder': ent + 'index/', 'line': 'finds entries', 'interface': ['find(x: Text) → Entry?  // finds one']}
+    entries(root, {'name': 'Index', 'line': 'i', 'files': {ent + 'index/index.py': '+ finds'}, 'boxes': [inner]})
+    code, out, err = run(root)
+    check('a new box inside the folder of a box is an error, and is not folded',
+          code == 1 and 'Index: the new box src/core/entries/index/ is inside the box src/core/entries/' in out
+          and [b['folder'] for b in system(root)['regions']['core']['boxes']] == [ent, rep], out + err)
+    back(root)
+    write(root, 'src/core/a/b/b.py', 'x = 1\n')
+    entries(root, {'name': 'Deep', 'line': 'd', 'files': {'src/core/a/b/b.py': '+ b'}, 'boxes': [{'name': 'B', 'folder': 'src/core/a/b/', 'line': 'b'}]})
+    code, out, err = run(root, '--check')
+    check('a new box deeper than directly in a region is an error', code == 1 and 'Deep: the new box src/core/a/b/ is not directly in src/core/' in out, out + err)
+    entries(root, {'name': 'Deep', 'line': 'd', 'files': {'src/core/a/b/b.py': '+ b'}, 'boxes': [{'name': 'A', 'folder': 'src/core/a/', 'line': 'a'}]})
+    code, out, err = run(root, '--check')
+    check('directly in a region it is folded as before', code == 0 and 'ERROR' not in out, out + err)
+
+    root = new()
+    odd = system(root)
+    odd['regions']['core']['boxes'].append({'name': 'Ghost', 'folder': 'src/core/ghost/', 'line': 'nothing there'})
+    write(root, SV + 'system.json', json.dumps(odd, ensure_ascii=False))
+    code, out, err = run(root, '--check')
+    check('a box with no file is said', code == 0 and 'note   No file is in the box src/core/ghost/.' in out, out + err)
+
+    # ---- smaller things
+    root = new()
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    write(root, 'WORK/notes.md', 'new\n')
+    entries(root, {'name': 'A', 'line': 'a', 'files': {ENTRIES_PY: 'x', 'WORK/notes.md': 'notes', 'WORK/more.md': '+ more'}, 'affects': ['add']})
+    code, out, err = run(root, '--check')
+    check('a file of the work folder in an entry is not said to be unchanged; a "+ " one is still looked for',
+          code == 1 and 'WORK/notes.md does not differ' not in out and 'WORK/more.md is written as a new file ("+ ") and does not exist' in out, out + err)
+    back(root)
+    code, out, err = run(root, '--check', '--seen')
+    check('--check with --seen writes nothing', code == 0 and 'Nothing is written' in out and not os.path.exists(os.path.join(root, SV + 'seen')), out + err)
+    write(root, ENTRIES_PY, MINI_FILES[ENTRIES_PY] + '# pad pad pad\n' * 45000)
+    code, out, err = run(root, '--check')
+    check('a name is still found in a file too large to read as code', 'found nowhere' not in out, out + err)
+    back(root)
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    entries(root, {'name': 'A', 'line': 'a', 'files': {ENTRIES_PY: 'x'}, 'interface': {ent: ['add(entry: NewEntry, at: Date) → EntryId']}})
+    os.remove(os.path.join(root, 'WORK/SYSTEM_VIEW.html'))
+    p = subprocess.run([sys.executable, SCRIPT], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                       env=dict(os.environ, LC_ALL='C', LANG='C', PYTHONIOENCODING='latin-1', PYTHONUTF8='0'))
+    check('on a terminal that is not UTF-8 the script still ends and writes the page',
+          p.returncode == 0 and b'Traceback' not in p.stderr and os.path.exists(os.path.join(root, 'WORK/SYSTEM_VIEW.html')), p.stderr.decode('latin-1')[-300:])
+    back(root)
+    routes = system(root)
+    routes['regions']['entry']['boxes'][0]['interface'] = ['GET /users  // lists users', 'GET /orders  // lists orders']
+    write(root, SV + 'system.json', json.dumps(routes, ensure_ascii=False))
+    code, out, err = run(root, '--check')
+    check('two routes that start with the same word are an error that says how to name them',
+          code == 1 and 'GET is written twice: in src/entry/cli/. The name of a line is its first word.' in out and 'get_users' in out, out + err)
+
+    # ---- the proposal of affects on a large box: each function is read once
+    root = new()
+    files, fns = 150, 40
+    for i in range(files):
+        write(root, ent + 'mod%d.py' % i, ''.join('def f%d_%d(x):\n    return f%d_%d(x) + helper_%d(x)\n\n' % (i, j, i, j + 1, j) for j in range(fns)))
+    commit(root, 'a large box')
+
+    def timed(n):
+        git(root, 'checkout', '-q', '--', '.')
+        for i in range(n):
+            edit(root, ent + 'mod%d.py' % i, 'def f%d_%d(x):\n    return f%d_%d(x)' % (i, fns - 1, i, fns), 'def f%d_%d(x):\n    return 1 + f%d_%d(x)' % (i, fns - 1, i, fns))
+        start = time.time()
+        code, out, err = run(root, '--check')
+        return time.time() - start, code, out + err
+
+    few, code, _said = timed(3)
+    many, code, _said = timed(30)
+    check('proposing affects for 30 changed files of a large box costs little more than for 3', code == 1 and many < few * 3 + 2,
+          '%.1f s for 3 files, %.1f s for 30' % (few, many))
+
+
 def tally(tmp):
     root = repository(tmp, 'tally')
     code, out, err = run(root, '--check')
@@ -571,6 +977,7 @@ def main():
         no_repository(tmp)
         checks(tmp)
         empty(tmp)
+        review(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print('\nResult: %d passed, %d failed' % (len(PASS), len(FAIL)))

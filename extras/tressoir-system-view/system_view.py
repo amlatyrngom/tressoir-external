@@ -63,8 +63,11 @@ PLAIN = [
 def read_json(path, default, shown):
     if not os.path.exists(path):
         return default
-    with open(path, encoding='utf-8') as f:
-        text = f.read()
+    try:
+        with open(path, encoding='utf-8-sig') as f:
+            text = f.read()
+    except UnicodeDecodeError:
+        raise Stop('%s is not saved as UTF-8. Save it as UTF-8 and run again.' % shown)
     if not text.strip():
         return default
     try:
@@ -93,7 +96,7 @@ class Git:
     def _run(self, *args):
         try:
             p = subprocess.run(['git'] + list(args), cwd=self.root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        except OSError:
+        except (OSError, ValueError):
             return 1, ''
         return p.returncode, p.stdout.decode('utf-8', 'replace')
 
@@ -153,6 +156,22 @@ class Git:
     def diff(self, commit, path):
         return self._run('diff', '-U0', commit, '--', path)[1]
 
+    def new_with(self, path):
+        """The commit that added this file, when it added it as a new file and not under a new name; else None."""
+        c = self._run('log', '-1', '--diff-filter=A', '--format=%H', '--', path)[1].strip()
+        if not c:
+            return None
+        out = self._run('diff-tree', '--root', '-r', '-M', '--no-commit-id', '--name-status', '--relative', '-z', c)[1].split('\0')
+        i = 0
+        while i < len(out) - 1:
+            if out[i][:1] in ('R', 'C'):
+                i += 3
+            elif out[i] == 'A' and out[i + 1] == path:
+                return c
+            else:
+                i += 2
+        return None
+
     def commits_between(self, older, newer='HEAD'):
         return [c for c in self._run('rev-list', '--reverse', '%s..%s' % (older, newer))[1].split('\n') if c]
 
@@ -184,9 +203,16 @@ def write_line(p):
     return (p['name'] + ' = ' if p['type'] else '') + p['sig'] + ('  // ' + p['words'] if p['words'] else '')
 
 
+TOP = './'      # how a region's folder is written when the code sits at the top of the repository
+
+
 def under(prefix, path):
     """Whether a path is this path, or lies under this folder."""
-    return path == prefix or path.startswith(prefix if prefix.endswith('/') else prefix + '/')
+    return prefix == TOP or path == prefix or path.startswith(prefix if prefix.endswith('/') else prefix + '/')
+
+
+def depth(folder):
+    return 0 if folder == TOP else len(folder)
 
 
 # ---------------------------------------------------------------- one state of the system
@@ -242,7 +268,12 @@ class World:
                 lid = p['name'] if p['type'] else folder + '#' + p['name']
                 if lid in self.lines and problems is not None:
                     where = self.lines[lid]['home']
-                    problems.error('%s is written twice: %s.' % (p['name'], 'in ' + where if where == folder else 'in %s and in %s' % (where, folder)))
+                    # a route or a command written as several words: its name is only the first one
+                    words = any(q['sig'][len(q['name']):len(q['name']) + 1] not in ('', '(') for q in (p, self.lines[lid]) if not q['type'])
+                    problems.error('%s is written twice: %s.%s' % (
+                        p['name'], 'in ' + where if where == folder else 'in %s and in %s' % (where, folder),
+                        ' The name of a line is its first word. Give each line its own: for a route or a command, one word '
+                        'such as get_users, with the route itself in the words after //.' if words else ''))
                 self.lines[lid] = p
                 self.order[folder].append(lid)
                 if p['bare']:
@@ -281,14 +312,36 @@ class World:
             folder = self.parent.get(folder)
         return out
 
-    def row_for(self, folder):
-        """The row a new box belongs in: the row or region whose folder most closely contains it."""
-        best, size = None, -1
-        for row, _parent, _key in rows_of(self.sys):
+    def place(self, folder):
+        """(the row a new box goes in, None) or (None, why it has none). A new box sits directly in the folder of a row
+        or of a region, and of one only: the script never chooses between two, and never puts a box inside a box."""
+        rows = []
+        for row, _parent, key in rows_of(self.sys):
             f = row.get('folder')
-            if f and folder != f and under(f, folder) and len(f) > size:
-                best, size = row, len(f)
-        return best
+            if f and folder != f and under(f, folder):
+                rows.append((depth(f), row, key))
+        if not rows:
+            return None, ('is in no row and no region. A new row or region is architecture: leave the figure alone and tell the owner.'
+                          + (' (Where the code sits at the top of the repository, the regions\' folder is written "%s".)' % TOP
+                             if '/' not in folder.strip('/') else ''))
+        top = max(d for d, _row, _key in rows)
+        best = [(row, key) for d, row, key in rows if d == top]
+        f = best[0][0]['folder']
+        rest = folder if f == TOP else folder[len(f):]
+        if '/' in rest.strip('/'):
+            boxes = [b for b in self.boxes for q in self.paths(b) if q != folder and depth(q) > top and under(q, folder)]
+            if boxes:
+                box = max(boxes, key=len)
+                return None, ('is inside the box %s. A new folder inside a box is not a box: take it out of "boxes". If %s should now '
+                              'show boxes inside it, that is architecture: leave the figure alone and tell the owner.' % (box, box))
+            return None, ('is not directly in %s. A new box is a folder directly in a row or in a region\'s folder. Anything else is '
+                          'architecture: leave the figure alone and tell the owner.' % f)
+        if len(best) > 1:
+            keys = [key for _row, key in best if key]
+            return None, ('could go in more than one %s%s: they share the folder %s. Which one is architecture: write the box into '
+                          'system.json with the owner, and take it out of "boxes".'
+                          % ('region' if len(keys) == len(best) else 'row', ' (%s)' % ', '.join(keys) if len(keys) == len(best) else '', f))
+        return best[0][0], None
 
 
 # ---------------------------------------------------------------- folding
@@ -334,10 +387,9 @@ def fold(system, entries, problems, quiet=False):
                 continue
             old = world.boxes.get(folder)
             if old is None:
-                row = world.row_for(folder)
+                row, why = world.place(folder)
                 if row is None:
-                    problems.error('%s: the new box %s is in no row and no region. A new row or region is architecture: '
-                                   'leave the figure alone and tell the owner.' % (e.get('name', '?'), folder))
+                    problems.error('%s: the new box %s %s' % (e.get('name', '?'), folder, why))
                     continue
                 new = copy.deepcopy(b)
                 if new.get('interface'):
@@ -357,7 +409,9 @@ def fold(system, entries, problems, quiet=False):
         for folder, lines in (e.get('interface') or {}).items():
             box = World(out).boxes.get(folder)
             if box is None:
-                problems.error('%s: "interface" names %s, which is not a box.' % (e.get('name', '?'), folder))
+                # taking lines out of a box that is not there is already true: the box went with its files
+                if not all(t.startswith('- ') for t in lines):
+                    problems.error('%s: "interface" names %s, which is not a box.' % (e.get('name', '?'), folder))
                 continue
             for was in merge_lines(box, lines):
                 if not quiet and not isinstance(was, str) and not e.get('plan'):
@@ -429,6 +483,20 @@ def note_of(text):
     return re.sub(r'^[+-] ', '', text)
 
 
+def stated_ids(folder, text, *worlds):
+    """The ids of a line an entry states. `- name` does not say whether it removes a function or a type, so both are looked
+    up in the states given."""
+    if not text.startswith('- '):
+        p = parse_line(text)
+        return [p['name'] if p['type'] else folder + '#' + p['name']]
+    name = text[2:].strip()
+    worlds = [w for w in worlds if w is not None]
+    out = [folder + '#' + name] if any(folder + '#' + name in w.lines for w in worlds) else []
+    if any(name in w.lines and w.lines[name]['type'] and w.lines[name]['home'] == folder for w in worlds):
+        out.append(name)
+    return out or [folder + '#' + name]
+
+
 def hits_of(entry, world, problems=None, base=None):
     """The listed lines a change marks: the names under `affects`, the lines it states, the lines of a box it brings,
     and the lines of a box that goes with its files. A name is looked up in the boxes the entry's files belong to
@@ -461,8 +529,7 @@ def hits_of(entry, world, problems=None, base=None):
                                % (name, n, ' and '.join(sorted(set(i.split('#')[0] for i in ids))), n))
     for folder, lines in (entry.get('interface') or {}).items():
         for text in lines:
-            p = parse_line(text[2:] if text.startswith('- ') else text)
-            hit.append(p['name'] if p['type'] else folder + '#' + p['name'])
+            hit.extend(stated_ids(folder, text, world, base))
 
     def brought(box):
         for text in box.get('interface') or []:
@@ -662,41 +729,147 @@ def emit_flows(system):
 
 # ---------------------------------------------------------------- the checks
 
-def check_shape(system, entries, shown):
-    """Stops on a file whose shape the rest of the script cannot read."""
-    regions = system.get('regions')
-    if regions is not None and not isinstance(regions, dict):
-        raise Stop('%s: "regions" must be an object.' % shown('system.json'))
+def texts(v):
+    return isinstance(v, list) and all(isinstance(x, str) for x in v)
 
-    def row(r, where):
-        if not isinstance(r, dict) or not isinstance(r.get('boxes') or [], list):
-            raise Stop('%s: %s must be an object with a list under "boxes".' % (shown('system.json'), where))
-        for b in r.get('boxes') or []:
-            if not isinstance(b, dict) or not isinstance(b.get('folder'), str) or not b['folder']:
-                raise Stop('%s: a box in %s has no "folder"%s.' % (shown('system.json'), where,
-                           ' (%s)' % b['name'] if isinstance(b, dict) and b.get('name') else ''))
-            if not isinstance(b.get('interface') or [], list) or not all(isinstance(t, str) for t in b.get('interface') or []):
-                raise Stop('%s: "interface" of %s must be a list of lines.' % (shown('system.json'), b['folder']))
-            for inner in b.get('inside') or []:
-                row(inner, 'the rows inside ' + b['folder'])
 
-    for key, r in (regions or {}).items():
+def fields_fault(d, what, keys):
+    for k in keys:
+        if k in d and not isinstance(d[k], str):
+            return '"%s" of %s must be text' % (k, what)
+    return None
+
+
+def links_fault(v, where):
+    if not isinstance(v, list) or not all(isinstance(l, dict) and isinstance(l.get('from'), str) and isinstance(l.get('to'), str) for l in v):
+        return '"links" %s must be a list of objects, each with "from" and "to"' % where
+    for l in v:
+        fault = fields_fault(l, 'a link ' + where, ('label', 'says'))
+        if fault:
+            return fault
+    return None
+
+
+def row_fault(r, where):
+    if not isinstance(r, dict) or not isinstance(r.get('boxes', []), list):
+        return '%s must be an object with a list under "boxes"' % where
+    fault = fields_fault(r, where, ('folder', 'name', 'line'))
+    if fault:
+        return fault
+    if r.get('folder') in ('.', '/'):
+        return '%s has the folder "%s". The top of the repository is written "%s"' % (where, r['folder'], TOP)
+    for b in r.get('boxes', []):
+        fault = box_fault(b, where)
+        if fault:
+            return fault
+    return None
+
+
+def box_fault(b, where):
+    if not isinstance(b, dict) or not isinstance(b.get('folder'), str) or not b['folder']:
+        return 'a box in %s has no "folder"%s' % (where, ' (%s)' % b['name'] if isinstance(b, dict) and b.get('name') and isinstance(b['name'], str) else '')
+    f = b['folder']
+    fault = fields_fault(b, 'the box ' + f, ('name', 'line'))
+    if fault:
+        return fault
+    if 'interface' in b and not texts(b['interface']):
+        return '"interface" of %s must be a list of lines' % f
+    if 'also' in b and not texts(b['also']):
+        return '"also" of %s must be a list of paths' % f
+    if 'inside' in b:
+        if not isinstance(b['inside'], list):
+            return '"inside" of %s must be a list of rows' % f
+        for r in b['inside']:
+            fault = row_fault(r, 'the rows inside ' + f)
+            if fault:
+                return fault
+    if 'links' in b:
+        fault = links_fault(b['links'], 'of ' + f)
+        if fault:
+            return fault
+    for k in ('from', 'uses'):
+        if k in b and not (isinstance(b[k], dict) and texts(b[k].get('boxes', [])) and isinstance(b[k].get('says', ''), str)):
+            return '"%s" of %s must be an object: box folders under "boxes", a sentence under "says"' % (k, f)
+    return None
+
+
+def system_fault(system):
+    """What is wrong with the shape of a system.json, or None."""
+    if not isinstance(system, dict):
+        return 'it must hold an object'
+    if not isinstance(system.get('name', ''), str):
+        return '"name" must be text'
+    regions = system.get('regions', {})
+    if not isinstance(regions, dict):
+        return '"regions" must be an object'
+    for key, r in regions.items():
         if key not in REGIONS:
-            raise Stop('%s has a region "%s". The regions are: %s.' % (shown('system.json'), key, ', '.join(REGIONS)))
+            return 'there is a region "%s". The regions are: %s' % (key, ', '.join(REGIONS))
         if r is not None:
-            row(r, 'the region "%s"' % key)
+            fault = row_fault(r, 'the region "%s"' % key)
+            if fault:
+                return fault
+    if 'links' in system:
+        fault = links_fault(system['links'], 'of the overview')
+        if fault:
+            return fault
+    flows = system.get('flows', [])
+    if not isinstance(flows, list) or not all(isinstance(f, dict) and isinstance(f.get('steps', []), list) for f in flows):
+        return '"flows" must be a list of objects, each with a list under "steps"'
+    for f in flows:
+        fault = fields_fault(f, 'a flow', ('name', 'line'))
+        if fault:
+            return fault
+        for st in f.get('steps', []):
+            if not isinstance(st, dict):
+                return 'a step of the flow "%s" is not an object' % f.get('name', '?')
+            fault = fields_fault(st, 'a step of the flow "%s"' % f.get('name', '?'), ('at', 'gets', 'does', 'calls'))
+            if fault:
+                return fault
+    return None
+
+
+def entry_fault(e):
+    """What is wrong with the shape of one entry of changes.json, or None."""
+    if not isinstance(e, dict) or not isinstance(e.get('name'), str) or not e['name']:
+        return 'every entry is an object with a "name"'
+    name = 'the entry "%s"' % e['name']
+    if e.get('plan') is not None and not isinstance(e['plan'], str):
+        return '"plan" of %s must be the plan\'s name' % name
+    ok = (isinstance(e.get('line', ''), str)
+          and isinstance(e.get('files', {}), dict) and all(isinstance(n, str) for n in e.get('files', {}).values())
+          and texts(e.get('affects', []))
+          and isinstance(e.get('interface', {}), dict) and all(texts(l) for l in e.get('interface', {}).values())
+          and isinstance(e.get('boxes', []), list))
+    if not ok:
+        return ('%s is not in the shape the skill gives: "files" is an object of notes, "affects" a list of names, '
+                '"interface" an object of lists of lines, "boxes" a list of boxes' % name)
+    for b in e.get('boxes', []):
+        fault = box_fault(b, name)
+        if fault:
+            return fault
+    return None
+
+
+def check_shape(system, entries, words, shown):
+    """Stops on a file whose shape the rest of the script cannot read."""
+    fault = system_fault(system)
+    if fault:
+        raise Stop('%s: %s.' % (shown('system.json'), fault))
+    if not isinstance(entries, list):
+        raise Stop('%s: it must hold a list of entries.' % shown('changes.json'))
+    names = set()
     for e in entries:
-        if not isinstance(e, dict) or not isinstance(e.get('name'), str) or not e['name']:
-            raise Stop('%s: every entry is an object with a "name".' % shown('changes.json'))
-        ok = (isinstance(e.get('files') or {}, dict) and all(isinstance(n, str) for n in (e.get('files') or {}).values())
-              and isinstance(e.get('affects') or [], list) and all(isinstance(a, str) for a in e.get('affects') or [])
-              and isinstance(e.get('interface') or {}, dict)
-              and all(isinstance(l, list) and all(isinstance(t, str) for t in l) for l in (e.get('interface') or {}).values())
-              and isinstance(e.get('boxes') or [], list) and all(isinstance(b, dict) for b in e.get('boxes') or [])
-              and all(isinstance(b.get('interface') or [], list) for b in e.get('boxes') or []))
-        if not ok:
-            raise Stop('%s: the entry "%s" is not in the shape the skill gives: "files" is an object of notes, "affects" a list of '
-                       'names, "interface" an object of lists of lines, "boxes" a list of boxes.' % (shown('changes.json'), e['name']))
+        fault = entry_fault(e)
+        if fault:
+            raise Stop('%s: %s.' % (shown('changes.json'), fault))
+        key = (e['name'], e.get('plan') or '')
+        if key in names:
+            raise Stop('%s: two %s are named "%s". Each change has its own name: rename one, or make them one entry.'
+                       % (shown('changes.json'), 'entries of the plan %s' % e['plan'] if e.get('plan') else 'entries', e['name']))
+        names.add(key)
+    if not isinstance(words, dict) or not all(isinstance(w, str) for w in words.values()):
+        raise Stop('%s: it must hold an object: a path, then its few words.' % shown('lines.json'))
 
 
 def stated(entry):
@@ -710,48 +883,96 @@ def stated(entry):
     return out
 
 
-def line_id(folder, text):
-    p = parse_line(text[2:] if text.startswith('- ') else text)
-    return p['name'] if p['type'] else folder + '#' + p['name']
-
-
-def later_wins(built, problems):
+def later_wins(built, world, problems):
     """A built line is stated once. When two built entries state the same line the later one stands: the line is taken
-    out of the earlier entry, and its name goes under that entry's `affects` unless the line is gone."""
-    first, rewritten = {}, False
+    out of the earlier entry, and its name goes under that entry's `affects` unless the line is gone. Done after the
+    fold, on the entries that were folded: `world` is the state they lead to. Says whether an entry was rewritten."""
+    said, lent, rewritten = {}, {}, False
     for e in built:
         for lines, folder, text in stated(e):
-            i = line_id(folder, text)
-            old = first.get(i)
-            if old is not None and old[0] is not e and old[2] in old[1]:
-                old[1].remove(old[2])
-                name = parse_line(text[2:] if text.startswith('- ') else text)['name']
-                if not text.startswith('- ') and not old[2].startswith('- ') \
-                        and name not in [a.rpartition(': ')[2] for a in old[0].get('affects') or []]:
-                    old[0].setdefault('affects', []).append(name)
-                problems.note('"%s" and "%s" both state %s in %s. The later one stands, and the line is taken out of the earlier '
-                              'entry. It was: %s. It is: %s.' % (old[0].get('name', '?'), e.get('name', '?'), name, folder, old[2], text))
+            gone = text.startswith('- ')
+            name = parse_line(text[2:] if gone else text)['name']
+            key = (folder, name)
+            for old, old_lines, old_text in said.get(key, []):
+                if old_text not in old_lines:
+                    continue
+                old_lines.remove(old_text)
                 rewritten = True
-            first[i] = (e, lines, text)
+                if old is e:            # the same entry said it twice: the last one stands
+                    continue
+                if not gone and not old_text.startswith('- '):
+                    lid = stated_ids(folder, text)[0]
+                    probe = {'name': '?', 'files': old.get('files') or {}, 'boxes': old.get('boxes') or [], 'affects': [name]}
+                    quiet = Problems()
+                    found = hits_of(probe, world, quiet)
+                    mine = name if not quiet.errors and lid in found else '%s: %s' % (folder, name)
+                    if lid not in hits_of(dict(probe, affects=old.get('affects') or []), world):
+                        old.setdefault('affects', []).append(mine)
+                        lent.setdefault(key, []).append((old, mine))
+                problems.note('"%s" and "%s" both state %s in %s. The later one stands, and the line is taken out of the earlier '
+                              'entry. It was: %s. It is: %s.' % (old.get('name', '?'), e.get('name', '?'), name, folder, old_text, text))
+            if gone:                    # the line is gone: no earlier entry is left pointing at it
+                for old, mine in lent.pop(key, []):
+                    if mine in old.get('affects', []):
+                        old['affects'].remove(mine)
+            said[key] = [(e, lines, text)]
     if rewritten:
         for e in built:
             if 'interface' in e:
                 e['interface'] = {f: l for f, l in e['interface'].items() if l}
-                if not e['interface']:
-                    del e['interface']
+            for b in e.get('boxes') or []:
+                if b.get('interface') == []:
+                    del b['interface']
+            for k in ('interface', 'affects'):
+                if k in e and not e[k]:
+                    del e[k]
     return rewritten
 
 
-def check_files(entry, now_files, changed, problems):
-    """A built entry's files: a `+ ` file exists, and no file is unchanged while the others differ."""
+def settled(built, at_head, raw):
+    """(the built entries the last commit holds, the ones it has unchanged). An entry is held when changes.json at the last
+    commit has it unchanged and system.json there already says what it states: folding the unchanged entries into that
+    system.json, in their order, changes none of its lines and boxes. Such an entry has nothing left to show."""
+    then = {}
+    for x in parse_json_text(raw) or [] if raw else []:
+        if isinstance(x, dict) and not x.get('plan') and isinstance(x.get('name'), str):
+            then.setdefault(x['name'], x)
+    same = [e for e in built if then.get(e['name']) == e]
+    if not same:
+        return [], []
+    try:
+        after = World(fold(at_head.sys, same, Problems(), quiet=True))
+    except (KeyError, TypeError, AttributeError):
+        return [], same
+    plain = lambda box: {k: v for k, v in box.items() if k != 'interface'}
+    out = []
+    for e in same:
+        ok = True
+        for _lines, folder, text in stated(e):
+            for i in stated_ids(folder, text, at_head, after):
+                x, y = at_head.lines.get(i), after.lines.get(i)
+                ok = ok and not differs(x, y) and (x is None) == text.startswith('- ')
+        for b in e.get('boxes') or []:
+            f = b.get('folder')
+            ok = ok and f in at_head.boxes and f in after.boxes and plain(at_head.boxes[f]) == plain(after.boxes[f])
+        if ok:
+            out.append(e)
+    return out, same
+
+
+def check_files(entry, now_files, changed, problems, visible, root):
+    """A built entry's files: a `+ ` file exists, and no file is unchanged while the others differ. `changed` is None when
+    there is nothing to compare with. A path the file view leaves out (the work folder) is only looked for on disk."""
     name, files = entry.get('name', '?'), entry.get('files') or {}
-    missing = [p for p, n in files.items() if n.startswith('+ ') and p not in now_files]
+    there = lambda p: p in now_files if visible(p) else os.path.exists(os.path.join(root, p))
+    missing = [p for p, n in files.items() if n.startswith('+ ') and not there(p)]
     for p in missing:
         problems.error('%s: %s is written as a new file ("+ ") and does not exist.' % (name, p))
     if changed is None:
         return
-    same = [p for p in files if p not in changed and p not in missing]
-    if same and len(same) < len(files):
+    seen = [p for p in files if visible(p)]
+    same = [p for p in seen if p not in changed and p not in missing]
+    if same and len(same) < len(seen):
         for p in same:
             problems.error('%s: %s does not differ from the last commit, while other files of the entry do. '
                            'Take it out of the entry, or make the change its note describes.' % (name, p))
@@ -781,6 +1002,10 @@ def differs(a, b):
 
 
 def note_loose_files(world, now_files, problems):
+    regions = world.sys.get('regions') or {}
+    if world.boxes and not any((regions.get(k) or {}).get('folder') for k in REGIONS):
+        problems.note('No region gives its folder, so a changed file beside the boxes is not noticed. Write each region\'s "folder" '
+                      'in system.json: "%s" when the code sits at the top of the repository.' % TOP)
     for key in REGIONS:
         folder = ((world.sys.get('regions') or {}).get(key) or {}).get('folder')
         if not folder:
@@ -793,18 +1018,33 @@ def note_loose_files(world, now_files, problems):
 
 def note_unseen_names(world, code, now_files, problems):
     """A listed name that appears nowhere in the files of its box."""
-    words = {}
+    words, unread = {}, {}
     for p in now_files:
         homes = [f for f in world.boxes if world.order.get(f) and world.holds(f, p)]
         if homes:
             ids = set(re.findall(r'[A-Za-z_]\w*', code.text(p)))
             for f in homes:
                 words.setdefault(f, set()).update(ids)
+                if p in code.unread:
+                    unread.setdefault(f, []).append(p)
     for folder, ids in world.order.items():
         if folder in words:
             missing = [world.lines[i]['name'] for i in ids if world.lines[i]['name'].split('.')[-1] not in words[folder]]
+            # a file too large to read as code, or not saved as UTF-8, is still searched for the name
+            missing = [n for n in missing if not any(code.has(p, n.split('.')[-1]) for p in unread.get(folder, []))]
             if missing:
                 problems.note('Listed in %s and found nowhere in its files: %s.' % (folder, some(missing)))
+
+
+def note_empty_boxes(world, now_files, problems):
+    """A box none of whose paths holds a file."""
+    have = set(now_files)
+    for p in now_files:
+        parts = p.split('/')
+        have.update('/'.join(parts[:k]) + '/' for k in range(1, len(parts)))
+    for folder in world.boxes:
+        if not any(q in have or q.rstrip('/') in have or q.rstrip('/') + '/' in have for q in world.paths(folder)):
+            problems.note('No file is in the box %s. If its code is gone, the box goes too: take it out of system.json.' % folder)
 
 
 def note_flows(system, built, world, problems):
@@ -874,18 +1114,37 @@ class Code:
     def __init__(self, root, git, commit, world, now_files):
         self.root, self.git, self.commit, self.world, self.now = root, git, commit, world, now_files
         self._text, self._defs, self._box = {}, {}, {}
+        self.unread = set()     # files not read as code: too large, or not text in UTF-8
 
     def text(self, path):
         if path not in self._text:
             full, text = os.path.join(self.root, path), ''
             try:
                 if os.path.getsize(full) <= 512 * 1024:
-                    with open(full, encoding='utf-8', errors='ignore') as f:
-                        text = f.read()
+                    with open(full, 'rb') as f:
+                        raw = f.read()
+                    if b'\0' in raw:
+                        self.unread.add(path)
+                    else:
+                        text = raw.decode('utf-8', 'ignore')
+                else:
+                    self.unread.add(path)
             except OSError:
                 pass
             self._text[path] = text
         return self._text[path]
+
+    def has(self, path, word):
+        """Whether a file left unread holds this word, searched as bytes. A file too large even for that counts as holding it."""
+        full = os.path.join(self.root, path)
+        try:
+            if os.path.getsize(full) > 64 * 1024 * 1024:
+                return True
+            with open(full, 'rb') as f:
+                raw = f.read()
+        except OSError:
+            return False
+        return any(word.encode(enc) in raw for enc in ('utf-8', 'utf-16-le', 'utf-16-be'))
 
     def defs(self, path):
         """[(name, the lines up to the next function)] for one file."""
@@ -930,12 +1189,20 @@ class Code:
         if not home or not names or not fns:
             return []
         if home not in self._box:
+            # who calls whom inside the box, read once: {a name followed by "(": the functions whose text has it}
             files = sorted(p for p in self.now if self.world.holds(home, p))[:400]
-            self._box[home] = [d for p in files for d in self.defs(p)]
+            callers = {}
+            for p in files:
+                for n, body in self.defs(p):
+                    for called in set(CALLISH.findall(body)):
+                        callers.setdefault(called, []).append(n)
+            self._box[home] = callers
+        callers = self._box[home]
         short = {n.split('.')[-1]: n for n in names}
-        out, seen, todo = [], set(), list(fns)
-        while todo and len(seen) < 400:
-            f = todo.pop(0)
+        out, seen, todo, at = [], set(), list(fns), 0
+        while at < len(todo) and len(seen) < 400:
+            f = todo[at]
+            at += 1
             if f in seen:
                 continue
             seen.add(f)
@@ -943,8 +1210,7 @@ class Code:
                 if short[f] not in out:
                     out.append(short[f])
                 continue
-            pat = re.compile(r'\b%s\s*\(' % re.escape(f))
-            todo.extend(n for n, body in self._box[home] if n not in seen and pat.search(body))
+            todo.extend(n for n in callers.get(f, []) if n not in seen)
         return out
 
     def proposal(self, paths, changed, moved):
@@ -996,6 +1262,9 @@ def build(args):
     if args.seen:
         if not git.head:
             raise Stop('There is no commit yet, so Seen has nothing to point at.')
+        if args.check:
+            print('Seen would become %s. Nothing is written with --check.' % git.short(git.head))
+            return 0
         with open(os.path.join(here, 'seen'), 'w', encoding='utf-8') as f:
             f.write(git.head + '\n')
         print('Seen is now %s.' % git.short(git.head))
@@ -1004,9 +1273,7 @@ def build(args):
     system = read_json(os.path.join(here, 'system.json'), {}, shown('system.json'))
     entries = read_json(os.path.join(here, 'changes.json'), [], shown('changes.json'))
     words = read_json(os.path.join(here, 'lines.json'), {}, shown('lines.json'))
-    if not isinstance(system, dict) or not isinstance(entries, list) or not isinstance(words, dict):
-        raise Stop('system.json must hold an object, changes.json a list, and lines.json an object.')
-    check_shape(system, entries, shown)
+    check_shape(system, entries, words, shown)
     problems = Problems()
     built = [e for e in entries if not e.get('plan')]
     plans = []
@@ -1015,10 +1282,13 @@ def build(args):
             plans.append(e['plan'])
 
     def at_commit(commit):
+        """system.json as it was at a commit, or None when it has none that can be read."""
         raw = git.show(commit, '%s/SYSTEM_VIEW/system.json' % name)
         old = parse_json_text(raw) if raw else None
+        if not isinstance(old, dict) or not old or system_fault(old):
+            return None
         try:
-            return World(old) if isinstance(old, dict) and old else None
+            return World(old)
         except (KeyError, TypeError, AttributeError):
             return None
 
@@ -1028,28 +1298,71 @@ def build(args):
     changed, moved = git.changed_since(git.head) if git.head else ({}, {})
     at_head = at_commit(git.head) if git.head else None
 
-    # ---- the built entries: each line stated once, then folded one entry at a time
-    on_disk = copy.deepcopy(built)
-    rewritten = later_wins(built, problems)
+    # ---- first the built entries the last commit holds leave: they have nothing left to show
+    dropped, unchanged, new_words = [], [], False
+    if at_head is not None:
+        dropped, unchanged = settled(built, at_head, git.show(git.head, '%s/SYSTEM_VIEW/changes.json' % name))
+    if dropped:
+        built = [e for e in built if not any(e is d for d in dropped)]
+        entries = [e for e in entries if not any(e is d for d in dropped)]
+
+        def added_by(e, p):
+            """Whether the commit that added this file also held this entry, naming the file."""
+            c = git.new_with(p)
+            raw = git.show(c, '%s/SYSTEM_VIEW/changes.json' % name) if c else None
+            then = parse_json_text(raw) if raw else None
+            return any(isinstance(x, dict) and x.get('name') == e['name'] and isinstance(x.get('files'), dict) and p in x['files']
+                       for x in (then if isinstance(then, list) else []))
+
+        for e in dropped:
+            for p, n in (e.get('files') or {}).items():
+                # the note of a file the change added becomes the file's line
+                if p in now_files and not words.get(p) and note_of(n) and (n.startswith('+ ') or added_by(e, p)):
+                    words[p], new_words = note_of(n), True
+
+    # ---- then the others are folded, one entry at a time; an entry that fails a check is left out
     base = Problems()
     World(system, base)
     for t in base.errors:
         problems.error(t)
-    folded, failed = system, []
-    for e in built:
-        mine = Problems()
-        trial = fold(folded, [e], mine)
-        hits_of(e, World(trial, mine), mine)
-        check_files(e, now_files, changed if git.head else None, mine)
-        new = [t for t in mine.errors if t not in base.errors]
-        if new:
+    passing, failed = list(built), []
+    while True:
+        folded, bad, late, notes = system, [], [], []
+        for e in passing:
+            mine = Problems()
+            trial = fold(folded, [e], mine)
+            after = World(trial, mine)
+            # the last commit already has an unchanged entry's files: nothing of them is expected to differ
+            check_files(e, now_files, changed if git.head and not any(e is u for u in unchanged) else None, mine,
+                        lambda p: bool(git.keep([p])), root)
+            new = [t for t in mine.errors if t not in base.errors]
+            if new:
+                bad.append((e, new))
+                continue
+            named = Problems()
+            hits_of(e, after, named)
+            if named.errors:
+                late.append(e)
+            notes.extend(mine.notes)
+            folded = trial
+        if not bad:
+            # a name under `affects` may be of a line a later entry brings
+            final = World(folded)
+            for e in late:
+                named = Problems()
+                hits_of(e, final, named)
+                if named.errors:
+                    bad.append((e, named.errors))
+        if not bad:
+            break
+        for e, errors in bad:
             failed.append(e)
-            for t in new:
+            for t in errors:
                 problems.error(t if t.startswith(e['name'] + ':') else '%s: %s' % (e['name'], t))
-            continue
-        for t in mine.notes:
-            problems.note(t)
-        folded = trial
+        passing = [e for e in passing if not any(e is x for x, _errors in bad)]
+    for t in notes:
+        problems.note(t)
+    rewritten = later_wins(passing, World(folded), problems)
     if head_files is not None:
         folded, gone = drop_removed(folded, head_files, now_files)
         for f in gone:
@@ -1057,37 +1370,11 @@ def build(args):
     current = World(folded)
     text = pretty(folded) + '\n'
     path = os.path.join(here, 'system.json')
-    before = open(path, encoding='utf-8').read() if os.path.exists(path) else ''
+    before = open(path, encoding='utf-8-sig').read() if os.path.exists(path) else ''
     if text != before and not args.check and system:
         with open(path, 'w', encoding='utf-8') as f:
             f.write(text)
         print('Folded the built changes into %s.' % shown('system.json'))
-
-    # ---- then dropped: a built entry goes once the last commit holds it, its files and its lines unchanged
-    dropped, new_words = [], False
-    if at_head is not None:
-        raw = git.show(git.head, '%s/SYSTEM_VIEW/changes.json' % name)
-        held = {}
-        for x in (parse_json_text(raw) if raw else None) or []:
-            if isinstance(x, dict) and not x.get('plan'):
-                held[x.get('name')] = x
-        for e, was in zip(built, on_disk):
-            if any(e is f for f in failed) or held.get(was['name']) != was or any(p in changed for p in e.get('files') or {}):
-                continue
-            if any(differs(at_head.lines.get(line_id(folder, t)), current.lines.get(line_id(folder, t))) for _l, folder, t in stated(was)):
-                continue
-            if any(b.get('folder') not in at_head.boxes or b.get('folder') not in current.boxes
-                   or any(at_head.boxes[b['folder']].get(k) != current.boxes[b['folder']].get(k) for k in ('name', 'line', 'also'))
-                   for b in e.get('boxes') or []):
-                continue
-            dropped.append(e)
-    if dropped:
-        built = [e for e in built if not any(e is d for d in dropped)]
-        entries = [e for e in entries if not any(e is d for d in dropped)]
-        for e in dropped:
-            for p, n in (e.get('files') or {}).items():
-                if p in now_files and not words.get(p) and note_of(n):
-                    words[p], new_words = note_of(n), True
     if not args.check:
         if rewritten or dropped:
             with open(os.path.join(here, 'changes.json'), 'w', encoding='utf-8') as f:
@@ -1103,7 +1390,8 @@ def build(args):
     committed = at_head
     if git.head and committed is None:
         committed = current
-        problems.note('The last commit has no %s, so nothing in the figure or the listing is marked as new.' % shown('system.json'))
+        problems.note('The last commit has no %s%s, so nothing in the figure or the listing is marked as new.' % (
+            shown('system.json'), ' that can be read' if git.show(git.head, '%s/SYSTEM_VIEW/system.json' % name) else ''))
 
     # ---- what no entry explains, and what the files and the code say beside the entries
     code = Code(root, git, git.head, current, now_files)
@@ -1134,13 +1422,14 @@ def build(args):
                               % (e['name'], ', '.join(mine) or 'nothing', ', '.join(names) or 'nothing'))
     note_loose_files(current, now_files, problems)
     note_unseen_names(current, code, now_files, problems)
+    note_empty_boxes(current, now_files, problems)
     note_flows(folded, built, current, problems)
     note_dangling(folded, current, problems)
 
     plan_worlds = []
     for pl in plans:
         mine = [e for e in entries if e.get('plan') == pl]
-        files = dict(changed_by_plan(mine, now_files, problems))
+        files = changed_by_plan(mine, now_files, problems)
         after = (now_files | set(p for p, s in files.items() if s == 'add')) - set(p for p, s in files.items() if s == 'del')
         psys, _gone = drop_removed(fold(folded, mine, problems, quiet=True), now_files, after)
         plan_worlds.append((pl, mine, World(psys), files, after))
@@ -1151,7 +1440,8 @@ def build(args):
                 problems.note('%s, of the plan %s, looks built: %s %s. Once it is built, correct the entry and delete its "plan" key.' % (
                     e['name'], pl, some(done, 3), 'is already as the plan leaves it' if len(done) == 1 else 'are already as the plan leaves them'))
             moved_on = [parse_line(t[2:] if t.startswith('- ') else t)['name'] for _l, folder, t in stated(e)
-                        if at_head is not None and differs(at_head.lines.get(line_id(folder, t)), current.lines.get(line_id(folder, t)))]
+                        if at_head is not None and any(differs(at_head.lines.get(i), current.lines.get(i))
+                                                       for i in stated_ids(folder, t, at_head, current))]
             if moved_on:
                 problems.note('%s, of the plan %s, restates %s, which %s changed since the last commit. Check the plan against the line as it is now.' % (
                     e['name'], pl, some(moved_on), 'has' if len(moved_on) == 1 else 'have'))
@@ -1159,11 +1449,12 @@ def build(args):
     # ---- starting points other than the last commit
     starts = []
     seen_path = os.path.join(here, 'seen')
-    seen = open(seen_path, encoding='utf-8').read().strip() if os.path.exists(seen_path) else ''
+    seen = open(seen_path, encoding='utf-8', errors='replace').read().strip() if os.path.exists(seen_path) else ''
     if seen and git.head:
         c = git.commit(seen)
         if c is None:
-            problems.note('Seen names %s, which is not a commit here; the Seen tab is left out.' % seen[:12])
+            problems.note('Seen names %s, which is not a commit here; the Seen tab is left out.'
+                          % ''.join(ch if ch.isprintable() else '?' for ch in seen[:12]))
         elif c != git.head:
             starts.append(('seen', 'Seen → Current', c))
     if args.start and git.head:
@@ -1217,7 +1508,7 @@ def build(args):
     for tab, label, c, w, files, ch, mv in start_worlds:
         tabs.append({'id': tab, 'label': label, 'delta': True})
         s = delta_snap(lists, w, current, files, now_files, ch, all_files, mv)
-        since = built + [e for e in entries_since(git, name, c) if (e.get('name', ''), '') not in set((b.get('name', ''), '') for b in built)]
+        since = built + [e for e in entries_since(git, name, c, problems) if (e.get('name', ''), '') not in set((b.get('name', ''), '') for b in built)]
         s['changes'] = [change(e) for e in since]
         s['hits'] = {str(change(e)): hits_of(e, current, base=w) for e in since}
         snap[tab] = s
@@ -1290,36 +1581,54 @@ def build(args):
 
 
 def changed_by_plan(mine, now_files, problems):
-    """What a plan does to the files: `+ ` adds one, `- ` removes one, anything else changes one that exists."""
+    """{path: add | chg | del}: what a plan does to the files. `+ ` adds one, `- ` removes one, anything else changes one
+    that exists or that an entry of the plan adds. Several entries may name a file: what counts is where it ends."""
     adds = set(p for e in mine for p, n in (e.get('files') or {}).items() if n.startswith('+ '))
+    there, named = {}, []
     for e in mine:
         for p, n in (e.get('files') or {}).items():
+            if p not in there:
+                there[p] = p in now_files
+                named.append(p)
             if n.startswith('+ '):
-                yield p, 'add'
+                there[p] = True
             elif n.startswith('- '):
-                yield p, 'del'
-            else:
-                if p not in now_files and p not in adds:
-                    near = sorted(q for q in now_files if os.path.dirname(q) == os.path.dirname(p))[:3]
-                    problems.error('%s: %s does not exist and its note has no "+ ". %s' % (
-                        e.get('name', '?'), p, 'Nearest: ' + ', '.join(near) + '.' if near else 'Nothing exists in that folder.'))
-                yield p, 'chg'
+                there[p] = False
+            elif p not in now_files and p not in adds:
+                near = sorted(q for q in now_files if os.path.dirname(q) == os.path.dirname(p))[:3]
+                problems.error('%s: %s does not exist and its note has no "+ ". %s' % (
+                    e.get('name', '?'), p, 'Nearest: ' + ', '.join(near) + '.' if near else 'Nothing exists in that folder.'))
+    out = {}
+    for p in named:
+        if p in now_files:
+            out[p] = 'chg' if there[p] else 'del'
+        elif there[p] or p not in adds:
+            out[p] = 'add' if there[p] else 'chg'
+    return out
 
 
-def entries_since(git, name, commit):
-    """The built entries of changes.json as it was at each commit after this one, joined by name; the latest text wins."""
+def entries_since(git, name, commit, problems):
+    """The built entries of changes.json as it was at each commit after this one, joined by name; the latest text wins.
+    An entry that cannot be read is left out."""
     found = {}
     for c in git.commits_between(commit):
         raw = git.show(c, '%s/SYSTEM_VIEW/changes.json' % name)
-        for e in parse_json_text(raw) or [] if raw else []:
-            if not isinstance(e, dict) or e.get('plan'):
+        then = parse_json_text(raw) if raw else []
+        if not isinstance(then, list):
+            problems.note('%s/SYSTEM_VIEW/changes.json at commit %s cannot be read; the changes it names are left out.' % (name, git.short(c)))
+            continue
+        for e in then:
+            if entry_fault(e):
+                problems.note('%s/SYSTEM_VIEW/changes.json at commit %s has an entry that cannot be read; it is left out.' % (name, git.short(c)))
                 continue
-            old = found.get(e.get('name', ''))
+            if e.get('plan'):
+                continue
+            old = found.get(e['name'])
             if old:
                 files = dict(old.get('files') or {})
                 files.update(e.get('files') or {})
                 e = dict(e, files=files)
-            found[e.get('name', '')] = e
+            found[e['name']] = e
     return list(found.values())
 
 
@@ -1340,6 +1649,11 @@ def main():
     ap.add_argument('--from', dest='start', metavar='COMMIT', help='also show a delta that starts at this commit')
     ap.add_argument('--work', metavar='FOLDER', help='the work folder, when it is not the nearest WORK/')
     args = ap.parse_args()
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors='replace')     # an arrow on a terminal that is not UTF-8 is shown as "?"
+        except (AttributeError, ValueError):
+            pass
     try:
         return build(args)
     except Stop as e:
