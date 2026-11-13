@@ -125,6 +125,7 @@ which commits and tags the old files before retiring them.
 ```bash
 bash tests/test_install.sh                 # installer: layout, repeat runs, --override, the system view option, migration swap
 python3 tests/test_system_view.py          # system view script, on temporary git repositories
+uv run tests/check_system_view.py          # system view pages, headless Chrome, four widths
 uv run skills/tressoir-present/present.py tests/fixtures/three-choices.slides.html
 uv run tests/check_player.py tests/fixtures/three-choices.html    # player, headless Chrome
 ```
