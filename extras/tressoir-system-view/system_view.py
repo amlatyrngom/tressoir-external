@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.7"
+# dependencies = []
+# ///
 """Builds WORK/SYSTEM_VIEW.html, the system view of a project.
 
     system_view.py            fold the built changes into system.json, print the checks, write the page
     system_view.py --check    print the checks and write nothing
     system_view.py --seen     move Seen to the last commit (done when a planned task starts)
     system_view.py --from C   also show a delta that starts at commit C
+    system_view.py --work F   use this work folder instead of the nearest WORK/
+
+An error leaves its entry out of the fold and makes the script end with 1; a note is only printed.
+A built entry is taken out of changes.json once the last commit holds it.
 
 It reads WORK/SYSTEM_VIEW/system.json (the architecture, written with the project's owner),
 changes.json (one entry per named change, written by the agent for every task), lines.json (a few

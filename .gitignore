@@ -5,3 +5,4 @@ WORK/
 tests/fixtures/*.html
 !tests/fixtures/*.slides.html
 tests/fixtures/*.mp4
+__pycache__/
