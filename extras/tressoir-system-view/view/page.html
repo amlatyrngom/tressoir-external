@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+:root { --bg:#f6f6f4; --panel:#ffffff; --fg:#1b1c1f; --muted:#70747d; --line:#c9ccd2; --accent:#2457c5; --accent-soft:#e6edfb; --add:#1d7a46; --chg:#9a5b00; --del:#a33030;
+  --entry:#2f74c0; --core:#6b4fc8; --plat:#5f6672; --ext:#0e8aa8; }
+@media (prefers-color-scheme: dark) { :root { --bg:#131417; --panel:#1b1d21; --fg:#e8e8eb; --muted:#9a9ea7; --line:#454952; --accent:#8fb0ff; --accent-soft:#1f2b47; --add:#6fd39b; --chg:#e8b25a; --del:#f0a0a0;
+  --entry:#7db4ea; --core:#a996f0; --plat:#a3a8b3; --ext:#5cc6de; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width:1500px; margin:0 auto; padding:12px 14px 40px; }
+button { font:inherit; color:inherit; cursor:pointer; background:none; border:0; padding:0; white-space:nowrap; }
+
+.ctl { display:flex; align-items:center; gap:16px; margin:0 2px 10px; flex-wrap:wrap; row-gap:6px; }
+.pick { display:inline-flex; gap:16px; align-items:baseline; }
+.pick button { color:var(--muted); padding:2px 0; border-bottom:2px solid transparent; }
+.pick button[aria-pressed="true"] { color:var(--fg); font-weight:600; border-bottom-color:var(--accent); }
+#mode { flex-wrap:wrap; row-gap:2px; }
+#mode .div { align-self:stretch; width:1px; background:var(--line); margin:0 2px; }
+.right { margin-left:auto; display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; } .counts { margin-left:6px; }
+.chip { border:1px solid var(--line); border-radius:5px; padding:2px 10px; color:var(--muted); font-size:13px; }
+.chip[aria-pressed="true"] { background:var(--accent-soft); border-color:var(--accent); color:var(--fg); }
+.chip:disabled { opacity:.4; cursor:default; }
+.counts { font-weight:600; font-variant-numeric:tabular-nums; display:flex; gap:10px; min-width:92px; justify-content:flex-end; }
+.c.add { color:var(--add); } .c.chg { color:var(--chg); } .c.del { color:var(--del); } .c.zero { opacity:.35; }
+@media (max-width:480px) { .ctl, .pick, .right { gap:10px; } .counts { min-width:0; gap:7px; } }
+
+/* moving between views: a line of names above the state tabs; a dot on a name when something under it changed */
+.vnav { display:flex; align-items:baseline; gap:6px 20px; margin:0 2px 8px; flex-wrap:wrap; font-size:15.5px; }
+.vnav button { color:var(--muted); padding:1px 0 2px; border-bottom:2px solid transparent; display:inline-flex; gap:6px; align-items:baseline; }
+.vnav button[aria-pressed="true"] { color:var(--fg); font-weight:650; border-bottom-color:var(--fg); }
+.vnav .div { align-self:stretch; width:1px; background:var(--line); }
+.dotm { width:6px; height:6px; border-radius:50%; background:var(--chg); display:inline-block; align-self:center; }
+/* a two-way switch between the parts of the system and the flows through it */
+.seg { display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; font-size:13px; align-self:center; }
+.seg button, .vnav .seg button { padding:2px 11px; border:0; display:inline-flex; gap:5px; align-items:center; color:var(--muted); } .seg button[aria-pressed="true"], .vnav .seg button[aria-pressed="true"] { background:var(--accent-soft); color:var(--fg); font-weight:600; }
+
+.pane { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:10px 12px; margin-bottom:12px; }
+@media (min-width:860px) { .cols { display:grid; grid-template-columns:minmax(0, 3fr) minmax(0, 2fr); gap:12px; align-items:start; } .cols .files { position:sticky; top:8px; max-height:calc(100vh - 16px); overflow:auto; } }
+.fhead { display:flex; justify-content:flex-end; align-items:center; margin:-2px -4px 2px 0; } .fhead .seg { margin-right:auto; font-size:12.5px; } .fhead > button { color:var(--muted); border-radius:5px; padding:3px 5px; line-height:0; } .fhead > button:hover { color:var(--fg); background:color-mix(in srgb, var(--line) 40%, transparent); }
+
+/* the figure: positions computed from the data, drawn 668 wide and scaled to fit */
+.figwrap { position:relative; overflow:hidden; } .stage { position:absolute; left:0; top:0; width:668px; transform-origin:0 0; }
+.stage svg { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
+.entry { --k:var(--entry); } .core { --k:var(--core); } .plat { --k:var(--plat); } .ext { --k:var(--ext); } .sep { --k:var(--muted); }
+.rg { position:absolute; border:1px solid color-mix(in srgb, var(--k) 45%, var(--panel)); border-radius:9px; background:color-mix(in srgb, var(--k) 7%, var(--panel)); cursor:pointer; }
+.rg b { position:absolute; white-space:nowrap; font-size:9.5px; line-height:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--k); font-weight:700; }
+.rg.sel { box-shadow:0 0 0 2px var(--k); }
+.nd { --bd:var(--line); position:absolute; display:grid; place-items:center; border:1.5px solid var(--bd); border-radius:6px; background:var(--panel); font-size:12.5px; font-weight:650; white-space:nowrap; cursor:pointer; }
+.nd.util { border-style:dashed; font-weight:500; }
+.nd.add { --bd:var(--add); background:color-mix(in srgb, var(--add) 13%, var(--panel)); color:var(--add); }
+.nd.chg { --bd:var(--chg); background:color-mix(in srgb, var(--chg) 13%, var(--panel)); color:var(--chg); }
+.nd.del { --bd:var(--del); border-style:dashed; color:var(--del); text-decoration:line-through; }
+/* NEW: a box that has its own view looks like the top sheet of a small stack */
+.nd.has { box-shadow:3.5px 3.5px 0 -1.5px var(--panel), 3.5px 3.5px 0 0 var(--bd); }
+.nd.sel { box-shadow:0 0 0 2.5px var(--fg); } .nd.has.sel { box-shadow:0 0 0 2.5px var(--fg), 5px 5px 0 -1.5px var(--panel), 5px 5px 0 0 var(--bd); }
+/* NEW: a box that lives in another view, shown at the edge of this one */
+.nd.near { border-radius:13px; font-size:11.5px; font-weight:550; }
+.sd { min-width:16px; height:16px; padding:0 4px; border-radius:8px; background:var(--fg); color:var(--panel); font:700 10px/16px system-ui, sans-serif; text-align:center; font-style:normal; }
+/* a flow drawn as lanes: one column per overview box on its path, one row per step */
+.sd { position:absolute; cursor:pointer; } .sd.sel, .sd.ref { box-shadow:0 0 0 2.5px var(--panel), 0 0 0 4.5px var(--fg); }
+.nd.pill { border-radius:11px; font-size:11.5px; font-weight:550; }
+.nd .sw, .r .sw { display:inline-block; width:8px; height:8px; border-radius:2px; background:var(--k); margin-right:6px; }
+.life { stroke:var(--line); stroke-width:1.2; stroke-dasharray:3 4; }
+.lab { position:absolute; font-size:9.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); font-weight:700; white-space:nowrap; } .lab.gone { color:var(--del); }
+.ed { color:var(--muted); }
+.ed .ln { fill:none; stroke:currentColor; stroke-width:1.3; }
+.only .nd.same { opacity:.5; } .only .nd.sel { opacity:1; } .ed polygon, .ed circle { fill:currentColor; }
+.ed .hit { fill:none; stroke:transparent; stroke-width:12; pointer-events:stroke; cursor:pointer; }
+.ed text { font:9.5px system-ui, sans-serif; fill:currentColor; paint-order:stroke; stroke:var(--panel); stroke-width:3.5px; stroke-linejoin:round; }
+.ed.con .ln { stroke-width:2.4; } .ed.sel .ln { stroke-width:3; }
+
+/* the strip under the figure */
+.strip { border-top:1px solid var(--line); margin-top:10px; padding-top:8px; min-height:132px; font-size:13.5px; }
+.strip .t { margin:0 0 6px; } .strip .t b { font-weight:650; } .strip .m { color:var(--muted); }
+.strip .dl { display:flex; gap:8px; align-items:baseline; } .strip .dl .g { flex:0 0 12px; text-align:center; font-weight:700; }
+.strip .dl.add .g { color:var(--add); } .strip .dl.chg .g { color:var(--chg); } .strip .dl.del .g { color:var(--del); }
+.strip .hint { color:var(--muted); } .strip .all .dl { border-radius:4px; cursor:default; } .strip .all .dl:hover { background:color-mix(in srgb, var(--line) 40%, transparent); }
+@media (min-width:1500px) { .strip .all { columns:2; column-gap:24px; } .strip .all .dl { break-inside:avoid; } }
+.nd.ref { box-shadow:0 0 0 2px var(--fg); opacity:1 !important; }
+.go { color:var(--accent); font-weight:600; margin-left:10px; } .strip .else { color:var(--muted); margin:6px 0 0 20px; font-size:12.5px; }
+
+/* interfaces: functions and types, under the figure. Two styles and no more: code, in a monospaced face, with the name of a line in bold; and words, small and quiet. A line is a box's name or a signature; a line that changed carries a small mark in the margin. A line opens from itself and from nothing else */
+code { font:12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; } code b { font-weight:600; }
+.api { margin:0 0 8px; } .strip .hd { font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--muted); font-weight:600; margin:10px 0 3px; }
+.fn { display:flex; gap:6px; align-items:baseline; font-size:13px; position:relative; } .fn > .g { flex:0 0 12px; text-align:center; font-weight:700; } .fn .m { color:var(--muted); } .fn > .ct { min-width:0; flex:1; }
+.ct[data-fold] { cursor:pointer; } .ct[data-fold]:hover b, button.bx:hover { color:var(--accent); }
+/* a signature that wraps hangs under itself */
+.fn > .ct > code, .tr > code { display:block; padding-left:2ch; text-indent:-2ch; overflow-wrap:anywhere; } .fn button { text-indent:0; }
+.fn.add > .g { color:var(--add); } .fn.chg > .g { color:var(--chg); } .fn.del > .g { color:var(--del); } .fn.del > .ct > code { color:var(--muted); text-decoration:line-through; }
+.pv { color:var(--muted); }
+.ed text.mono { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:9px; }
+/* everything shown at once, group by group: a box's name, in the same style whether it changed or not, then its lines */
+.abox { margin:0 0 7px; } .bn { font-weight:650; } .bn .sn { color:var(--muted); font-weight:600; margin-right:6px; font-variant-numeric:tabular-nums; }
+/* what an opened line has to say sits under it, behind a rule, and is built the same way at every depth: its words, then why it changed, then what it is made of. The words are one quiet style; the lines under them are lines like any other, with their marks in the gap beside the rule */
+.inl { margin:1px 0 5px 18px; padding-left:18px; border-left:2px solid var(--line); } .inl .inl { margin-left:0; }
+/* an opened line's words read as comments: the code's own face, all one grey, so the block under a line is one texture. What a line was is a comment too, with the old signature struck */
+.wl { color:var(--muted); font:12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; padding-left:3ch; text-indent:-3ch; overflow-wrap:anywhere; } .wl::before { content:'// '; } .wl code { font:inherit; }
+.wl s { text-decoration:line-through; }
+/* under an opened line, the change takes a little of the change colour and what the line was a little of the removed colour, so neither reads as the line's own words */
+.wl.cn { color:color-mix(in srgb, var(--chg) 62%, var(--muted)); } .wl.ws { color:color-mix(in srgb, var(--del) 62%, var(--muted)); }
+.ct > .wl { display:block; }
+.tr { display:flex; align-items:baseline; position:relative; } .tr > code { min-width:0; flex:1; }
+.inl > .fn > .g, .tr > .g2 { position:absolute; left:-16px; width:12px; text-align:center; font-weight:700; font-size:12px; }
+.tr.add, .tr.add .g2, .new { color:var(--add); } .tr.chg .g2 { color:var(--chg); } .tr.del, .old { color:var(--del); text-decoration:line-through; } .tr.del .g2 { text-decoration:none; }
+
+/* files */
+.scroll { overflow-x:auto; }
+.tree { font:13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; width:max-content; min-width:100%; }
+.r { display:flex; align-items:baseline; gap:8px; white-space:nowrap; padding-right:6px; }
+.r .g { flex:0 0 14px; text-align:center; font-weight:700; } .r .p { font:12.5px/1.5 system-ui, sans-serif; color:var(--muted); }
+.r.add .g, .r.add .n { color:var(--add); } .r.chg .g, .r.chg .n { color:var(--chg); } .r.del .g, .r.del .n { color:var(--del); } .r.del .n { text-decoration:line-through; }
+.r.add .p, .r.chg .p, .r.del .p, .r .p.what { color:var(--fg); }
+.diff .r.same { opacity:.5; } .diff .r.same.inside { opacity:1; }
+.r .dots { color:var(--muted); }
+.r.hot { background:var(--accent-soft); opacity:1 !important; }
+.r[data-pick] { cursor:pointer; border-radius:4px; } .r[data-pick]:hover { background:color-mix(in srgb, var(--line) 40%, transparent); } .r.sel { box-shadow:inset 3px 0 0 var(--fg); background:color-mix(in srgb, var(--line) 55%, transparent); opacity:1 !important; }
+.r .roll { font:600 12px/1.5 system-ui, sans-serif; display:inline-flex; gap:7px; font-variant-numeric:tabular-nums; }
+.foot { font:12px/1.5 system-ui, sans-serif; color:var(--muted); margin:6px 0 0 22px; opacity:.8; }
+
+/* one quiet line under the page: what it was built from, and anything the script had to say */
+.built { margin-top:14px; border-top:1px dashed var(--line); padding-top:8px; color:var(--muted); font-size:12px; line-height:1.5; }
+.built p { margin:0 0 2px; }
+</style>
+</head>
+<body>
+<main>
+  <div id="nav"></div>
+  <div class="ctl">
+    <span class="pick" id="mode"></span>
+    <span class="right"><button class="chip" id="only">Changes only</button><span class="counts" id="counts"></span></span>
+  </div>
+  <div class="cols">
+    <section class="pane"><div id="fig"></div><div class="strip" id="strip"></div></section>
+    <section class="pane files"><div class="fhead"><button id="fold" title="Collapse to components" aria-label="Collapse to components"><svg viewBox="0 0 16 16" width="16" height="16"><path d="M4.5 2.5 8 5.5l3.5-3M2 8h12M4.5 13.5 8 10.5l3.5 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div><div class="scroll"><div class="tree" id="tree"></div></div></section>
+  </div>
+  <div class="built" id="built"></div>
+</main>
+
+<script>
+// ============ data ============
+// Written by system_view.py. Lists hold everything any tab shows; `snap` says, per tab, what is there and how it changed:
+//   snap[tab].files[path]  add | chg | del, null when the file is not there; absent when unchanged
+//   snap[tab].boxes[folder] the same for a box
+//   snap[tab].lines[id]    { s, sig, was, line } for a function or a type, null when it is not there
+//   snap[tab].changes      the named changes of that delta (indexes into `changes`); snap[tab].hits their lines
+const S = __DATA__;
+// ============ state ============
+let openT = [], V, flow = null, back = '', mode = 'cc', only = true, hov = null, pin = null, reveal = null, closed = new Set(), LAY = null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+const mark = { add:'+', chg:'~', del:'−' }, TABS = S.tabs, SN = () => S.snap[mode], delta = () => !!TABS.find(t => t.id === mode).delta;
+S.files = S.files.map(f => ({ path:f[0], line:f[1] }));
+if (S.api) { Object.keys(S.api).forEach(k => { S.api[k] = S.api[k].map(a => ({ sig:a[0], line:a[1], id:k + '#' + a[0].slice(0, a[0].search(/[^\w.]/) < 0 ? a[0].length : a[0].search(/[^\w.]/)) })); });
+  Object.keys(S.types).forEach(k => { const a = S.types[k]; S.types[k] = { sig:a[0], line:a[1], home:a[2], name:k, id:k }; }); }
+S.views.forEach(v => { if (v.id) { const b = S.views.flatMap(w => [...w.rows.flatMap(r => r.boxes), ...(w.band ? w.band.boxes : []), ...(w.sep || [])]).find(x => x.folder === v.id); v.name = b.name; v.line = b.line; } });
+// ============ reading the snapshot of the tab being shown ============
+const own = v => [...v.rows.flatMap(r => r.boxes), ...(v.band ? v.band.boxes : []), ...(v.sep || [])];
+const regionsOf = v => [...v.rows, ...(v.band ? [v.band] : [])];
+const boxAt = folder => { for (const v of S.views) { const b = own(v).find(x => x.folder === folder); if (b) return b; } };
+const regionAt = dir => { for (const v of S.views) { const r = regionsOf(v).find(x => x.dir === dir); if (r) return r; } };
+const viewOf = folder => S.views.find(v => v.id === folder && v.id);          // the view a box opens, if it has one
+const homeOf = folder => S.views.find(v => own(v).some(b => b.folder === folder));
+const isSep = b => S.views.some(v => (v.sep || []).includes(b));
+const rootBox = folder => own(S.views[0]).find(b => folder.startsWith(b.folder));          // the overview box a folder sits in
+const slotOf = b => { const r = regionsOf(S.views[0]).find(x => x.boxes.includes(b)); return r ? r.slot : 'sep'; };
+const sf = s => s[0];                                                                         // the folder a step of a flow points at: a box at any depth
+const stepName = s => { const r = rootBox(s[0]), b = boxAt(sf(s)); return b === r ? r.name : r.name + ' › ' + b.name; };
+const under = p => S.files.filter(f => f.path.startsWith(p));
+// a file, a function or a type in the tab being shown: '', add, chg, del, or null when it is not there
+const entry = x => SN().lines[x.id];
+function fst(x){ if (x.path !== undefined) { const v = SN().files[x.path]; return v === undefined ? '' : v; } const e = entry(x); return e === undefined ? '' : e === null ? null : e.s || ''; }
+// a box in the tab being shown. It is changed exactly when a file under its paths changed; the script works that out
+function bst(b){ const v = SN().boxes[b.folder]; return v === undefined ? '' : v; }
+const bstIn = (tab, b) => S.snap[tab].boxes[b.folder];
+// the named changes of the delta being shown
+const inDelta = () => delta() ? SN().changes.map(i => S.changes[i]) : [];
+const touches = (c, folder) => Object.keys(c.files).some(p => p.startsWith(folder));
+const touching = folder => inDelta().filter(c => touches(c, folder));
+// a change reads as new when it is the one that brings a new box in, and takes none away
+function cmark(c){ const boxes = S.views.flatMap(own).filter(b => touches(c, b.folder)); if (boxes.some(b => bst(b) === 'del')) return 'chg';
+  return boxes.some(b => bst(b) === 'add' && touching(b.folder)[0] === c) ? 'add' : 'chg'; }
+const tally = p => { const t = { add:0, chg:0, del:0 }; under(p).forEach(f => { const s = fst(f); if (s) t[s]++; }); return t; };
+const notes = path => inDelta().filter(c => c.files[path]).map(c => c.files[path]);
+
+// ---- interfaces: a few functions per box, and the types that cross between boxes
+const there = x => fst(x) !== null;
+const fnsOf = folder => (S.api && S.api[folder] || []).filter(there);
+const st2 = x => delta() ? fst(x) || '' : '';
+// the text of a function or type as of the tab being shown
+const nowSig = x => (entry(x) || {}).sig || x.sig, wasOf = x => (entry(x) || {}).was || '', wordsOf = x => (entry(x) || {}).line || x.line;
+const names = text => [...new Set((text.match(/[A-Z][A-Za-z]+/g) || []).filter(n => S.types[n] && there(S.types[n])))];
+// the named changes of the delta shown that affect a function or type, whether they altered its signature or only what happens behind it. The script places a change on the closest listed line it affects
+const hitsOf = c => SN().hits[S.changes.indexOf(c)] || [];
+const causes = x => S.api ? inDelta().filter(c => hitsOf(c).includes(x.id)) : [];
+// the mark in the margin, one of three: + or − when the delta added or removed the line, ~ when a change affects it
+const markOf = x => st2(x) || (causes(x).length ? 'chg' : '');
+// a named change, as a comment: its name, then its sentence
+const note = c => `<div class="wl cn" data-change="${S.changes.indexOf(c)}">${esc(c.name)}: ${esc(c.line)}</div>`;
+// what an opened line says about its change: each named change behind it, then what the line was, as a comment with the old signature struck. A type with fields shows what it was in its rows
+function chgNote(x){ const w = wasOf(x), was = st2(x) === 'chg' && w && (!x.name || shape(w).kind === 'alias');
+  return causes(x).map(note).join('') + (was ? `<div class="wl ws">was <s>${esc(w)}</s></div>` : ''); }
+// one line of code, and what it says when open. The line itself is what opens it; nothing inside it is a button of its own
+const codeLine = (x, key, on, code, body) => { const m = markOf(x); return `<div class="fn ${m}"><span class="g">${mark[m] || ''}</span><span class="ct" data-fold="${key}"><code>${code}</code></span></div>${on ? `<div class="inl">${body}</div>` : ''}`; };
+const nameOf = (text, on) => `<button class="tn" aria-expanded="${on}"><b>${esc(text)}</b></button>`;
+// one function: its signature and nothing else. Open, it gives its words, why it changed, and the types it names, each a type line like any other
+function fnLine(f, at){ const sig = nowSig(f), on = openT.includes(at), i = sig.search(/[^\w.]/);
+  return codeLine(f, at, on, nameOf(i < 0 ? sig : sig.slice(0, i), on) + (i < 0 ? '' : esc(sig.slice(i))), on ? `<div class="wl">${esc(wordsOf(f))}</div>${chgNote(f)}${names(sig).map(n => typeRow(S.types[n], at + '>' + n, { inline:true })).join('')}` : ''); }
+// a shape read one level deep: a record of fields, a choice among variants, or another name for something
+function split(text, sep){ const out = []; let depth = 0, cur = ''; for (let i = 0; i < text.length; i++) { const c = text[i]; if ('{[('.includes(c)) depth++; else if ('}])'.includes(c)) depth--;
+  if (!depth && text.startsWith(sep, i)) { out.push(cur.trim()); cur = ''; i += sep.length - 1; } else cur += c; } out.push(cur.trim()); return out; }
+function shape(text){ text = text.trim(); if (text[0] === '{' && text.endsWith('}')) return { kind:'record', rows:split(text.slice(1, -1), ',').map(f => { const i = f.indexOf(': '); return i < 0 || /^\w+\(/.test(f) ? ['', f] : [f.slice(0, i), f.slice(i + 2)]; }) };
+  const v = split(text, ' | '); return v.length > 1 ? { kind:'union', rows:v.map(x => ['', x]) } : { kind:'alias', rows:[['', text]] }; }
+// a folded type as one line of code: the names of its fields, the heads of its variants, or what it is another name for
+function preview(t){ const sh = shape(nowSig(t)); if (sh.kind === 'record') return ' { ' + sh.rows.map(r => r[0] || r[1].replace(/\(.*$/, '()')).join(', ') + ' }'; return ' = ' + sh.rows.map(r => sh.kind === 'union' ? r[1].replace(/\s*[{(].*$/, '') : r[1]).join(' | '); }
+// the rows of a type, each marked when the delta being shown added, changed or removed it; the script would get this by comparing the two copies
+function shapeRows(t){ const cur = shape(nowSig(t)), plain = r => ({ name:r[0], html:esc(r[1]), s:'' }); if (st2(t) !== 'chg' || !wasOf(t)) return { kind:cur.kind, rows:cur.rows.map(plain) };
+  const old = shape(wasOf(t)); if (old.kind !== cur.kind) return { kind:cur.kind, rows:cur.rows.map(r => Object.assign(plain(r), { s:'chg' })) };
+  const k = r => r[0] || r[1], was = new Map(old.rows.map(r => [k(r), r[1]])), rows = cur.rows.map(r => { const o = was.get(k(r)); if (o === undefined) return Object.assign(plain(r), { s:'add' }); if (o === r[1]) return plain(r);
+    const ov = split(o, ' | '), nv = split(r[1], ' | '); return { name:r[0], s:'chg', html:nv.map(v => ov.includes(v) ? esc(v) : `<span class="new">${esc(v)}</span>`).concat(ov.filter(v => !nv.includes(v)).map(v => `<span class="old">${esc(v)}</span>`)).join(' | ') }; });
+  const now = new Set(cur.rows.map(k)); old.rows.filter(r => !now.has(k(r))).forEach(r => rows.push({ name:r[0], html:esc(r[1]), s:'del' })); return { kind:cur.kind, rows }; }
+// one type, written like a function: one line, folded to its name and the names of its fields, wherever it appears. Open, it gives its words, why it changed, and one row per field or variant. Under an opened function it says which box owns it
+function typeRow(t, key, o){ const sh = shapeRows(t), alias = sh.kind === 'alias', rec = sh.kind === 'record', open = openT.includes(key);
+  const rows = alias ? '' : sh.rows.map(r => `<div class="tr ${r.s}"><span class="g2">${mark[r.s] || ''}</span><code>${rec ? '' : '| '}${r.name ? esc(r.name) + ': ' : ''}${r.html}</code></div>`).join('');
+  return codeLine(t, key, open, nameOf(t.name, open) + (open ? (alias ? ' = ' + sh.rows[0].html : '') : `<span class="pv">${esc(preview(t))}</span>`), open ? `<div class="wl">${esc(wordsOf(t))}${o.inline ? ' · ' + esc(boxAt(t.home).name) : ''}</div>${chgNote(t)}${rows}` : ''); }
+// the types some signatures pass: the ones they name, then the ones those are made of, however deep. The same on every tab
+function reach(sigs){ const seen = new Set(names(sigs.join(' '))), walk = n => names(nowSig(S.types[n])).forEach(c => { if (!seen.has(c)) { seen.add(c); walk(c); } }); [...seen].forEach(walk); return [...seen]; }
+// a box's card: its functions, then the types they pass that it owns, wherever under its folder they live. A box that lists no function lists the types it owns. It is the same wherever the box is shown: in the listing of the view it sits in, when it is selected from the figure or the file list, and at the top of its own view
+function card(folder){ const fs = fnsOf(folder), mine = n => S.types[n].home.startsWith(folder); return { key:folder, folder, fs, ts:fs.length || !folder ? reach(fs.map(nowSig)).filter(mine) : Object.keys(S.types || {}).filter(n => mine(n) && there(S.types[n])) }; }
+// the named changes a card's lines tell, and the ones any line under a folder tells
+const toldBy = cards => new Set(cards.flatMap(c => [...c.fs, ...c.ts.map(n => S.types[n])]).flatMap(causes));
+const toldUnder = folder => new Set([...Object.keys(S.api).filter(k => k.startsWith(folder)).flatMap(fnsOf), ...Object.values(S.types).filter(t => t.home.startsWith(folder) && there(t))].flatMap(causes));
+// what changed inside a box that none of its card's lines shows: the named changes; the boxes of its view whose own lines do show them; and the ones no listed line shows at all. `bare` says files changed and no named change explains it
+function inside(c){ const b = delta() && boxAt(c.folder); if (!b) return null; const on = toldBy([c]), all = touching(c.folder), rest = all.filter(x => !on.has(x)), bare = bst(b) === 'chg' && !all.length; if (!rest.length && !bare) return null;
+  const v = viewOf(c.folder), deep = toldUnder(c.folder); return { rest, bare, kids:(v ? own(v) : []).filter(k => bst(k) !== null && rest.some(x => toldUnder(k.folder).has(x))), priv:rest.filter(x => !deep.has(x)) }; }
+// it is the last line on the card. It says where, and opens like any line to name the changes. At the top of the box's own view, where its boxes are listed just below, it keeps only what no listed line shows
+function insideLine(c, top){ const n = inside(c), cs = n && (top ? n.priv : n.rest); if (!n || (!cs.length && !n.bare)) return '';
+  const where = (top ? [] : n.kids.map(k => k.name)).concat(n.priv.length || n.bare ? ['unlisted code'] : []).join(', ') || 'unlisted code', key = c.key + '~', on = openT.includes(key);
+  return `<div class="fn chg"><span class="g">~</span><span class="ct" data-fold="${key}"><span class="wl tn" role="button" aria-expanded="${on}">internal: ${esc(where)}</span></span></div>${on ? `<div class="inl">${cs.map(note).join('') || '<div class="wl">no named change explains it</div>'}</div>` : ''}`; }
+const cardLines = (c, skip, top) => c.fs.map((f, i) => fnLine(f, c.key + '#' + i)).join('') + c.ts.filter(n => !skip || !skip.has(n)).map(n => typeRow(S.types[n], c.key + '|' + n, {})).join('') + insideLine(c, top);
+// a view, taken apart: the card of the box it is the inside of; the cards of its boxes; and the types its boxes pass among themselves that belong to none of them. A type already on the view's own card is not repeated under a box
+function viewParts(v){ const main = card(v.id), boxes = own(v).filter(b => bst(b) !== null).map(b => Object.assign(card(b.folder), { name:b.name }));
+  const loose = v.id ? reach(boxes.flatMap(c => c.fs.map(nowSig))).filter(n => S.types[n].home.startsWith(v.id) && !main.ts.includes(n) && !boxes.some(c => S.types[n].home.startsWith(c.folder))) : [];
+  return { main, top:new Set(main.ts), boxes, loose }; }
+const callOf = s => s[3] && fnsOf(s[0]).find(x => x.sig.startsWith(s[3] + '('));
+const stepGroups = f => f.steps.map((s, i) => { const fn = callOf(s); return { s, i, key:'flow' + flow + ':' + i, folder:rootBox(s[0]).folder, fs:fn ? [fn] : [], ts:[] }; });
+// the card of one box, as the strip shows it when the box is selected
+function apiBlock(folder){ if (!S.api) return ''; const ln = cardLines(card(folder)); return ln ? `<div class="api">${ln}</div>` : ''; }
+function stepApi(i){ const g = stepGroups(S.flows[flow])[i]; return `<div class="api">${fnLine(g.fs[0], g.key + '#0')}</div>`; }
+// everything shown at once, and nothing but code under plain names. A flow: its steps in order, each with its call. The overview: the card of every box. A box's own view: its card first, under the view's title, then a heading, Inside, and what is inside. One region of a view: the cards of its boxes, whole
+function wholeApi(region, other){ if (!S.api) return ''; const wrap = html => `<div class="api whole">${html || `<p class="m" style="margin:0">No interface is written ${region ? 'here' : 'for this view'}.</p>`}</div>`;
+  if (flow !== null && !region && !other) return wrap(stepGroups(S.flows[flow]).map(g => `<div class="abox"><div class="bn" data-step="${g.i}"><span class="sn">${g.i + 1}</span><button class="bx" data-stepgo="${g.i}">${esc(stepName(g.s))}</button></div>${g.fs.length ? fnLine(g.fs[0], g.key + '#0') : `<div class="fn"><span class="g"></span><span class="ct m">${esc(g.s[2])}</span></div>`}</div>`).join(''));
+  const view = region ? S.views.find(v => regionsOf(v).includes(region)) : other || V, p = viewParts(view), box = skip => c => { const ln = cardLines(c, skip); return ln ? `<div class="abox"><div class="bn"><button class="bx" data-box="${c.folder}">${esc(c.name)}</button></div>${ln}</div>` : ''; };
+  if (region) return wrap(p.boxes.filter(c => region.boxes.some(b => b.folder === c.folder)).map(box()).join(''));
+  const main = cardLines(p.main, null, true), loose = p.loose.map(n => typeRow(S.types[n], view.id + '|' + n, {})).join(''), boxes = p.boxes.map(box(p.top)).join('');
+  if (!view.id || !(main || loose)) return wrap(boxes);
+  return wrap((main ? `<div class="abox">${main}</div>` : '') + (loose || boxes ? `<p class="hd">Internals</p>${loose ? `<div class="abox">${loose}</div>` : ''}${boxes}` : '')); }
+const flip = k => { openT.includes(k) ? openT = openT.filter(x => x !== k) : openT.push(k); show(); };
+// a line of code opens and closes from itself, where it is; the name of a box or a step selects it
+document.addEventListener('click', e => { const f = e.target.closest('[data-fold]'), bx = e.target.closest('[data-box]'), sg = e.target.closest('[data-stepgo]');
+  if (bx) { e.stopPropagation(); select(bx.dataset.box); return; }
+  if (sg) { e.stopPropagation(); pin = 'step:' + sg.dataset.stepgo; reveal = folderOf(pin); if (reveal) closed.delete(reveal); show(); renderTree(); return; }
+  if (f) { e.stopPropagation(); flip(f.dataset.fold); } }, true);
+
+// ============ layout: computed from the lists, the same on every tab ============
+const W = 668, GAP = 38;
+function layout(v){ const side = (v.band && v.band.boxes.length) || (v.sep && v.sep.length), RW = side ? 568 : 660, spine = 4 + RW / 2, out = { regions:[], pos:{}, edges:[], labs:[], near:[] };
+  const near = v; let y = 8;
+  const chips = (list, yy, word) => { const cw = 112, total = list.length * cw + (list.length - 1) * 8; out.labs.push({ text:word, x:8, y:yy + 7 }); list.forEach((f, k) => out.near.push({ folder:f, pos:[Math.round(spine - total / 2 + k * (cw + 8)), yy, cw, 24] })); };
+  if (near.from) { chips(near.from.boxes, y, 'From'); out.edges.push({ id:'from', from:'outside', to:v.rows[0].dir, p:[[spine, y + 24], [spine, y + 24 + 28]], title:'Into ' + v.name, says:near.from.says }); y += 24 + 28; }
+  v.rows.forEach(r => { const slots = [];   // a planned box listed right after the box it replaces takes that box's place
+    r.boxes.forEach((b, j) => { const p = r.boxes[j - 1]; if (j && TABS.some(t => t.delta && bstIn(t.id, b) === 'add' && bstIn(t.id, p) === 'del')) slots[slots.length - 1].push(b); else slots.push([b]); });
+    const n = slots.length, iw = RW - 16; let lines = 1, per = n, bw = (iw - 8 * (n - 1)) / n;
+    while (bw < 92 && lines < 3) { lines++; per = Math.ceil(n / lines); bw = (iw - 8 * (per - 1)) / per; }
+    bw = Math.min(Math.floor(bw), 116); const gap = per > 1 ? Math.min(44, (iw - per * bw) / (per - 1)) : 0, h = 22 + lines * 30 + (lines - 1) * 8 + 8;
+    for (let l = 0; l < lines; l++) { const part = slots.slice(l * per, (l + 1) * per), c = part.length, x0 = 12 + (iw - c * bw - (c - 1) * gap) / 2;
+      part.forEach((slot, k) => slot.forEach(b => { out.pos[b.folder] = [Math.round(x0 + k * (bw + gap)), y + 22 + l * 38, bw, 30]; })); }
+    out.regions.push({ r, x:4, y, w:RW, h }); y += h + GAP; });
+  y -= GAP; const first = out.regions[0], last = out.regions[out.regions.length - 1], at = dir => out.regions.find(g => g.r.dir === dir);
+  if (v.band && v.band.boxes.length) { const to = out.regions[Math.max(0, out.regions.length - 2)], h = Math.max(to.y + to.h - first.y, 44 + v.band.boxes.length * 44 - 6);
+    out.regions.push({ r:v.band, x:584, y:first.y, w:76, h }); v.band.boxes.forEach((b, k) => { out.pos[b.folder] = [592, first.y + 44 + k * 44, 60, 30]; }); }
+  if (v.sep && v.sep.length) { out.labs.push({ text:'Separate', x:584, y:last.y + 4 }); v.sep.forEach((b, k) => { out.pos[b.folder] = [584, last.y + 22 + k * 38, 76, 30]; }); }
+  (v.links || []).forEach((l, i) => { const a = at(l.from), b = at(l.to); if (!a || !b) return;
+    if (v.band && l.from === v.band.dir) out.edges.push({ id:'l' + i, from:l.from, to:l.to, p:[[584, b.y + b.h / 2], [572, b.y + b.h / 2]], both:true, says:l.says });
+    else out.edges.push({ id:'l' + i, from:l.from, to:l.to, p:[[spine - 38, a.y + a.h], [spine - 38, b.y]], label:l.label, says:l.says, dot:true }); });
+  if (near.uses) { out.edges.push({ id:'uses', from:last.r.dir, to:'outside', p:[[spine, y], [spine, y + 28]], title:v.name + ' relies on', says:near.uses.says, dot:true }); y += 28; chips(near.uses.boxes, y, 'Uses'); y += 24; }
+  out.H = y + 8; return out; }
+
+// ============ figure ============
+const head = (a, t) => { const D = Math.hypot(t[0] - a[0], t[1] - a[1]), ux = (t[0] - a[0]) / D, uy = (t[1] - a[1]) / D; return `<polygon points="${t[0]},${t[1]} ${t[0] - ux * 6.5 - uy * 3.2},${t[1] - uy * 6.5 + ux * 3.2} ${t[0] - ux * 6.5 + uy * 3.2},${t[1] - uy * 6.5 - ux * 3.2}"/>`; };
+function edgeSvg(e){ const p = e.p, n = p.length, pts = p.map(q => q.join(',')).join(' '), l = e.l || [p[0][0] + 5, (p[0][1] + p[1][1]) / 2 + 3, 'start'];
+  return `<g class="ed" data-pick="${e.pick || 'edge:' + e.id}" data-id="${e.id}" data-from="${e.from || ''}" data-to="${e.to || ''}"><polyline class="hit" points="${pts}"/><polyline class="ln" points="${pts}"/>${head(p[n - 2], p[n - 1])}${e.both ? head(p[1], p[0]) : e.dot ? `<circle cx="${p[0][0]}" cy="${p[0][1]}" r="2.6"/>` : ''}${e.label ? `<text ${e.mono ? 'class="mono"' : ''} x="${l[0]}" y="${l[1]}" text-anchor="${l[2]}">${esc(e.label)}</text>` : ''}</g>`; }
+function stage(){ const L = LAY = layout(V);
+  const st = b => { const s = bst(b); return s === null ? null : s || 'same'; }, boxes = own(V), over = (a, c) => a[0] < c[0] + c[2] && a[0] + a[2] > c[0] && a[1] < c[1] + c[3] && a[1] + a[3] > c[1];
+  // a removed box keeps its place if nothing else needs it; otherwise it goes to a row under the figure
+  const live = boxes.filter(b => st(b) && st(b) !== 'del'), tray = boxes.filter(b => st(b) === 'del' && live.some(o => over(L.pos[b.folder], L.pos[o.folder]))), full = L.H + (tray.length ? 42 : 0);
+  const regions = L.regions.map(g => `<div class="rg ${g.r.slot}" data-pick="region:${g.r.dir}" style="left:${g.x}px;top:${g.y}px;width:${g.w}px;height:${g.h}px"><b style="left:8px;top:6px">${g.r.title}</b></div>`).join('');
+  const nd = (b, pos, extra) => { const c = st(b); if (c === null) return '';
+    return `<div class="nd ${c} ${b.shared ? 'util' : ''} ${viewOf(b.folder) && !extra ? 'has' : ''} ${extra || ''}" data-pick="node:${b.folder}" style="left:${pos[0]}px;top:${pos[1]}px;width:${pos[2]}px;height:${pos[3]}px"><span>${esc(b.name)}</span></div>`; };
+  const nodes = boxes.map(b => { const t = tray.indexOf(b); return nd(b, t < 0 ? L.pos[b.folder] : [76 + t * 124, L.H + 4, L.pos[b.folder][2], 30]); }).join('') + L.near.map(n => nd(boxAt(n.folder), n.pos, 'near')).join('')
+    + L.labs.map(l => `<div class="lab" style="left:${l.x}px;top:${l.y}px">${l.text}</div>`).join('') + (tray.length ? `<div class="lab gone" style="left:8px;top:${L.H + 13}px">Removed</div>` : '');
+  const edges = L.edges.map(edgeSvg).join('');
+  return `<div class="figwrap"><div class="stage ${only && delta() ? 'only' : ''}" style="height:${full}px">${regions}<svg viewBox="0 0 ${W} ${full}">${edges}</svg>${nodes}</div></div>`; }
+// A flow as lanes: the boxes it passes through, left to right in the overview's order and inside their region's colour; one row per step.
+function flowLanes(f){ const root = S.views[0], lanes = own(root).filter(b => f.steps.some(s => s[0].startsWith(b.folder))), n = lanes.length, lw = Math.min(116, Math.floor((W - 24 - (n - 1) * 16) / n));
+  const cx = i => Math.round(12 + lw / 2 + (n > 1 ? i * (W - 24 - lw) / (n - 1) : (W - 24 - lw) / 2)), top = 68, y = i => top + 30 + i * 40, H = y(f.steps.length - 1) + 26, L = LAY = { edges:[], segs:[] };
+  const st = b => bst(b) || 'same', groups = [], lane = s => lanes.indexOf(rootBox(s[0])), pw = Math.min(lw, 104);
+  lanes.forEach((b, i) => { const r = regionsOf(root).find(x => x.boxes.includes(b)), g = groups[groups.length - 1]; if (g && g.r === r) g.to = i; else groups.push({ r, from:i, to:i }); });
+  const regions = groups.map(g => g.r ? `<div class="rg ${g.r.slot}" data-pick="region:${g.r.dir}" style="left:${cx(g.from) - lw / 2 - 6}px;top:8px;width:${cx(g.to) - cx(g.from) + lw + 12}px;height:60px"><b style="left:8px;top:6px">${g.r.title.replace('<br>', '')}</b></div>` : '').join('');
+  let nodes = lanes.map((b, i) => `<div class="nd ${st(b)} ${viewOf(b.folder) ? 'has' : ''}" data-pick="node:${b.folder}" style="left:${cx(i) - lw / 2}px;top:30px;width:${lw}px;height:30px"><span>${esc(b.name)}</span></div>`).join('');
+  const lines = lanes.map((b, i) => { L.segs.push({ id:'life' + i, x1:cx(i), x2:cx(i), y1:top, y2:H - 8 }); return `<line class="life" x1="${cx(i)}" y1="${top}" x2="${cx(i)}" y2="${H - 8}"/>`; }).join('');
+  f.steps.forEach((s, i) => { const k = lane(s), x = cx(k), b = boxAt(sf(s)), pill = b !== lanes[k], half = pill ? pw / 2 : 8;
+    nodes += pill ? `<div class="nd pill ${st(b)}" data-pick="step:${i}" style="left:${x - pw / 2}px;top:${y(i) - 11}px;width:${pw}px;height:22px"><span>${esc(b.name)}</span></div><i class="sd" data-pick="step:${i}" style="left:${x + pw / 2 - 9}px;top:${y(i) - 20}px">${i + 1}</i>` : `<i class="sd" data-pick="step:${i}" style="left:${x - 8}px;top:${y(i) - 8}px">${i + 1}</i>`;
+    if (!i) return; const a = lane(f.steps[i - 1]), dir = k > a ? 1 : -1;
+    const call = s[3], word = call ? s[3] + '()' : s[1];
+    L.edges.push(a === k ? { id:'s' + i, pick:'step:' + i, p:[[x, y(i - 1) + 12], [x, y(i) - 12]], label:word, mono:call, l:[x + 6, (y(i - 1) + y(i)) / 2 + 3, 'start'] }
+      : { id:'s' + i, pick:'step:' + i, p:[[cx(a), y(i)], [x - dir * (half + 1), y(i)]], label:word, mono:call, dot:true, l:[(cx(a) + (a + dir === k ? x - dir * (half + 1) : cx(a + dir))) / 2, y(i) - 5, 'middle'] }); });
+  return `<div class="figwrap"><div class="stage ${only && delta() ? 'only' : ''}" style="height:${H}px">${regions}<svg viewBox="0 0 ${W} ${H}">${lines}${L.edges.map(edgeSvg).join('')}</svg>${nodes}</div></div>`; }
+// Keep text off boxes, lines and other text. Region titles pick a free corner; link labels slide along their link; a label with no free place is left out.
+function declutter(stageEl){ const rect = el => ({ x:el.offsetLeft, y:el.offsetTop, w:el.offsetWidth, h:el.offsetHeight }), boxes = [...stageEl.querySelectorAll('.nd, .sd')].map(rect), segs = [...(LAY.segs || [])], placed = [...stageEl.querySelectorAll('.lab')].map(rect);
+  LAY.edges.forEach(e => { for (let i = 0; i < e.p.length - 1; i++) segs.push({ id:e.id, x1:Math.min(e.p[i][0], e.p[i + 1][0]), x2:Math.max(e.p[i][0], e.p[i + 1][0]), y1:Math.min(e.p[i][1], e.p[i + 1][1]), y2:Math.max(e.p[i][1], e.p[i + 1][1]) }); });
+  const hit = (r, o, pad) => r.x < o.x + o.w + pad && r.x + r.w + pad > o.x && r.y < o.y + o.h + pad && r.y + r.h + pad > o.y;
+  const gap = (r, s) => Math.max(0, s.x1 - (r.x + r.w), r.x - s.x2) + Math.max(0, s.y1 - (r.y + r.h), r.y - s.y2);
+  stageEl.querySelectorAll('.nd').forEach(el => { const s = el.firstChild; let f = parseFloat(getComputedStyle(el).fontSize); while (s.offsetWidth > el.clientWidth - 8 && f > 9) { f -= .5; el.style.fontSize = f + 'px'; } });
+  stageEl.querySelectorAll('.rg').forEach(el => { const t = el.querySelector('b'), R = rect(el), w = t.offsetWidth, h = t.offsetHeight; let best = null, low = 1e9;
+    for (const [dx, dy] of [[8, 6], [R.w - w - 8, 6], [8, R.h - h - 6], [R.w - w - 8, R.h - h - 6]]) { const r = { x:R.x + dx, y:R.y + dy, w, h }, bad = boxes.filter(o => hit(r, o, 2)).length * 10 + placed.filter(o => hit(r, o, 2)).length * 10 + segs.filter(s => gap(r, s) < 2).length; if (bad < low) { low = bad; best = [dx, dy, r]; } }
+    t.style.left = best[0] + 'px'; t.style.top = best[1] + 'px'; placed.push(best[2]); });
+  const offs = [[0, 0]]; for (const d of [6, 12, 18, 24, 30, 38, 46]) offs.push([0, -d], [0, d], [d, 0], [-d, 0]);
+  stageEl.querySelectorAll('.ed text').forEach(t => { const id = t.parentNode.dataset.id, bb = t.getBBox(), x0 = +t.getAttribute('x'), y0 = +t.getAttribute('y'); let ok = null;
+    const flip = []; for (const d of [0, -8, 8, -16, 16, -26, 26]) flip.push([-(bb.width + 10), d], [bb.width + 10, d], [d, bb.height + 6], [d, -(bb.height + 6)]);
+    for (const [dx, dy] of offs.concat(flip)) { const r = { x:bb.x + dx, y:bb.y + dy, w:bb.width, h:bb.height };
+      if (r.x < 1 || r.x + r.w > W - 1 || boxes.some(o => hit(r, o, 1)) || placed.some(o => hit(r, o, 2)) || segs.some(s => gap(r, s) < 2) || !segs.some(s => s.id === id && gap(r, s) <= 7)) continue;
+      t.setAttribute('x', x0 + dx); t.setAttribute('y', y0 + dy); ok = r; break; }
+    if (ok) placed.push(ok); else t.style.display = 'none'; }); }
+function fit(){ document.querySelectorAll('.figwrap').forEach(w => { const s = Math.min(1.7, w.clientWidth / W); w.firstChild.style.transform = `scale(${s})`; w.style.height = (w.firstChild.offsetHeight + 2) * s + 'px'; }); }
+
+// ============ the strip ============
+function describe(pick){ const d = delta(), row = c => { const m = cmark(c); return `<div class="dl ${m}" data-change="${S.changes.indexOf(c)}"><span class="g">${mark[m]}</span><span><b>${esc(c.name)}</b> <span class="m">${esc(c.line)}</span></span></div>`; };
+  // the named changes that touch what is selected, under its interface: the ones its lines do not already tell
+  const list = (cs, on) => { if (!d) return ''; if (!cs.length) return `<p class="m" style="margin:0">Nothing changed here.</p>`; const rest = on ? cs.filter(c => !on.has(c)) : cs;
+    return rest.length ? (S.api ? `<p class="hd">${rest.length < cs.length ? 'Also changed here' : 'Changes'}</p>` : '') + rest.map(row).join('') : ''; };
+  // a card says in its last line what changed inside, so nothing is listed under it
+  const also = (cs, cards) => S.api ? (d && !cs.length ? list(cs) : '') : list(cs);
+  if (!pick) { const has = !!S.api;
+    // with nothing selected, the strip is one listing: the interface of what is shown. The named changes are in the file list, and behind the lines they changed
+    if (flow !== null) { const f = S.flows[flow], ft = `<p class="t"><b>${esc(f.name)}</b> <span class="m">${esc(f.line)}</span></p>`; if (has) return ft + wholeApi();
+      return ft + `<div class="all">` + f.steps.map((s, i) => { const m = d ? bst(boxAt(sf(s))) || '' : '', cs = m ? touching(sf(s)).map(c => c.name).join('; ') : '';
+        return `<div class="dl ${m}" data-step="${i}"><span class="g">${i + 1}</span><span><b>${esc(stepName(s))}</b> <span class="m">${esc(s[2])}${cs ? ' · ' + cs : ''}</span></span></div>`; }).join('') + '</div>'; }
+    const head = V.id ? `<p class="t"><b>${esc(V.name)}</b> <span class="m">${esc(V.line)}</span></p>` : '';
+    if (!d && head && has) return head + wholeApi();
+    if (!d) return (head || `<p class="t m">${esc(S.name)} ${TABS.find(t => t.id === mode).idle}</p>`) + (has ? '<p class="hd">Interface</p>' + wholeApi() : '');
+    const all = inDelta(), here = V.id ? all.filter(c => touches(c, V.id)) : all, rest = all.length - here.length, more = rest ? `<p class="else">${rest} more ${rest === 1 ? 'change' : 'changes'} elsewhere in ${esc(S.name)}</p>` : '';
+    const rows = `<div class="all">${here.map(row).join('') || '<p class="m" style="margin:0">Nothing changed in this view.</p>'}</div>`; if (!has) return head + rows + more;
+    return head + wholeApi(); }
+  const i = pick.indexOf(':'), type = pick.slice(0, i), id = pick.slice(i + 1);
+  if (type === 'node' && id === V.id && flow === null && S.api) return describe(null);
+  if (type === 'node') { const b = boxAt(id), v = viewOf(id), home = homeOf(id);
+    const fl = flow === null ? S.flows.map((f, k) => [f, k]).filter(x => x[0].steps.some(s => s[0].startsWith(id))) : [];
+    return `<p class="t"><b>${esc(b.name)}</b> <span class="m">${esc(b.line)}${home !== V ? ' · in ' + esc(home.name) : ''}</span>${v && (v !== V || flow !== null) ? `<button class="go" data-go="${id}">Open its view ›</button>` : ''}${home !== V && !v ? `<button class="go" data-show="${id}">Show it in ${esc(home.name)} ›</button>` : ''}</p>${v && v !== V ? wholeApi(null, v) : apiBlock(id)}${also(touching(id), [card(id)])}`
+      + (fl.length ? `<p class="else" style="margin-left:0">Takes part in ${fl.map(x => `<button class="go" style="margin:0 12px 0 4px" data-flow="${x[1]}">${esc(x[0].name)} ›</button>`).join('')}</p>` : ''); }
+  if (type === 'step') { const s = S.flows[flow].steps[+id], f0 = sf(s), b = boxAt(f0), r = rootBox(s[0]), v = viewOf(r.folder);
+    return `<p class="t"><b>${+id + 1} · ${esc(stepName(s))}</b> <span class="m">${esc(s[2])}</span>${v ? `<button class="go" data-go="${r.folder}" data-sel="${b !== r ? f0 : ''}">Open ${esc(r.name)} ›</button>` : ''}</p>${callOf(s) ? stepApi(+id) : `<p class="m" style="margin:0 0 6px">${esc(b.name)}: ${esc(b.line)}</p>`}${list(touching(f0), new Set(callOf(s) ? causes(callOf(s)) : []))}`; }
+  if (type === 'edge') { const e = LAY.edges.find(x => x.id === id), nm = x => regionAt(x).title.replace('<br>', ''); return `<p class="t"><b>${esc(e.title || nm(e.from) + (e.both ? ' ↔ ' : ' → ') + nm(e.to))}</b> <span class="m">${esc(e.says)}</span></p>`; }
+  if (type === 'region') { const r = regionAt(id); return `<p class="t"><b>${r.title.replace('<br>', '')}</b> <span class="m">${esc(r.line)}</span></p>${wholeApi(r)}${also(inDelta().filter(c => r.boxes.some(b => touches(c, b.folder))), r.boxes.map(b => card(b.folder)))}`; }
+  // a line of the file view
+  const mono = t => `<b style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600">${esc(t)}</b>`, short = p => p.replace(/\/$/, '').split('/').pop() + (p.endsWith('/') ? '/' : '');
+  if (boxAt(id)) return describe('node:' + id); if (regionAt(id)) return describe('region:' + id);
+  const lines = f => { const s = d ? fst(f) : ''; if (!s) return []; const cs = inDelta().filter(c => c.files[f.path]); return cs.length ? cs.map(c => ({ m:s, name:c.name, text:c.files[f.path] })) : [{ m:s, text:s === 'add' ? 'new file' : s === 'del' ? 'removed' : 'changed; no named change explains it' }]; };
+  const line = (l, who) => `<div class="dl ${l.m}"><span class="g">${mark[l.m]}</span><span>${l.name ? `<b>${esc(l.name)}</b> ` : ''}${who ? mono(who) + ' ' : ''}<span class="m">${esc(l.text)}</span></span></div>`;
+  const none = d ? `<p class="m" style="margin:0">Nothing changed here.</p>` : '', f = S.files.find(x => x.path === id);
+  if (f) return `<p class="t">${mono(short(id))} <span class="m">${esc(f.line)}</span></p>${lines(f).map(l => line(l)).join('') || none}`;
+  const all = under(id).filter(x => fst(x) !== null).flatMap(x => lines(x).map(l => Object.assign(l, { file:x.path }))), names = [...new Set(all.map(l => l.name).filter(Boolean))];
+  return `<p class="t">${mono(short(id))} <span class="m">${esc(S.dirs[id] || '')}</span></p>${inDelta().filter(c => names.includes(c.name)).map(row).join('') + all.filter(l => !l.name).map(l => line(l, short(l.file))).join('') || none}`; }
+function show(){ const pick = hov || pin, i = (pick || ':').indexOf(':'), type = (pick || ':').slice(0, i), id = (pick || ':').slice(i + 1);
+  document.querySelectorAll('.sel, .con').forEach(x => x.classList.remove('sel', 'con'));
+  if (pick) { document.querySelectorAll(`[data-pick="${pick}"]`).forEach(x => x.classList.add('sel')); if (type === 'region') document.querySelectorAll(`.ed[data-from="${id}"], .ed[data-to="${id}"]`).forEach(x => x.classList.add('con')); }
+  $('strip').className = 'strip'; $('strip').innerHTML = describe(pick); }
+// text is placed by measuring it. While the page is not displayed every measure is zero, so the placing waits (blind) and the figure is drawn again once it has a size
+let blind = false, figW = -1, blindT;
+function renderFigure(){ $('fig').innerHTML = flow !== null ? flowLanes(S.flows[flow]) : stage(); fit(); const st = [...document.querySelectorAll('.stage')]; blind = st.some(s => !s.offsetWidth); if (!blind) st.forEach(declutter);
+  clearTimeout(blindT); if (blind) blindT = setTimeout(function again(){ $('fig').offsetWidth ? renderFigure() : blindT = setTimeout(again, 250); }, 250); show(); }
+function refit(){ const w = $('fig').offsetWidth; if (w === figW && !(blind && w)) return; figW = w; blind && w ? renderFigure() : fit(); }
+const folderOf = pick => !pick ? null : /^(node|region):/.test(pick) ? pick.slice(pick.indexOf(':') + 1) : /^step:/.test(pick) && flow !== null ? sf(S.flows[flow].steps[+pick.slice(5)]) : null;
+function select(f){ pin = 'node:' + f; reveal = f; closed.delete(f); show(); renderTree(); }
+$('fig').addEventListener('click', e => { const t = e.target.closest('[data-pick]'), was = folderOf(pin);
+  pin = t && t.dataset.pick !== pin ? t.dataset.pick : null; hov = null;
+  if (was && boxAt(was)) closed.add(was); reveal = folderOf(pin); if (reveal) closed.delete(reveal);
+  show(); renderTree(); const row = document.querySelector('.r.hot'); if (row && matchMedia('(min-width:860px)').matches) row.scrollIntoView({ block:'nearest', behavior:'smooth' }); });
+$('fig').addEventListener('dblclick', e => { const t = e.target.closest('[data-pick]'), f = t && folderOf(t.dataset.pick), r = f && rootBox(f), v = f && (viewOf(f) || (r && viewOf(r.folder))); if (v && (v !== V || flow !== null)) { go(v.id); if (f !== v.id) select(f); } });
+$('strip').addEventListener('mouseover', e => { const d = e.target.closest('[data-change], [data-step]'); document.querySelectorAll('.ref').forEach(x => x.classList.remove('ref')); if (!d) return;
+  const picks = d.dataset.step ? ['step:' + d.dataset.step, 'node:' + rootBox(S.flows[flow].steps[+d.dataset.step][0]).folder] : [...own(V), ...LAY.near.map(n => boxAt(n.folder))].filter(b => touches(S.changes[+d.dataset.change], b.folder)).map(b => 'node:' + b.folder);
+  picks.forEach(p => document.querySelectorAll(`.nd[data-pick="${p}"], .sd[data-pick="${p}"]`).forEach(x => x.classList.add('ref'))); });
+$('strip').addEventListener('mouseleave', () => document.querySelectorAll('.ref').forEach(x => x.classList.remove('ref')));
+$('strip').addEventListener('click', e => { const g = e.target.closest('[data-go]'), s = e.target.closest('[data-show]'), w = e.target.closest('[data-flow]'); if (g) { const f = g.dataset.sel; go(g.dataset.go); if (f) select(f); }
+  if (s) { const f = s.dataset.show; go(homeOf(f).id); select(f); } if (w) goFlow(+w.dataset.flow); });
+
+// ============ files ============
+function entries(){ const out = [], seen = new Set();
+  S.files.forEach(f => { const parts = f.path.replace(/\/$/, '').split('/'); let parent = '';
+    for (let i = 0; i < parts.length - 1; i++) { const p = parts.slice(0, i + 1).join('/') + '/';
+      if (!seen.has(p)) { seen.add(p); const b = boxAt(p), r = regionAt(p); out.push({ path:p, parent, name:parts[i] + '/', line: r ? (r.short || r.line) : b ? b.line : S.dirs[p] || '', slot: r ? r.slot : b && isSep(b) ? 'sep' : null, box:b }); }
+      parent = p; }
+    const b = boxAt(f.path); out.push({ path:f.path, parent, name:parts[parts.length - 1] + (f.path.endsWith('/') ? '/' : ''), line:f.line, file:f, box:b, slot: b && isSep(b) ? 'sep' : null }); });
+  return out; }
+function renderTree(){ counts();
+  const all = entries(), kids = {}; all.forEach(e => (kids[e.parent] = kids[e.parent] || []).push(e));
+  const d = delta(), fold = only && d; let hidden = 0;
+  const st = e => { if (e.file) return fst(e.file); const fs = under(e.path).map(fst).filter(s => s !== null); return !fs.length ? null : fs.every(s => s === 'add') ? 'add' : fs.every(s => s === 'del') ? 'del' : ''; };
+  const inside = e => (kids[e.path] || []).some(c => { const s = st(c); return s || (s === '' && inside(c)); });
+  const rows = (parent, dep) => { let out = '';
+    for (const e of kids[parent] || []) { let s = st(e); if (s === null) continue; const ins = inside(e);
+      if (s === '' && e.box && d) s = bst(e.box) || '';
+      const rev = reveal && (e.path.startsWith(reveal) || reveal.startsWith(e.path));   // the folder asked for is shown even if nothing in it changed
+      if (fold && s === '' && !ins && !rev) { if (!kids[e.path]) hidden++; continue; }
+      const what = d && s !== 'add' && s !== 'del' && e.box ? touching(e.path).map(c => c.name).join('; ') : '';
+      const text = what || (s === 'chg' ? (notes(e.path).join('; ') || e.line) : e.line), sub = rows(e.path, dep + 1), shut = sub && closed.has(e.path) && !(reveal && reveal !== e.path && reveal.startsWith(e.path)), t = shut ? tally(e.path) : null;
+      const roll = t && d ? `<span class="roll">${['add', 'chg', 'del'].filter(x => t[x]).map(x => `<span class="c ${x}">${mark[x]}${t[x]}</span>`).join('')}</span>` : '';
+      out += `<div class="r ${s || 'same'} ${ins ? 'inside' : ''} ${sub ? 'dir' : ''} ${reveal && e.path.startsWith(reveal) ? 'hot' : ''} ${pin === 'path:' + e.path ? 'sel' : ''}" data-pick="path:${esc(e.path)}" data-id="${esc(e.path)}"><span class="g">${mark[s] || ''}</span><span class="n" style="margin-left:${dep * 16}px">${e.slot ? `<i class="sw ${e.slot}"></i>` : ''}${esc(e.name)}${shut ? '<span class="dots"> …</span>' : ''}</span>${roll}<span class="p ${what ? 'what' : ''}">${esc(text)}</span></div>` + (shut ? '' : sub); }
+    return out; };
+  $('tree').className = 'tree' + (d ? ' diff' : '');
+  $('tree').innerHTML = rows('', 0) + (hidden ? `<div class="foot">${hidden} unchanged hidden</div>` : '');
+  $('tree').querySelectorAll('.r[data-pick]').forEach(el => el.onclick = () => { const p = el.dataset.pick, dir = el.classList.contains('dir');
+    if (dir) { closed.has(el.dataset.id) ? closed.delete(el.dataset.id) : closed.add(el.dataset.id); pin = p; } else pin = pin === p ? null : p;
+    hov = null; renderTree(); show(); });
+}
+function counts(){ const tot = tally(''); $('counts').innerHTML = !delta() ? '' : ['add', 'chg', 'del'].map(x => `<span class="c ${x} ${tot[x] ? '' : 'zero'}">${mark[x]}${tot[x]}</span>`).join(''); }
+// "collapsed to components": the overview's boxes, and inside the view you are in, that view's boxes
+function folded(v){ const set = new Set(own(S.views[0]).map(b => b.folder)); S.files.forEach(f => { const top = f.path.split('/')[0] + '/'; if (f.path.includes('/') && !S.views[0].rows.some(r => r.dir.startsWith(top))) set.add(top); });
+  if (v.id) { set.delete(v.id); own(v).forEach(b => set.add(b.folder)); } return set; }
+
+// ============ moving between views ============
+function go(id){ V = S.views.find(v => v.id === id) || S.views[0]; flow = null; pin = hov = reveal = null; closed = folded(V); render(); scrollTo({ top:0 }); }
+function goFlow(i){ if (flow === null) back = V.id; V = S.views[0]; flow = i; pin = hov = reveal = null; closed = folded(V); render(); scrollTo({ top:0 }); }
+function renderNav(){ const many = S.views.length > 1, has = S.flows.length, d = delta(); if (!many && !has) { $('nav').innerHTML = ''; return; }
+  // a view's or a flow's name carries a dot when something under it changed: a file inside a view, a box on a flow's path. The switch carries none.
+  const dot = '<i class="dotm"></i>', any = p => { const t = tally(p); return d && t.add + t.chg + t.del; }, hot = f => d && f.steps.some(s => under(sf(s)).some(x => fst(x)));
+  const vb = S.views.map(v => `<button data-view="${v.id}" aria-pressed="${v === V && flow === null}">${esc(v.name)}${any(v.id) ? dot : ''}</button>`).join(''), fb = S.flows.map((f, i) => `<button data-flow="${i}" aria-pressed="${flow === i}">${esc(f.name)}${hot(f) ? dot : ''}</button>`).join('');
+  $('nav').innerHTML = !has ? `<div class="vnav">${vb}</div>`
+    : `<div class="vnav"><span class="seg"><button data-side="system" aria-pressed="${flow === null}">System</button><button data-side="flows" aria-pressed="${flow !== null}">Flows</button></span>${flow === null ? vb : fb}</div>`;
+  $('nav').querySelectorAll('[data-view]').forEach(x => x.onclick = () => go(x.dataset.view));
+  $('nav').querySelectorAll('[data-flow]').forEach(x => x.onclick = () => goFlow(+x.dataset.flow));
+  $('nav').querySelectorAll('[data-side]').forEach(x => x.onclick = () => x.dataset.side === 'flows' ? flow === null && goFlow(0) : flow !== null && go(back)); }
+
+function render(){ renderNav();
+  $('mode').innerHTML = TABS.map((x, i) => `${x.delta && i && !TABS[i - 1].delta ? '<i class="div"></i>' : ''}<button data-v="${x.id}" aria-pressed="${x.id === mode}">${x.label}</button>`).join('');
+  $('mode').querySelectorAll('button').forEach(x => x.onclick = () => { mode = x.dataset.v; pin = null; if (reveal && boxAt(reveal)) closed.add(reveal); reveal = null; render(); });
+  $('only').disabled = !delta(); $('only').setAttribute('aria-pressed', only && delta());
+  renderFigure(); renderTree(); }
+$('only').onclick = () => { only = !only; render(); };
+$('fold').onclick = () => { closed = folded(V); reveal = null; pin = null; show(); renderTree(); };
+$('built').innerHTML = (S.built || []).map(t => `<p>${esc(t)}</p>`).join('');
+let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { figW = -1; refit(); }, 60); });
+if (window.ResizeObserver) new ResizeObserver(refit).observe($('fig'));
+addEventListener('pageshow', () => { figW = -1; refit(); }); document.addEventListener('visibilitychange', () => { figW = -1; refit(); });
+mode = TABS.some(t => t.id === 'cc') ? 'cc' : TABS[0].id; V = S.views[0]; closed = folded(V); render();
+</script>
+</body>
+</html>

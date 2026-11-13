@@ -1,0 +1,60 @@
+{ "name": "Tally",
+  "regions": {
+    "entry": { "folder": "src/entry/", "line": "how you reach it",
+      "boxes": [
+        { "name": "Command line", "folder": "src/entry/cli/", "line": "add, import, report",
+          "interface": ["main(args: [Text]) → ExitCode  // runs one command"] },
+        { "name": "Local page", "folder": "src/entry/web/", "line": "browse and edit in the browser",
+          "interface": ["serve(port: Int)  // serves the page on this machine"] }
+      ] },
+    "core": { "folder": "src/core/", "line": "what Tally does",
+      "boxes": [
+        { "name": "Entries", "folder": "src/core/entries/", "line": "every expense and income",
+          "interface": [
+            "add(entry: NewEntry) → EntryId  // records one entry",
+            "search(filter: Filter) → [Entry]  // finds entries by date, category or text",
+            "Entry = { id: EntryId, date: Date, amount: Money, payee: Text, category: CategoryId? }  // one expense or income",
+            "NewEntry = { date: Date, amount: Money, payee: Text }  // an entry not yet recorded",
+            "Filter = { from: Date?, to: Date?, category: CategoryId?, text: Text? }  // which entries to find"
+          ] },
+        { "name": "Categories", "folder": "src/core/categories/", "line": "rules that sort an entry into a category",
+          "interface": ["categorize(entry: NewEntry) → CategoryId?  // applies the first rule that matches"] },
+        { "name": "Budgets", "folder": "src/core/budgets/", "line": "monthly limits and what is left",
+          "interface": [
+            "left(month: Month) → [BudgetLine]  // says what is left of each limit",
+            "BudgetLine = { category: CategoryId, limit: Money, spent: Money }  // one limit and how much of it is used"
+          ] },
+        { "name": "Reports", "folder": "src/core/reports/", "line": "totals by month and category",
+          "interface": ["monthly(month: Month) → Report  // totals one month by category"] },
+        { "name": "Store", "folder": "src/core/store/", "line": "one SQLite file",
+          "interface": [
+            "read(query: Query) → [Row]  // runs one query",
+            "write(change: Change)  // applies one change, all of it or none"
+          ] },
+        { "name": "Shared", "folder": "src/core/shared/", "line": "money and dates", "shared": true,
+          "interface": ["Money = { cents: Int }  // an amount, in the home currency", "Month = { year: Int, month: Int }  // one calendar month"] }
+      ] },
+    "external": { "folder": "src/connectors/", "line": "what Tally reads from outside",
+      "boxes": [
+        { "name": "Bank files", "folder": "src/connectors/bank-files/", "line": "CSV and OFX exports from banks",
+          "interface": ["parse(path: Path) → [NewEntry]  // reads one bank export"] }
+      ] },
+    "platform": { "boxes": [] },
+    "separate": { "boxes": [] }
+  },
+  "links": [
+    { "from": "src/entry/", "to": "src/core/", "label": "commands and edits", "says": "Both entry points call the same core." },
+    { "from": "src/core/", "to": "src/connectors/", "label": "bank exports", "says": "An import reads a bank file through Bank files." }
+  ],
+  "flows": [
+    { "name": "Importing a bank file", "line": "from the file to recorded entries",
+      "steps": [
+        { "at": "src/entry/cli/", "does": "receives the import command and the file's path" },
+        { "at": "src/connectors/bank-files/", "gets": "path", "does": "reads the export into entries", "calls": "parse" },
+        { "at": "src/core/categories/", "gets": "entries", "does": "gives each entry a category when a rule matches", "calls": "categorize" },
+        { "at": "src/core/entries/", "gets": "categorized entries", "does": "records each one", "calls": "add" },
+        { "at": "src/core/store/", "gets": "rows", "does": "writes them in one transaction", "calls": "write" },
+        { "at": "src/entry/cli/", "gets": "count", "does": "prints how many were recorded" }
+      ] }
+  ]
+}

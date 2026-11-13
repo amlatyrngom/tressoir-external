@@ -1,0 +1,33 @@
+[
+  { "name": "Duplicates skipped on import", "line": "importing the same export twice records nothing new",
+    "files": {
+      "src/core/entries/dedupe.py": "recognises an entry already recorded",
+      "src/core/entries/entries.py": "skips an entry that is already there",
+      "src/entry/cli/import_cmd.py": "prints how many were skipped",
+      "tests/test_import.py": "imports the same file twice"
+    },
+    "affects": ["main"],
+    "interface": {
+      "src/core/entries/": ["add(entry: NewEntry) → EntryId?  // records one entry; nothing when it is already there"]
+    } },
+  { "name": "Rules can test the amount", "line": "a rule may say: over 500, category Rent",
+    "files": {
+      "src/core/categories/rules.py": "a rule may compare the amount"
+    },
+    "affects": ["categorize"] },
+
+  { "name": "Amounts in any currency", "line": "an entry keeps its own currency; totals are in yours", "plan": "Several currencies",
+    "files": {
+      "src/connectors/rates/client.py": "+ fetches one day's exchange rates",
+      "src/core/shared/money.py": "an amount carries its currency",
+      "src/core/reports/monthly.py": "converts before totalling"
+    },
+    "affects": ["monthly"],
+    "interface": {
+      "src/core/shared/": ["Money = { cents: Int, currency: Text }  // an amount in its own currency"]
+    },
+    "boxes": [
+      { "name": "Exchange rates", "folder": "src/connectors/rates/", "line": "daily rates from a public service",
+        "interface": ["rate(from: Text, to: Text, on: Date) → Float  // looks up one day's rate"] }
+    ] }
+]
