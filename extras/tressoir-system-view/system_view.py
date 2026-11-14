@@ -7,7 +7,7 @@
 
     system_view.py            fold the built changes into system.json, print the checks, write the page
     system_view.py --check    print the checks and write nothing
-    system_view.py --seen     move Seen to the last commit (done when a planned task starts)
+    system_view.py --seen     move Seen to the last commit (done when the building of a plan starts)
     system_view.py --from C   also show a delta that starts at commit C
     system_view.py --flows    also print every flow, with the listed functions found on each line
     system_view.py --work F   use this work folder instead of the nearest WORK/
@@ -40,6 +40,7 @@ TITLE = {'entry': 'Entry points', 'core': 'Core application', 'external': 'Exter
          'platform': 'Platform-<br>specific'}
 INNER_SLOTS = ['entry', 'core', 'ext', 'plat']
 HEAD_KEYS = ['name', 'folder', 'line', 'plan', 'shared', 'of']
+PLAN_NAME = 24   # characters of a plan's name: it is written on the plan's tab
 # left out of the file view: the harness's links to the skills
 LINK_FOLDERS = ['.claude/skills/', '.agents/skills/']
 EMPTY_BLOB = 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391'
@@ -1358,6 +1359,12 @@ def entry_fault(e):
     name = 'the entry "%s"' % e['name']
     if e.get('plan') is not None and not isinstance(e['plan'], str):
         return '"plan" of %s must be the plan\'s name' % name
+    plan = e.get('plan') or ''
+    if plan != plan.strip() or any(not ch.isprintable() for ch in plan):
+        return '"plan" of %s must be the plan\'s name on one line, with no space before or after it' % name
+    if len(plan) > PLAN_NAME:
+        return ('"plan" of %s is %d characters long; a plan\'s name is at most %d, because it is written on the plan\'s tab. '
+                'Shorten it in every entry of the plan' % (name, len(plan), PLAN_NAME))
     ok = (isinstance(e.get('line', ''), str)
           and isinstance(e.get('files', {}), dict) and all(isinstance(n, str) for n in e.get('files', {}).values())
           and texts(e.get('affects', []))
@@ -2226,7 +2233,7 @@ def build(args):
         snap[tab] = with_flows(s, flow_delta(flows, flows_in(w), flows_now))
     for k, (pl, mine, w, files, after) in enumerate(plan_worlds):
         tab = 'plan:%d' % k
-        tabs.append({'id': tab, 'label': 'Current → Plan' if len(plan_worlds) == 1 else 'Current → Plan: ' + pl, 'delta': True})
+        tabs.append({'id': tab, 'label': 'Current → Plan: ' + pl, 'delta': True})
         s = delta_snap(lists, current, w, now_files, after, files, all_files)
         s['changes'] = [change(e) for e in mine]
         s['hits'] = {str(change(e)): hits_of(e, w, problems, base=current) for e in mine}

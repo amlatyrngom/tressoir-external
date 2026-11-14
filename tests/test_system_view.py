@@ -225,8 +225,8 @@ def marlin(tmp):
     check('marlin: one view per box that has boxes inside, after the overview',
           [v['id'] for v in data['views']] == ['', 'src/core/optimizer/', 'src/core/execution/', 'src/core/transactions/', 'src/core/storage/'],
           [v['id'] for v in data['views']])
-    check('marlin: tabs are Committed, Current, Committed → Current, Current → Plan',
-          [t['label'] for t in data['tabs']] == ['Committed', 'Current', 'Committed → Current', 'Current → Plan'], data['tabs'])
+    check('marlin: tabs are Committed, Current, Committed → Current, and the plan by its name',
+          [t['label'] for t in data['tabs']] == ['Committed', 'Current', 'Committed → Current', 'Current → Plan: Storage for analytics'], data['tabs'])
     diffs = compare_marks(data, json.loads(read(os.path.join(FIXTURES, 'marlin', 'expect.json'))))
     check('marlin: every mark on the page is the expected one', not diffs, '\n      '.join(diffs[:8]))
     cc = data['snap']['cc']['files']
@@ -1025,8 +1025,8 @@ def tally(tmp):
           read(os.path.join(root, 'WORK/SYSTEM_VIEW/system.json')) == read(os.path.join(EXAMPLES, 'tally', 'system.json')))
     check('tally: the replaced line is said', 'It was: add(entry: NewEntry) → EntryId  // records one entry.' in out, out)
     data = page_data(root)
-    check('tally: tabs are Committed, Current, Committed → Current, Current → Plan',
-          [t['label'] for t in data['tabs']] == ['Committed', 'Current', 'Committed → Current', 'Current → Plan'], data['tabs'])
+    check('tally: tabs are Committed, Current, Committed → Current, and the plan by its name',
+          [t['label'] for t in data['tabs']] == ['Committed', 'Current', 'Committed → Current', 'Current → Plan: Several currencies'], data['tabs'])
     diffs = compare(data, json.loads(read(os.path.join(FIXTURES, 'tally', 'expect.json'))))
     check('tally: every mark on the page is the expected one', not diffs, '\n      '.join(diffs[:8]))
     cc = data['snap']['cc']['files']
@@ -2021,6 +2021,21 @@ def third(tmp):
           code == 0 and 'ERROR' not in out and [f['of'] for f in flows_of(root)] == ['src/core/c#/: build', ent + ': écrire'] and 'src/core/c#/#build' in data['flows'], out + err + str(flows_of(root)))
     check('a function whose name has letters beyond ASCII is called and found like any other',
           data['flows']['src/core/c#/#build'][0][3] == [ent + '#écrire'] and data['flows'][ent + '#écrire'][0][3] == [ADD], data['flows'])
+
+    # ---- a plan's name is on its tab, so it stays short
+    root = new()
+    longest = 'Totals for a whole year!'
+    entries(root, {'name': 'Yearly', 'plan': longest, 'line': 'y', 'files': {MONTHLY_PY: 'a yearly total'}})
+    code, out, err = run(root)
+    check('one plan alone shows its name on its tab, and 24 characters are accepted',
+          code == 0 and len(longest) == 24 and [t['label'] for t in page_data(root)['tabs']][-1] == 'Current → Plan: ' + longest, out + err)
+    entries(root, {'name': 'Yearly', 'plan': longest + '!', 'line': 'y', 'files': {MONTHLY_PY: 'a yearly total'}})
+    code, out, err = run(root, '--check')
+    check('a plan\'s name over 24 characters stops the script, with the length and the limit',
+          code != 0 and 'Traceback' not in err and 'is 25 characters long' in out + err and 'at most 24' in out + err, out + err)
+    entries(root, {'name': 'Yearly', 'plan': 'Totals\nfor a year', 'line': 'y', 'files': {MONTHLY_PY: 'a yearly total'}})
+    code, out, err = run(root, '--check')
+    check('a plan\'s name on two lines stops the script', code != 0 and 'Traceback' not in err and 'on one line' in out + err, out + err)
 
 
 def main():

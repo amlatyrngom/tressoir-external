@@ -13,8 +13,9 @@ Flows only, every box, region and link of the figure (closed, then with every li
 every line of every flow opened), a card of a type, the name of a box beside a called function,
 and some files, and expects: no console error; no text of the figure on a box or on other text; no
 name larger than its box; no two regions picked by the same name; every link between regions ends
-at the edge of both; a flow opened wherever one is written; at 375 pixels, nothing wider than the
-screen. It then draws the page
+at the edge of both; a flow opened wherever one is written; every tab on one line and inside the
+screen, with plans named as long and as wide as the script accepts; at 375 pixels, nothing wider
+than the screen. It then draws the page
 inside a hidden frame, shows the frame, and expects the same figure as in a frame that was never
 hidden. Uses the Chrome already installed; downloads no browser.
 """
@@ -49,6 +50,10 @@ SWEEP = """(narrow) => { const bad = [], strip = document.getElementById('strip'
   const wide = where => { states++; if (narrow && document.documentElement.scrollWidth > innerWidth + 1) bad.push(where + ': the page is ' + document.documentElement.scrollWidth + ' pixels wide'); };
   let where = '', flows = 0, cards = 0;
   const pop = document.getElementById('fcpop');
+  // every tab is one line and inside the screen, whatever a plan is called
+  document.querySelectorAll('#mode button').forEach(b => { const r = R(b), line = parseFloat(getComputedStyle(b).lineHeight) || 1.5 * parseFloat(getComputedStyle(b).fontSize);
+    if (r.left < -1 || r.right > innerWidth + 1) bad.push('the tab "' + b.textContent + '" does not fit in the screen');
+    if (r.height > 1.5 * line + 8) bad.push('the tab "' + b.textContent + '" takes more than one line'); });
   try {
     for (const t of TABS) { mode = t.id;
       for (const fo of S.api ? [true, false] : [true]) { FONLY = fo;
@@ -100,6 +105,12 @@ def build(tmp):
     system['links'] += [{'from': 'entry', 'to': 'external', 'label': 'addresses'}, {'from': 'external', 'to': 'core', 'label': 'pages back'},
                         {'from': 'core', 'to': 'platform', 'label': 'notices'}]
     path.write_text(json.dumps(system, ensure_ascii=False), encoding='utf-8')
+    # and two plans whose names are as long and as wide as the script accepts
+    path = Path(root) / 'WORK' / 'SYSTEM_VIEW' / 'changes.json'
+    file = sorted(p for p in json.loads((Path(root) / 'WORK' / 'SYSTEM_VIEW' / 'lines.json').read_text(encoding='utf-8')))[0]
+    path.write_text(json.dumps(json.loads(path.read_text(encoding='utf-8')) + [
+        {'name': 'Wide', 'plan': 'W' * 24, 'line': 'the widest name', 'files': {file: 'something'}},
+        {'name': 'Long', 'plan': 'Warm Wide Window Margins', 'line': 'a long name', 'files': {file: 'something else'}}], ensure_ascii=False), encoding='utf-8')
     code, out, err = kit.run(root)
     if code != 0:
         sys.exit('could not build the page of unusual links:\n%s%s' % (out, err))

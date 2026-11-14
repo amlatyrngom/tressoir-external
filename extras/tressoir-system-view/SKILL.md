@@ -70,7 +70,7 @@ The same shape for work that is planned and work that is done.
 | `flows` | a flow as it is now, whole | when the steps of a function that has a flow changed |
 | `moves` | a box's old path, then its new one | when its code moved and it is otherwise the same box |
 | `renames` | a listed function, then its new name | when it was renamed and is otherwise the same function |
-| `plan` | the plan's name | only while it is not built |
+| `plan` | the plan's name, 24 characters at most: it is written on the plan's tab | only while it is not built |
 
 An entry restates whatever is no longer true, and nothing else:
 
@@ -140,10 +140,12 @@ A change deep in private code must show on the nearest function I can see.
 
 ## The routine
 
-1. **A planned task starts**: I asked for a plan, to be built now or later. Run the script with
-   `--seen`, write one entry per plan step, each with `"plan": "<plan name>"`, and run the script.
-2. **As each step is built.** Correct its entry to what was built (file names, signatures), then
-   delete its `plan` key. There is no other command for building a plan.
+1. **A plan is written**: I asked for a plan. Write one entry per plan step, each with
+   `"plan": "<plan name>"`, and run the script. Seen stays where it is.
+2. **Building a plan starts**, in the same task or a later one. Before the first step is built,
+   run the script with `--seen`, unless I said to keep Seen. Then, as each step is built, correct
+   its entry to what was built (file names, signatures) and delete its `plan` key. There is no
+   other command for building a plan.
 3. **A task ends**, planned or not. Run the script. Answer every error; read every note; run again
    until no error is left, except one that is architecture (see below).
 4. **Then commit**, code and `WORK/SYSTEM_VIEW/` together. If the figure, a flow or a listed line
@@ -165,9 +167,10 @@ built entry, the next run takes it out of `changes.json` by itself: a built and 
 reads as if it was always there. "Holds" means the commit has the entry unchanged and its
 `system.json` already says what the entry states, so an entry committed before the script ran
 stays for one more commit. Work that goes on in the same files after that commit needs an entry
-of its own. Seen is the last commit that existed when I launched the current planned task, so
-that its tab shows what the task has done since. Move it only when a planned task starts, when
-the first figure is committed, or when I say so.
+of its own. Seen is the last commit that existed when the building of the current plan
+started, so that its tab shows what the task has done since. Move it only when the building of
+a plan starts, when the first figure is committed, or when I say so. A plan that is only
+written does not move it, and when I say to keep Seen, it stays.
 
 A file in a shape the script cannot read (a list where an object belongs, text where a list
 belongs, a file not saved as UTF-8) stops it with one sentence that says what to write. Nothing
@@ -189,7 +192,7 @@ What the script prints:
 | a call stated by hand in a sketch that names no listed function | a call in a sketch into a box that does not list it, or that two boxes answer to |
 | `moves` to another region or row, onto or into another box, or of a box with boxes inside | a sketch that began with its `def` line (the script takes it out); a sketch over 40 lines |
 | `renames` of a function no box lists, or to a name its box already lists | two entries state the same flow: the later one stands |
-| a box three levels deep, written or planned | an earlier entry named a box at the path a later entry moved it from: the script corrects the entry |
+| a box three levels deep, written or planned; a plan's name over 24 characters (this one stops the script) | an earlier entry named a box at the path a later entry moved it from: the script corrects the entry |
 | | a new folder with no words in `lines.json`, beside folders that have some |
 | | no box written yet |
 
