@@ -193,7 +193,7 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 const mark = { add:'+', chg:'~', del:'−' }, TABS = S.tabs, SN = () => S.snap[mode], delta = () => !!TABS.find(t => t.id === mode).delta;
 S.files = S.files.map(f => ({ path:f[0], line:f[1] }));
-if (S.api) { Object.keys(S.api).forEach(k => { S.api[k] = S.api[k].map(a => ({ sig:a[0], line:a[1], id:k + '#' + a[0].slice(0, a[0].search(/[^\w.]/) < 0 ? a[0].length : a[0].search(/[^\w.]/)) })); });
+if (S.api) { Object.keys(S.api).forEach(k => { S.api[k] = S.api[k].map(a => ({ sig:a[0], line:a[1], id:k + '#' + a[0].slice(0, a[0].search(/[^\p{L}\p{N}_.]/u) < 0 ? a[0].length : a[0].search(/[^\p{L}\p{N}_.]/u)) })); });
   Object.keys(S.types).forEach(k => { const a = S.types[k]; S.types[k] = { sig:a[0], line:a[1], home:a[2], name:k, id:k }; }); }
 S.views.forEach(v => { if (v.id) { const b = S.views.flatMap(w => [...w.rows.flatMap(r => r.boxes), ...(w.band ? w.band.boxes : []), ...(w.sep || [])]).find(x => x.folder === v.id); v.name = b.name; v.line = b.line; } });
 // ============ reading the snapshot of the tab being shown ============
@@ -243,7 +243,7 @@ const note = c => `<div class="wl cn" data-change="${S.changes.indexOf(c)}"># ch
 function chgNote(x){ const w = wasOf(x), was = st2(x) === 'chg' && w && (!x.name || shape(w).kind === 'alias');
   return causes(x).map(note).join('') + (was ? `<div class="wl ws"># was <s>${esc(w)}</s></div>` : ''); }
 // one line of code, and what it says when open. The line itself is what opens it; nothing inside it is a button of its own
-const codeLine = (x, key, on, code, body) => { const m = markOf(x); return `<div class="fn ${m}"><span class="g">${mark[m] || ''}</span><span class="ct" data-fold="${key}"><code>${code}</code></span></div>${on ? `<div class="inl">${body}</div>` : ''}`; };
+const codeLine = (x, key, on, code, body) => { const m = markOf(x); return `<div class="fn ${m}"><span class="g">${mark[m] || ''}</span><span class="ct" data-fold="${esc(key)}"><code>${code}</code></span></div>${on ? `<div class="inl">${body}</div>` : ''}`; };
 // one function: its signature, as a def. Open, it gives its words as a docstring, and why it changed. A function that has a flow opens into the flow instead
 function fnLine(f, at){ const host = flowHost(f, at); if (host) return host; const sig = nowSig(f), on = openT.includes(at);
   return codeLine(f, at, on, fnCode(f, sig), on ? `<div class="wl">${docOf(wordsOf(f))}</div>${chgNote(f)}` : ''); }
@@ -275,9 +275,9 @@ function inside(c){ const b = delta() && boxAt(c.folder); if (!b) return null; c
 // it is the last line on the card. It says where, and opens like any line to name the changes. At the top of the box's own view, where its boxes are listed just below, it keeps only what no listed line shows
 function insideLine(c, top){ const n = inside(c), cs = n && (top ? n.priv : n.rest); if (!n || (!cs.length && !n.bare)) return '';
   const where = (top ? [] : n.kids.map(k => k.name)).concat(n.priv.length || n.bare ? ['unlisted code'] : []).join(', ') || 'unlisted code', key = c.key + '~', on = openT.includes(key);
-  return `<div class="fn chg"><span class="g">~</span><span class="ct" data-fold="${key}"><span class="wl tn" role="button" aria-expanded="${on}"># internal: ${esc(where)}</span></span></div>${on ? `<div class="inl">${cs.map(note).join('') || '<div class="wl"># no named change explains it</div>'}</div>` : ''}`; }
+  return `<div class="fn chg"><span class="g">~</span><span class="ct" data-fold="${esc(key)}"><span class="wl tn" role="button" aria-expanded="${on}"># internal: ${esc(where)}</span></span></div>${on ? `<div class="inl">${cs.map(note).join('') || '<div class="wl"># no named change explains it</div>'}</div>` : ''}`; }
 const cardLines = (c, skip, top) => fnList(c, c.ts.filter(n => !skip || !skip.has(n)).map(n => typeRow(S.types[n], c.key + '|' + n, {})).join('')) + insideLine(c, top);
-const flip = k => { openT.includes(k) ? openT = openT.filter(x => x !== k) : openT.push(k); show(); };
+const flip = k => { hide(); openT.includes(k) ? openT = openT.filter(x => x !== k) : openT.push(k); show(); };
 // a line of code opens and closes from itself, where it is. A type named in it and the name of a box beside it are links of their own
 document.addEventListener('click', e => { if (e.target.closest('.ty[data-ty], .fbx')) return; const f = e.target.closest('[data-fold]'); if (f) { e.stopPropagation(); flip(f.dataset.fold); } }, true);
 
@@ -316,9 +316,9 @@ function stage(){ const L = LAY = layout(V);
   const st = b => { const s = bst(b); return s === null ? null : s || 'same'; }, boxes = own(V), over = (a, c) => a[0] < c[0] + c[2] && a[0] + a[2] > c[0] && a[1] < c[1] + c[3] && a[1] + a[3] > c[1];
   // a removed box keeps its place if nothing else needs it; otherwise it goes to a row under the figure
   const live = boxes.filter(b => st(b) && st(b) !== 'del'), tray = boxes.filter(b => st(b) === 'del' && live.some(o => over(L.pos[b.folder], L.pos[o.folder]))), full = L.H + (tray.length ? 42 : 0);
-  const regions = L.regions.map(g => `<div class="rg ${g.r.slot}" data-pick="region:${g.r.id}" style="left:${g.x}px;top:${g.y}px;width:${g.w}px;height:${g.h}px"><b style="left:8px;top:6px">${g.r.title}</b></div>`).join('');
+  const regions = L.regions.map(g => `<div class="rg ${g.r.slot}" data-pick="region:${g.r.id}" style="left:${g.x}px;top:${g.y}px;width:${g.w}px;height:${g.h}px"><b style="left:8px;top:6px">${esc(g.r.title).replace(/&lt;br>/g, '<br>')}</b></div>`).join('');
   const nd = (b, pos, extra) => { const c = st(b); if (c === null) return '';
-    return `<div class="nd ${c} ${b.shared ? 'util' : ''} ${viewOf(b.folder) && !extra ? 'has' : ''} ${pos[2] < 80 ? 'tight' : ''} ${extra || ''}" data-pick="node:${b.folder}" style="left:${pos[0]}px;top:${pos[1]}px;width:${pos[2]}px;height:${pos[3]}px"><span>${esc(b.name)}</span></div>`; };
+    return `<div class="nd ${c} ${b.shared ? 'util' : ''} ${viewOf(b.folder) && !extra ? 'has' : ''} ${pos[2] < 80 ? 'tight' : ''} ${extra || ''}" data-pick="node:${esc(b.folder)}" style="left:${pos[0]}px;top:${pos[1]}px;width:${pos[2]}px;height:${pos[3]}px"><span>${esc(b.name)}</span></div>`; };
   const nodes = boxes.map(b => { const t = tray.indexOf(b); return nd(b, t < 0 ? L.pos[b.folder] : [76 + t * 124, L.H + 4, L.pos[b.folder][2], 30]); }).join('') + L.near.map(n => nd(boxAt(n.folder), n.pos, 'near')).join('')
     + L.labs.map(l => `<div class="lab" style="left:${l.x}px;top:${l.y}px">${l.text}</div>`).join('') + (tray.length ? `<div class="lab gone" style="left:8px;top:${L.H + 13}px">Removed</div>` : '');
   const edges = L.edges.map(edgeSvg).join('');
@@ -351,9 +351,9 @@ function describe(pick){ const d = delta(), row = c => { const m = cmark(c); ret
     return head + `<div class="all">${here.map(row).join('') || '<p class="m" style="margin:0">Nothing changed in this view.</p>'}</div>` + (rest ? `<p class="else">${rest} more ${rest === 1 ? 'change' : 'changes'} elsewhere in ${esc(S.name)}</p>` : ''); }
   const i = pick.indexOf(':'), type = pick.slice(0, i), id = pick.slice(i + 1);
   if (type === 'node') { const b = boxAt(id), v = viewOf(id), home = homeOf(id);
-    return `<p class="t"><b>${esc(b.name)}</b> <span class="m">${esc(b.line)}${home !== V ? ' · in ' + esc(home.name) : ''}</span>${v && v !== V ? `<button class="go" data-go="${id}">Open its view ›</button>` : ''}${home !== V && !v ? `<button class="go" data-show="${id}">Show it in ${esc(home.name)} ›</button>` : ''}</p>${list(touching(id))}`; }
+    return `<p class="t"><b>${esc(b.name)}</b> <span class="m">${esc(b.line)}${home !== V ? ' · in ' + esc(home.name) : ''}</span>${v && v !== V ? `<button class="go" data-go="${esc(id)}">Open its view ›</button>` : ''}${home !== V && !v ? `<button class="go" data-show="${esc(id)}">Show it in ${esc(home.name)} ›</button>` : ''}</p>${list(touching(id))}`; }
   if (type === 'edge') { const e = LAY.edges.find(x => x.id === id), nm = x => regionAt(x).title.replace('<br>', ''); return `<p class="t"><b>${esc(e.title || nm(e.from) + (e.both ? ' ↔ ' : ' → ') + nm(e.to))}</b> <span class="m">${esc(e.says)}</span></p>`; }
-  if (type === 'region') { const r = regionAt(id); return `<p class="t"><b>${r.title.replace('<br>', '')}</b> <span class="m">${esc(r.line)}</span></p>${list(inDelta().filter(c => r.boxes.some(b => touches(c, b.folder))))}`; }
+  if (type === 'region') { const r = regionAt(id); return `<p class="t"><b>${esc(r.title.replace('<br>', ''))}</b> <span class="m">${esc(r.line)}</span></p>${list(inDelta().filter(c => r.boxes.some(b => touches(c, b.folder))))}`; }
   // a line of the file view
   const mono = t => `<b style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600">${esc(t)}</b>`;
   if (boxAt(id)) return describe('node:' + id); if (regionOfDir(id)) return describe('region:' + regionOfDir(id).id);
@@ -365,7 +365,7 @@ function describe(pick){ const d = delta(), row = c => { const m = cmark(c); ret
   return `<p class="t">${mono(short(id))} <span class="m">${esc(S.dirs[id] || '')}</span></p>${inDelta().filter(c => names.includes(c.name)).map(row).join('') + all.filter(l => !l.name).map(l => line(l, short(l.file))).join('') || none}`; }
 function show(){ const pick = hov || pin, i = (pick || ':').indexOf(':'), type = (pick || ':').slice(0, i), id = (pick || ':').slice(i + 1);
   document.querySelectorAll('.sel, .con').forEach(x => x.classList.remove('sel', 'con'));
-  if (pick) { document.querySelectorAll(`[data-pick="${pick}"]`).forEach(x => x.classList.add('sel')); if (type === 'region') document.querySelectorAll(`.ed[data-from="${id}"], .ed[data-to="${id}"]`).forEach(x => x.classList.add('con')); }
+  if (pick) { document.querySelectorAll(`[data-pick="${CSS.escape(pick)}"]`).forEach(x => x.classList.add('sel')); if (type === 'region') document.querySelectorAll(`.ed[data-from="${id}"], .ed[data-to="${id}"]`).forEach(x => x.classList.add('con')); }
   $('strip').className = 'strip'; listing(pick); }
 // text is placed by measuring it. While the page is not displayed every measure is zero, so the placing waits (blind) and the figure is drawn again once it has a size
 let blind = false, figW = -1, blindT;
@@ -425,12 +425,12 @@ function folded(v){ const set = new Set(own(S.views[0]).map(b => b.folder)); S.f
 function go(id){ V = S.views.find(v => v.id === id) || S.views[0]; pin = hov = reveal = null; closed = folded(V); render(); scrollTo({ top:0 }); }
 // a view's name carries a dot when a file inside it changed
 function renderNav(){ const d = delta(), dot = '<i class="dotm"></i>', any = p => { const t = tally(p); return d && t.add + t.chg + t.del; };
-  $('nav').innerHTML = S.views.length < 2 ? '' : `<div class="vnav">${S.views.map(v => `<button data-view="${v.id}" aria-pressed="${v === V}">${esc(v.name)}${any(v.id) ? dot : ''}</button>`).join('')}</div>`;
+  $('nav').innerHTML = S.views.length < 2 ? '' : `<div class="vnav">${S.views.map(v => `<button data-view="${esc(v.id)}" aria-pressed="${v === V}">${esc(v.name)}${any(v.id) ? dot : ''}</button>`).join('')}</div>`;
   $('nav').querySelectorAll('[data-view]').forEach(x => x.onclick = () => go(x.dataset.view)); }
 
 function render(){ renderNav();
-  $('mode').innerHTML = TABS.map((x, i) => `${x.delta && i && !TABS[i - 1].delta ? '<i class="div"></i>' : ''}<button data-v="${x.id}" aria-pressed="${x.id === mode}">${x.label}</button>`).join('');
-  $('mode').querySelectorAll('button').forEach(x => x.onclick = () => { mode = x.dataset.v; pin = null; if (reveal && boxAt(reveal)) closed.add(reveal); reveal = null; render(); });
+  $('mode').innerHTML = TABS.map((x, i) => `${x.delta && i && !TABS[i - 1].delta ? '<i class="div"></i>' : ''}<button data-v="${x.id}" aria-pressed="${x.id === mode}">${esc(x.label)}</button>`).join('');
+  $('mode').querySelectorAll('button').forEach(x => x.onclick = () => { mode = x.dataset.v; pin = null; openF.clear(); if (reveal && boxAt(reveal)) closed.add(reveal); reveal = null; render(); });
   $('only').disabled = !delta(); $('only').setAttribute('aria-pressed', only && delta());
   renderFigure(); renderTree(); }
 $('only').onclick = () => { only = !only; render(); };
@@ -448,7 +448,7 @@ addEventListener('pageshow', () => { figW = -1; refit(); }); document.addEventLi
 let FONLY = true, SHOWN = [], lit = null, popEl = null, lastPick = null, calmKey = null; const openF = new Set();
 S.flows = S.flows || {};
 const KW = new Set('async await def return if else elif for in not and or with as try except raise yield while is parallel class module'.split(' ')), CONST = new Set(['None', 'True', 'False']);
-const TOK = /(#.*$)|([rbfRBF]{0,2}(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'))|(\b\d+(?:\.\d+)?\b)|([A-Za-z_]\w*)|(\s+)|(.)/g;
+const TOK = /(#.*$)|([rbfRBF]{0,2}(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'))|(\b\d+(?:\.\d+)?\b)|([\p{L}_][\p{L}\p{N}_]*)|(\s+)|(.)/gu;
 const uniq = a => [...new Set(a)];
 // a module's name as code: Write-ahead log is WriteAheadLog
 const camel = n => { const s = n.split(/[^A-Za-z0-9]+/).filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(''); return /^[A-Za-z]/.test(s) ? s : '_' + s; };
@@ -474,8 +474,8 @@ const pill = (folder, fl) => { const b = boxAt(folder); return b ? `<span class=
 
 // ---- flows
 const flowLines = id => { const t = (SN().flows || {})[id]; return t === undefined ? S.flows[id] : t; };
-const fnById = id => (S.api[id.slice(0, id.indexOf('#'))] || []).find(f => f.id === id);
-const fnName = f => f.id.slice(f.id.indexOf('#') + 1), homeOfFn = f => f.id.slice(0, f.id.indexOf('#'));
+const fnById = id => (S.api[id.slice(0, id.lastIndexOf('#'))] || []).find(f => f.id === id);
+const fnName = f => f.id.slice(f.id.lastIndexOf('#') + 1), homeOfFn = f => f.id.slice(0, f.id.lastIndexOf('#'));
 // the flow of a function, in the tab being shown: its id, or nothing
 const flowOf = f => there(f) && flowLines(f.id) ? f.id : null;
 const ICO = '<svg class="fico" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3.5v9h6M4 7.5h6"/><circle cx="4" cy="3" r="1.7"/><circle cx="12" cy="7.5" r="1.7"/><circle cx="12" cy="12.5" r="1.7"/></svg>';
@@ -486,7 +486,7 @@ function flowHtml(f, at){ const lines = flowLines(f.id), mine = causes(f), calls
   const beneath = uniq(lines.flatMap(l => calls(l).flatMap(causes))).filter(c => !mine.includes(c));
   const top = (c, own) => { const k = S.changes.indexOf(c), where = uniq(lines.flatMap(calls).filter(g => causes(g).includes(c)).map(fnName)).join(', ');
     return `<div class="fl cl ${lit === k ? 'on' : ''}" data-chg="${k}"><span class="fgut"></span><code class="tx chgs" style="padding-left:calc(var(--lv) + 2ch);text-indent:-2ch"># ${own ? 'changed: ' + esc(c.name) + ': ' + esc(c.line) : 'changed beneath: ' + esc(c.name) + ' (' + esc(where) + ')'}</code></div>`; };
-  let html = `<div class="row"><div class="fl fhd" data-fold="${at}"><span class="fgut"></span><code class="tx" style="padding-left:2ch;text-indent:-2ch">${hl('def ' + pySig(nowSig(f)) + ':')}</code>${ICO}</div>`
+  let html = `<div class="row"><div class="fl fhd" data-fold="${esc(at)}"><span class="fgut"></span><code class="tx" style="padding-left:2ch;text-indent:-2ch">${hl('def ' + pySig(nowSig(f)) + ':')}</code>${ICO}</div>`
     + `<div class="fl"><span class="fgut"></span><code class="tx doc">${docOf(wordsOf(f))}</code></div>${mine.map(c => top(c, true)).join('')}${beneath.map(c => top(c, false)).join('')}</div>`;
   lines.forEach((l, i) => { const lv = l[0] + 1, st = l[4] || '', fns = st === 'del' ? [] : calls(l), ch = uniq(fns.flatMap(causes)), key = f.id + '/' + i, can = !!(l[2] || fns.length), on = can && openF.has(key);
     const body = !on ? '' : `<div class="x" style="padding-left:calc(var(--gut) + ${lv} * var(--lv))">${l[2] ? `<div class="why">${esc(l[2])}</div>` : ''}` + fns.map(g => { const fl = g.id !== f.id && flowOf(g);
@@ -515,7 +515,7 @@ function say(el, html){ pop.innerHTML = html; pop.hidden = false; popEl = el; co
 const hide = () => { pop.hidden = true; popEl = null; };
 
 // ---- a module's lines, in parts, each under a comment: the functions that have a flow, the other functions, the types. A part alone needs no comment, except flows
-function fnList(c, types){ const all = c.fs.map((f, i) => [f, c.key + '#' + i]), line = x => fnLine(x[0], x[1]), flows = all.filter(x => flowOf(x[0])), rest = all.filter(x => !flowOf(x[0]));
+function fnList(c, types){ const all = c.fs.map(f => [f, c.key + '#' + fnName(f)]), line = x => fnLine(x[0], x[1]), flows = all.filter(x => flowOf(x[0])), rest = all.filter(x => !flowOf(x[0]));
   const many = (flows.length ? 1 : 0) + (rest.length ? 1 : 0) + (types ? 1 : 0) > 1, note = t => `<div class="fn"><span class="g"></span><span class="mdoc"># ${t}</span></div>`;
   return (flows.length ? note('flows') + flows.map(line).join('') : '') + (rest.length ? (many ? note('functions') : '') + rest.map(line).join('') : '') + (types ? (many ? note('types') : '') + types : ''); }
 
@@ -533,7 +533,7 @@ const marksIn = n => !delta() ? 0 : [...fnsOf(n.folder), ...card(n.folder).ts.ma
 const passedOn = (n, f) => n.kids.some(k => fnsOf(k.folder).some(g => fnName(g) === fnName(f) && nowSig(g) === nowSig(f)));
 function ownLines(n, all){ const c = card(n.folder), skip = new Set(n.kids.flatMap(k => card(k.folder).ts));
   if (all) return cardLines(c, skip, true);
-  return c.fs.map((f, i) => [f, c.key + '#' + i]).filter(x => (flowOf(x[0]) || markOf(x[0])) && !passedOn(n, x[0])).map(x => fnLine(x[0], x[1])).join('')
+  return c.fs.map(f => [f, c.key + '#' + fnName(f)]).filter(x => (flowOf(x[0]) || markOf(x[0])) && !passedOn(n, x[0])).map(x => fnLine(x[0], x[1])).join('')
     + c.ts.filter(t => !skip.has(t) && markOf(S.types[t])).map(t => typeRow(S.types[t], c.key + '|' + t, {})).join('') + insideLine(c, true); }
 const nHead = (n, cur) => `<div class="bn"><span class="mdoc blk"># ${esc(n.line || '')}</span>${cur ? '' : `<button class="bx" data-nsel="${esc(n.folder)}">`}<code class="mh"><span class="t-k">module</span> <span class="t-d">${esc(camel(n.name))}</span>:</code>${cur ? '' : '</button>'}</div>`;
 // one module and, indented inside it, its modules. all: every function and type; otherwise flows, and what changed. cur: the module the listing is about, which lists all its modules; elsewhere a module inside is listed only when it has something to show
@@ -550,7 +550,9 @@ const fileLine = path => { const f = S.files.find(x => x.path === path); return 
 const full = n => !n.kids.length || !FONLY || !flowsIn(n);
 const regOf = pick => pick && pick.startsWith('region:') ? regionsOf(V).find(r => r.id === pick.slice(7)) : null, regNodes = r => r.boxes.map(b => NODE[b.folder]).filter(x => x && nThere(x));
 function focan(){ if (!TOP.some(n => nThere(n) && flowsIn(n))) return false; if (!pin) return !V.id || flowsIn(NODE[V.id]) > 0;
-  const r = regOf(pin); if (r) return regNodes(r).some(x => x.kids.length && flowsIn(x)); const p = pathOfPick(pin), n = p ? MODOF(p) : pin.startsWith('node:') && NODE[pin.slice(5)]; return !!n && n.kids.length > 0 && flowsIn(n) > 0; }
+  const p = pathOfPick(pin), pm = p && MODOF(p); if (pm) return pm.kids.length > 0 && flowsIn(pm) > 0;
+  const r = regOf(p && regionOfDir(p) ? 'region:' + regionOfDir(p).id : pin); if (r) return regNodes(r).some(x => x.kids.length && flowsIn(x));
+  const n = pin.startsWith('node:') && NODE[pin.slice(5)]; return !!n && n.kids.length > 0 && flowsIn(n) > 0; }
 function LIST(pick){ const wrap = h => `<div class="api whole">${h}</div>`, here = V.id && NODE[V.id], p = pathOfPick(pick), pm = p && MODOF(p);
   if (pm) return p === pm.folder ? crumbs(pm) + wrap(block(pm, full(pm), true)) : crumbs(pm, short(p)) + fileLine(p) + wrap(block(pm, full(pm), true));          // a file: the module it is in
   const reg = regOf(p && regionOfDir(p) ? 'region:' + regionOfDir(p).id : pick);
@@ -570,11 +572,11 @@ function listing(pick){ const st = $('strip'), fo = $('fonly'); fo.hidden = !S.a
   const ring = (f, cls) => [f, (rootBox(f) || {}).folder].forEach(x => document.querySelectorAll('.nd').forEach(el => { if (el.dataset.pick === 'node:' + x) el.classList.add(cls); }));
   const p = pathOfPick(pick), pm = p && MODOF(p); if (pm) ring(pm.folder, 'sel');
   SHOWN = []; st.innerHTML = LIST(pick);
-  if (SHOWN.length) { $('fig').classList.add('hasflow'); uniq(SHOWN.flatMap(id => [id, ...(flowLines(id) || []).flatMap(l => l[3] || [])]).map(id => id.slice(0, id.indexOf('#')))).forEach(f => ring(f, 'onflow')); } }
+  if (SHOWN.length) { $('fig').classList.add('hasflow'); uniq(SHOWN.flatMap(id => [id, ...(flowLines(id) || []).flatMap(l => l[3] || [])]).map(id => id.slice(0, id.lastIndexOf('#')))).forEach(f => ring(f, 'onflow')); } }
 // selecting a module anywhere: the figure goes to the view that draws it
 function nsel(folder){ const home = homeOf(folder); if (home && home !== V) go(home.id); pin = 'node:' + folder; reveal = folder; closed.delete(folder); show(); renderTree(); }
 // the name of a box beside a called function: that module, with the function's flow open when it has one
-function goBox(folder, fid){ if (fid) { const i = fnsOf(folder).findIndex(f => f.id === fid), at = folder + '#' + i; if (i >= 0 && !openT.includes(at)) openT.push(at); } nsel(folder); }
+function goBox(folder, fid){ if (fid) { const f = fnsOf(folder).find(x => x.id === fid), at = f && folder + '#' + fnName(f); if (at && !openT.includes(at)) openT.push(at); } nsel(folder); }
 // with Changes only, a comparison in which nothing changed shows the whole file list folded to its top level and greyed, not an empty one. A selected module still shows just its own folder
 function calmTree(top){ if (!only || !delta() || reveal) return false; const t = tally(''); if (t.add || t.chg || t.del) return false;
   const k = mode + '|' + V.id; if (k !== calmKey) { calmKey = k; (top || []).forEach(e => { if (!e.file) closed.add(e.path); }); } return true; }

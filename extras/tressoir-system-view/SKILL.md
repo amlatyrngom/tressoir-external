@@ -69,14 +69,19 @@ The same shape for work that is planned and work that is done.
 | `boxes` | a box as it is now | when it is new, or its `line` changed, or it gains a path (`also`) |
 | `flows` | a flow as it is now, whole | when the steps of a function that has a flow changed |
 | `moves` | a box's old path, then its new one | when its code moved and it is otherwise the same box |
+| `renames` | a listed function, then its new name | when it was renamed and is otherwise the same function |
 | `plan` | the plan's name | only while it is not built |
 
 An entry restates whatever is no longer true, and nothing else:
 
 - A line under `interface` replaces the line of that name in that box, or is added last. Leave the
-  words out to keep them. `- name` removes a line. A rename is `- old` and the new line. A changed
-  signature goes here and not also in `affects`; so does a line whose words are no longer true
-  while its signature stays. A new type goes under the box that owns it.
+  words out to keep them. `- name` removes a line. A changed signature goes here and not also in
+  `affects`; so does a line whose words are no longer true while its signature stays. A new type
+  goes under the box that owns it.
+- A function that only changed its name is said under `renames`: `"renames": {
+  "app/triage.py: triage": "classify" }`. The line keeps its place, its words and its flow, and
+  the sketches that call it follow. If its arguments changed too, also state the new line under
+  `interface`, with the new name. A renamed type has no such key: write `- Old` and the new line.
 - When two built entries state the same line, the later one in the file stands. The script takes
   the line out of the earlier entry, puts its name under that entry's `affects`, and says so.
 - A box under `boxes` is matched by `folder`. Write a new one whole, with its `interface`. For an
@@ -85,22 +90,26 @@ An entry restates whatever is no longer true, and nothing else:
   other: a folder inside a box is not a box, and where two regions share the folder (a flat
   project) the region is mine to choose. Leave such a box out of `boxes` and tell me.
 - A box whose folder or file was renamed is said under `moves`: `"moves": { "app/notify.py":
-  "app/notify/" }`. The box keeps its region, name, line and interface, and the flow steps that
-  were at the old path follow. The new path stays in the same row or region and outside every
-  other box. Until it is said, the script keeps the box and gives an error that proposes the
+  "app/notify/" }`. The box keeps its region, name, line and interface, and its flows follow. The
+  new path stays in the same row or region and outside every other box (a box inside another
+  stays inside it). Until it is said, the script keeps the box and gives an error that proposes the
   line. A box that changes region, splits, or joins another is not a move.
 - A flow under `flows` is matched by its function (`of`) and replaces that function's flow. State
-  it whole, as in `system.json` (see "Flows" below). Do it when the task changed the steps I would
-  name: a step added, removed, reordered, or now calling another listed function. A change inside
-  a step leaves the flow alone. Removing a function (`- name`) removes its flow; when the function
-  was renamed, state the flow again with its new name in the same entry. Do not give a flow to a
-  function that has none, and do not drop one, unless I asked: which functions have a flow is
-  architecture.
+  it whole, as in `system.json` (see "Flows" below): copy it from there, or from what the script
+  prepares, and edit it. Do it when the task changed the steps I would name: a step added,
+  removed, reordered, or now calling another listed function; or when the words on a line are no
+  longer true. A change inside a step that leaves its line and its words true leaves the flow
+  alone. Removing a function (`- name`) removes its flow; a rename under `renames` keeps it. When
+  two built entries state the same flow, the later one stands, as for lines. Do not give a flow
+  to a function that has none, and do not drop one, unless I asked: which functions have a flow
+  is architecture. When I did ask, a flow stated with an empty `sketch` is taken out.
 - A renamed file is written once under `files`, with its new path.
 - A planned entry also says what git cannot know yet: a note that starts with `+ ` is a file the
-  plan adds, `- ` one it removes.
+  plan adds, `- ` one it removes. A later step of the same plan that touches a file an earlier
+  step adds names it without the `+ `.
 
-How many entries: with a plan, one per plan step, with the same names. Without a plan, one per
+How many entries: with a plan, one per plan step, with the same names (for a plan written with
+`tressoir-plan`, its milestones). Without a plan, one per
 task I asked for, in place before the task's first commit. Write it before or after the code:
 run with `--check` and no entry, and the script prepares one from the diff for you to name and
 correct. Every entry has its own name: two built
@@ -128,15 +137,16 @@ A change deep in private code must show on the nearest function I can see.
 
 ## The routine
 
-1. **A planned task starts.** Run the script with `--seen`, write one entry per plan step, each
-   with `"plan": "<plan name>"`, and run the script.
+1. **A planned task starts**: I asked for a plan, to be built now or later. Run the script with
+   `--seen`, write one entry per plan step, each with `"plan": "<plan name>"`, and run the script.
 2. **As each step is built.** Correct its entry to what was built (file names, signatures), then
    delete its `plan` key. There is no other command for building a plan.
 3. **A task ends**, planned or not. Run the script. Answer every error; read every note; run again
    until no error is left, except one that is architecture (see below).
 4. **Then commit**, code and `WORK/SYSTEM_VIEW/` together. If the figure, a flow or a listed line
    changed, say so in one line of the hand-off. Do not run the script again after the commit: the
-   committed entry stays in `changes.json` until the next task's first run takes it out.
+   committed entry stays in `changes.json` until the next task's first run with no option takes
+   it out. A run with `--check` or `--seen` leaves it there.
 
 ```bash
 uv run WORK/skills/tressoir-system-view/system_view.py            # fold, check, build the page
@@ -146,7 +156,8 @@ uv run WORK/skills/tressoir-system-view/system_view.py --from <commit>   # also 
 uv run WORK/skills/tressoir-system-view/system_view.py --check --flows   # also print each flow and the calls found on its lines
 ```
 
-It needs only Python 3 and git; `python3` works in place of `uv run`. Once the last commit holds a
+It needs only Python 3 and git; `python3` works in place of `uv run`. A run with `--check` that
+finds no error ends with `Checked: … No error.` Once the last commit holds a
 built entry, the next run takes it out of `changes.json` by itself: a built and committed change
 reads as if it was always there. "Holds" means the commit has the entry unchanged and its
 `system.json` already says what the entry states, so an entry committed before the script ran
@@ -162,7 +173,7 @@ What the script prints:
 
 | Error: the entry is not folded | Note: only said |
 | --- | --- |
-| a changed file under the figure that no entry explains (it prepares an entry) | a file under a region that belongs to no box |
+| a changed file under the figure that no entry explains (it prepares an entry, with the flow of each function it names) | a file under a region that belongs to no box (an empty file, such as a package marker, is not counted) |
 | a name in `affects` found nowhere, or in two boxes | a listed name that appears nowhere in its box's code |
 | a built entry's file that does not differ while its other files do | a planned entry that looks built |
 | a built entry with a `+ ` file that does not exist | an entry changes a function that has a flow and does not state the flow: check it still reads true |
@@ -170,10 +181,13 @@ What the script prints:
 | a name twice in a box; a path in two boxes; a bare name with no single match | an entry replaced a line: what it was, what it is |
 | a new box the script will not place: inside a box, deeper than a row, or where regions share the folder | a link or a neighbour that points at nothing |
 | a box with no file left whose files were renamed (it proposes the `moves` line) | a box with no file; a figure whose regions give no folder |
-| a flow of a function no box lists; two flows of one function; a flow with no line; a flow still written as steps | a box removed because its files were deleted; a function removed with its flow |
+| a flow of a function no box lists; two flows of one function; in `system.json`, a flow with no line or still written as steps | a box removed because its files were deleted; a function removed with its flow |
 | a call stated by hand in a sketch that names no listed function | a call in a sketch into a box that does not list it, or that two boxes answer to |
 | `moves` to another region or row, onto or into another box, or of a box with boxes inside | a sketch that began with its `def` line (the script takes it out); a sketch over 40 lines |
-| a box three levels deep | no box written yet |
+| `renames` of a function no box lists, or to a name its box already lists | two entries state the same flow: the later one stands |
+| a box three levels deep, written or planned | an earlier entry named a box at the path a later entry moved it from: the script corrects the entry |
+| | a new folder with no words in `lines.json`, beside folders that have some |
+| | no box written yet |
 
 Reading a diff:
 
@@ -185,6 +199,7 @@ Reading a diff:
 | a listed line's words, or a box's `line`, no longer true | restate it |
 | the steps of a function that has a flow changed | the flow, whole, under `flows` |
 | a box's folder or file renamed, the box otherwise the same | `moves`, old path then new path |
+| a listed function renamed, otherwise the same | `renames`, the function then its new name |
 | a new folder inside a box | nothing |
 | a new folder directly in a row or a region | a box under `boxes`, with a name and a line |
 | a new file in a flat project | `also` on the only box that imports it |
@@ -222,7 +237,8 @@ folder.
 
 - A box has `name`, `folder` and `line`. `folder` is its main path and its identifier everywhere.
   In a project whose code is flat it may be a single file, and `also` lists further paths. A file
-  belongs to the box with the longest matching path; a path belongs to one box only.
+  belongs to the box with the longest matching path, so a box may claim one file inside another
+  box's folder; the same path is never written on two boxes.
   `"shared": true` marks the one box of helpers with no better home.
 - A box lists what other boxes call. An entry box lists its entry points: commands, routes.
   A function that callers reach through a module of the box is written with that name
@@ -236,10 +252,13 @@ folder.
   one. A parent never writes out a signature that an inner box lists.
 - A name appears once per box; a type once in the file.
 - Tests, documents and scripts are in the file view and are never boxes.
-- Write types as the examples do: `[T]` is a list, `T?` may be absent, `{T}` is a set, `→` (or
-  `->`) gives the result. The page shows every signature as Python (`def`, `list[T]`,
-  `T | None`), whatever the project's language. Turning a C or Rust signature into such a line is
-  yours to do; keep the project's own names.
+- Write types as the examples do: `[T]` is a list, `T?` may be absent, `{T}` is a set, `(A, B)`
+  a pair, `A | B` one or the other, `→` (or `->`) gives the result. The page shows every
+  signature as Python (`def`, `list[T]`, `T | None`), whatever the project's language. Turning a
+  C or Rust signature into such a line is yours to do; keep the project's own names for types
+  (`str` and `int` in a Python project, `u64` in a Rust one). Leave out default values and
+  keyword markers. An argument the code gives no type may stand bare (`run(client, db)`), or
+  carry the type it holds.
 
 ### Flows
 
@@ -258,11 +277,15 @@ folder.
 On the page the function carries a small mark; opened, its line becomes this sketch, and each
 line that has words or calls a listed function opens in turn.
 
-- `of` names the function: its box's folder, a colon, its name. That box must list it. A function
-  has one flow. Do not write the `def` line: the page writes it from the listed signature.
-- The sketch is Python, whatever the project's language: typed assignments, `if`, `for`, `while`,
-  `return`, four spaces a level. Two additions: `parallel for x in xs:` for work done at once, and
-  `xs.where(test)` for a filter. Keep the project's names.
+- `of` names the function: its box's folder, a colon, its name. That box must list it. (The
+  box's name in place of its folder is read too; the script writes the folder.) A function has
+  one flow. Do not write the `def` line: the page writes it from the listed signature. Where
+  two listed functions share one body (two commands that run the same pipeline), give the flow to
+  one and say in the other's words how it differs.
+- The sketch is Python, whatever the project's language: assignments, typed where the type helps,
+  `if`, `for`, `while`, `with`, `return`, four spaces a level. Two additions: `parallel for x in
+  xs:` for work done at once, and `xs.where(test)` for a filter. Keep the project's names, a
+  private helper's leading underscore included.
 - One line per step I would name on a whiteboard. Leave out error handling, logging and private
   detail that explains nothing. A flow is a sketch, not the code.
 - The words after `#` say why the step is there or what it decides. I read them when I open the
@@ -271,8 +294,11 @@ line that has words or calls a listed function opens in turn.
   folder or its name, as an identifier (`wal`, `join_order`, `write_ahead_log`), and `function`
   is a line that box lists. A box inside another may be reached through its parent when the
   parent lists the bare name (`transactions.snapshot(...)`). A call to a listed function of the
-  flow's own box is written bare. The script finds these calls, and the page shows each called
-  function under the line, with its box. Private helpers are written bare and are not looked up.
+  flow's own box is written bare. A function listed with a module in front is called as it is
+  listed (`recency.is_recent(item)`). A listed function handed on without being called counts
+  too (`items.where(recency.is_recent)`). The script finds these calls, and the page shows each
+  called function under the line, with its box. Private helpers are written bare and are not
+  looked up.
 - Run with `--check --flows` to see which calls the script found on each line. Where it cannot
   tell (two boxes answer to the same word, the call goes through a variable, a step reaches a
   function its code does not name), state them by hand: write the line as an object,

@@ -31,3 +31,4 @@ Skills, loaded when the situation arises:
 - `tressoir-memory`: consolidating state, reorganizing memory, merges, sub-projects.
 - `tressoir-plan`: work that needs my decision before implementation.
 - `tressoir-present`: showing me a page or a narrated presentation.
+- `tressoir-system-view`, only where `WORK/SYSTEM_VIEW/` exists: every task that changes code.

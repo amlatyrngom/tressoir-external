@@ -5,37 +5,37 @@
         { "name": "Command line", "folder": "pocket/cli.py", "line": "add, read, find",
           "also": ["pocket/__main__.py"],
           "interface": [
-            "main(argv: [Text]) → ExitCode  // reads the command line and runs one command",
-            "cmd_add(url: Text)  // pocket add: saves one page",
+            "main(argv: [str]) → int  // reads the command line and runs one command",
+            "cmd_add(url: str)  // pocket add: saves one page",
             "cmd_read(id: PageId)  // pocket read: prints a saved page",
-            "cmd_find(words: Text)  // pocket find: lists the pages that match"
+            "cmd_find(words: str)  // pocket find: lists the pages that match"
           ] }
       ] },
     "core": { "folder": "pocket/", "line": "what Pocket does",
       "boxes": [
         { "name": "Pages", "folder": "pocket/pages.py", "line": "saving and reading pages",
           "interface": [
-            "save(url: Text) → PageId  // fetches, cleans and stores one page",
+            "save(url: str) → PageId  // fetches, cleans and stores one page",
             "read(id: PageId) → Page?  // one saved page",
-            "Page = { id: PageId, url: Text, title: Text, text: Text }  // one saved page"
+            "Page = { id: PageId, url: str, title: str, text: str }  // one saved page"
           ] },
         { "name": "Cleaning", "folder": "pocket/clean.py", "line": "keeps the article, drops the rest",
-          "interface": ["clean(html: Text) → Text  // the readable text of a page"] },
+          "interface": ["clean(html: str) → str  // the readable text of a page"] },
         { "name": "Search", "folder": "pocket/search.py", "line": "finds saved pages by their words",
           "also": ["pocket/stopwords.txt"],
-          "interface": ["find(words: Text) → [Page]  // the pages that hold every word, best first"] },
+          "interface": ["find(words: str) → [Page]  // the pages that hold every word, best first"] },
         { "name": "Store", "folder": "pocket/store.py", "line": "one SQLite file",
           "interface": ["put(page: Page) → PageId  // stores one page", "get(id: PageId) → Page?  // one page, or nothing", "all() → [Page]  // every page"] }
       ] },
     "external": { "folder": "pocket/", "line": "what it reads from outside",
       "boxes": [
         { "name": "Fetching", "folder": "pocket/fetch.py", "line": "downloads a page",
-          "interface": ["fetch(url: Text) → Text  // the HTML of one page, with a time limit"] }
+          "interface": ["fetch(url: str) → str  // the HTML of one page, with a time limit"] }
       ] },
     "platform": { "folder": "pocket/", "line": "differs per operating system",
       "boxes": [
         { "name": "Desktop notices", "folder": "pocket/notify/", "line": "says when a page is saved",
-          "interface": ["notify(title: Text)  // shows a desktop notice"] }
+          "interface": ["notify(title: str)  // shows a desktop notice"] }
       ] },
     "separate": { "folder": "", "line": "",
       "boxes": [] }
@@ -52,8 +52,8 @@
       ] },
     { "of": "pocket/pages.py: save",
       "sketch": [
-        "html: Text = fetch.fetch(url)  # downloads the page, with a time limit",
-        "text: Text = clean.clean(html)  # keeps the article, drops the rest",
+        "html: str = fetch.fetch(url)  # downloads the page, with a time limit",
+        "text: str = clean.clean(html)  # keeps the article, drops the rest",
         "id: PageId = store.put(Page(url, title_of(html), text))",
         "notify.notify(title_of(html))  # says the page is saved",
         "return id"
