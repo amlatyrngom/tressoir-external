@@ -18,24 +18,31 @@ read something is fine when reading it is itself the advice, such as a paper wor
 
 ## Level
 
-Brief me the way an engineer briefs a manager who is an architect, or the way I would brief my
-advisor. They hear what exists now and what it lets us do, how sure we are and on what evidence,
-what is still at risk or not done, and what they must decide. They do not hear how the work was
-done.
+A briefing has one of two levels. The architect briefing is the default.
 
-- Leave out the workings: file formats and the names of keys or options, the defects found and
-  fixed along the way, counts of checks, attempts that were dropped, and the choices that were
-  yours to make. Write those in the task's artifacts, where the next agent finds them. I will ask
-  when I want more.
-- Keep a detail only when it changes a decision the briefing asks for, changes what I do next,
-  or would surprise me to learn later.
-- Evidence is a sentence or two: what was tried, on what, and what happened.
+- **Architect briefing**: what an engineer tells the architect of the system. What exists now
+  and what it lets us do, how sure we are and on what evidence, what is still at risk or not
+  done, and what I must decide.
+- **Builder briefing**, only when I ask for one, on the whole subject or on one point: what
+  someone who continues the work needs. The workings: file formats and the names of keys or
+  options, the defects found and fixed along the way, counts of checks, attempts that were
+  dropped, and the choices that were yours to make.
+
+In an architect briefing:
+
+- The workings are left out. They belong in the task's artifacts, where the next agent finds
+  them; make sure they are there.
+- Keep a detail only when it changes a decision the briefing asks for or changes what I do next.
+- Evidence is short: what was tried, on what, what happened, and what that does not cover. What
+  was found and fixed is not listed. What was found and left is, when it matters to me.
 - A choice of yours that changes what I will see or how I work, and that I could well have made
-  differently, is a decision: give it a decision slide whose default is what you chose. There
-  are few of these. The rest are not mentioned.
-- Besides the summary, the decisions and the recap, one or two slides are usually enough.
+  differently, is a decision: give it a decision slide whose default is what you chose. So is a
+  finding that questions something I settled; its default is what I settled. There are few of
+  these. Your other choices are not mentioned.
+- Besides the summary, the decisions and the recap, one or two slides are usually enough. A
+  decision's background can be spoken on its own slide.
 
-The test for any slide or sentence: would I say this to my advisor?
+The test for any slide or sentence: would an engineer say this to the architect?
 
 ## Kinds
 
@@ -86,12 +93,15 @@ to shape.
   many decisions are waiting, by name. If nothing is needed from me, say so.
 - **One decision, one slide**, in the decision shape shown below: a short name for the decision,
   the question, two or three options each with its own short name and what it leads to, your
-  recommendation marked quietly, and what happens if I say nothing.
+  recommendation marked quietly, and what happens if I say nothing. Saying nothing never changes
+  something I settled and never starts something hard to undo, so it can differ from your
+  recommendation.
 - **Put each decision where I am ready for it.** A simple one can come straight after the summary.
   One that needs background comes right after the slides that give that background, and only as
   much background as the decision needs.
 - **Close with a recap slide** listing every decision by name with your recommendation, so I can
-  answer in my own words or say "all recommended".
+  answer in my own words or say "all recommended". Where saying nothing leads elsewhere, show
+  that too.
 
 The reference page uses the same shape: summary first, then open decisions, then detail.
 
@@ -99,8 +109,9 @@ The reference page uses the same shape: summary first, then open decisions, then
 
 Write `<date-time>-<name>.slides.html` in the task's `briefings/` folder (or `ARTIFACTS/BRIEFINGS/`
 when there is no task). There is no template: lay each slide out as its content needs, with a
-`<style>` block in the file's head if you need one. The shared styles give you the colour
-variables, type sizes on a 960 by 540 slide, and the decision slide.
+`<style>` block in the file's head if you need one. The shared styles (`slides.css`, beside the
+script) give you the colour variables, type sizes on a 960 by 540 slide, the decision slide and
+the recap table. Look at the built slides once: nothing may run past a slide's edge.
 
 ```html
 <section class="slide" data-title="Chapter name" data-hold>
