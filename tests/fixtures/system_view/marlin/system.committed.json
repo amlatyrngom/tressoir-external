@@ -323,38 +323,37 @@
     }
   ],
   "flows": [
-    { "name": "A read query", "line": "one SELECT, from the client and back",
-      "steps": [
-        { "at": "src/entry/wire/", "does": "receives the statement" },
-        { "at": "src/core/sql/", "gets": "SQL text", "does": "parses it and binds its names", "calls": "compile" },
-        { "at": "src/core/optimizer/", "gets": "statement", "does": "chooses a plan", "calls": "optimize" },
-        {
-          "at": "src/core/execution/pipelines/scheduler/",
-          "gets": "plan",
-          "does": "cuts the plan into pipelines and runs them on worker threads",
-          "calls": "run"
-        },
-        {
-          "at": "src/core/storage/memory/buffer-pool/",
-          "gets": "page requests",
-          "does": "hands out pages, reading them from disk when needed",
-          "calls": "pin"
-        },
-        { "at": "src/core/execution/pipelines/results/", "gets": "rows", "does": "gathers the rows into batches" },
-        { "at": "src/entry/wire/", "gets": "batches", "does": "streams them to the client", "calls": "send" }
+    { "of": "src/entry/wire/: handle",
+      "sketch": [
+        "stmt: Statement = sql.compile(message.sql, catalog)  # text to a checked, bound statement",
+        "plan: Plan = optimizer.optimize(stmt, catalog)  # chooses how to run it",
+        "snapshot: Snapshot = transactions.snapshot(session.txn)  # the query sees the database as of now, whatever commits meanwhile",
+        "rows: RowStream = execution.run(plan, snapshot)  # the plan is cut into pipelines that run on worker threads",
+        "while batch := results.next(rows):  # rows go back in batches as they are ready",
+        "    send(session, batch)",
+        "return Reply.done()"
       ] },
-    { "name": "A commit", "line": "between COMMIT and the reply",
-      "steps": [
-        { "at": "src/entry/wire/", "does": "receives COMMIT" },
-        { "at": "src/core/transactions/isolation/conflicts/", "gets": "request", "does": "checks for write-write conflicts", "calls": "check" },
-        {
-          "at": "src/core/transactions/durability/commit/",
-          "gets": "passed",
-          "does": "picks the commit time and joins the waiting group",
-          "calls": "commit"
-        },
-        { "at": "src/core/storage/disk/wal/", "gets": "log records", "does": "appends them; one flush for the whole group", "calls": "append" },
-        { "at": "src/connectors/replicas/", "gets": "log", "does": "receives the shipped log", "calls": "ship" },
-        { "at": "src/entry/wire/", "gets": "done", "does": "acknowledges" }
+    { "of": "src/core/optimizer/: optimize",
+      "sketch": [
+        "stmt = rules.rewrite(subqueries.unnest(stmt))  # the statement is made simpler before any search: subqueries become joins, then every rule is applied",
+        { "code": "tree: JoinTree = join_order.order(stmt)", "says": "which tables to join first, by how many rows each join should yield", "calls": ["src/core/optimizer/search/join-order/: order", "src/core/optimizer/estimates/cardinality/: estimate"] },
+        { "code": "plan: Plan = physical.implement(tree)", "says": "an algorithm for every step, priced by the cost model, and how many workers", "calls": ["src/core/optimizer/search/physical/: implement", "src/core/optimizer/estimates/cost/: cost"] },
+        "return plan"
+      ] },
+    { "of": "src/core/execution/pipelines/scheduler/: run",
+      "sketch": [
+        "pipelines: list[Pipeline] = cut(plan)  # a pipeline ends wherever every row must be seen before the next step can start: the build side of a join, a sort",
+        "parallel for p in pipelines.where(ready):  # every pipeline that waits on nothing runs at once, on worker threads",
+        "    source: Operator = scans.open(p.scan, snapshot)  # each pipeline starts from a scan, and the other operators are opened over it",
+        "    drive(p, source)",
+        "return RowStream(pipelines.last)  # the last pipeline feeds the stream the caller pulls from"
+      ] },
+    { "of": "src/core/transactions/durability/commit/: commit",
+      "sketch": [
+        "conflicts.check(txn)  # fails when another transaction wrote the same row first",
+        "at: Timestamp = next_timestamp()  # the commit time fixes the order other transactions see",
+        "lsn: Lsn = wal.append(records_of(txn, at))  # the changes are appended to the log",
+        "replicas.ship(lsn)  # the other nodes receive the log",
+        "return at"
       ] }
   ] }

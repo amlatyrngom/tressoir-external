@@ -78,10 +78,11 @@ rest.
 
 This adds the skill `tressoir-system-view` and a folder, `WORK/SYSTEM_VIEW/`, with empty starting
 files that are created once and never overwritten. The skill keeps one page current,
-`WORK/SYSTEM_VIEW.html`: a figure of the project's major parts with views inside the larger ones,
-flows, the interface each part offers, a file view, and tabs for the last commit, the current
-state, what changed between them, what changed since you last looked, and what each plan would
-change.
+`WORK/SYSTEM_VIEW.html`: a figure of the project's major parts with views inside the larger ones;
+under it the same parts listed as code (modules, the functions and types each offers, and flows:
+a function's steps as a short sketch, opened in place); a file view; and tabs for the last commit,
+the current state, what changed between them, what changed since you last looked, and what each
+plan would change.
 
 - The architecture is written once with you, in `system.json`. For every task the agent writes
   named changes in `changes.json`. A script works out every mark from git and builds the page:

@@ -47,14 +47,21 @@
     { "from": "core", "to": "external", "label": "bank exports", "says": "An import reads a bank file through Bank files." }
   ],
   "flows": [
-    { "name": "Importing a bank file", "line": "from the file to recorded entries",
-      "steps": [
-        { "at": "src/entry/cli/", "does": "receives the import command and the file's path" },
-        { "at": "src/connectors/bank-files/", "gets": "path", "does": "reads the export into entries", "calls": "parse" },
-        { "at": "src/core/categories/", "gets": "entries", "does": "gives each entry a category when a rule matches", "calls": "categorize" },
-        { "at": "src/core/entries/", "gets": "categorized entries", "does": "records each one", "calls": "add" },
-        { "at": "src/core/store/", "gets": "rows", "does": "writes them in one transaction", "calls": "write" },
-        { "at": "src/entry/cli/", "gets": "count", "does": "prints how many were recorded" }
+    { "of": "src/entry/cli/: main",
+      "sketch": [
+        "command = read(args)",
+        "if command.name == \"import\":",
+        "    found: list[NewEntry] = bank_files.parse(command.path)  # reads the bank's export into entries",
+        "    for entry in found:",
+        "        categories.categorize(entry)  # the first rule that matches gives its category",
+        "        entries.add(entry)  # records it; nothing when it is already there",
+        "    print(count(found))",
+        "return ExitCode.ok"
+      ] },
+    { "of": "src/core/entries/: add",
+      "sketch": [
+        "id: EntryId = next_id()",
+        "store.write(Change.insert(id, entry))  # all of it or none",
+        "return id"
       ] }
-  ]
-}
+  ] }

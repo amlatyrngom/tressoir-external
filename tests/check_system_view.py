@@ -8,10 +8,13 @@
     uv run tests/check_system_view.py                  # builds the Tally, Marlin and Pocket examples and a page of unusual links, then checks them
     uv run tests/check_system_view.py <page>.html ...  # checks pages that are already built
 
-At 375, 705, 900 and 1440 pixels wide it goes through every tab, every view, every box (closed and
-with every line opened) and every flow step, and expects: no console error; no text of the figure
-on a box or on other text; no name larger than its box; no two regions picked by the same name; every link between regions
-ends at the edge of both; at 375 pixels, nothing wider than the screen. It then draws the page
+At 375, 705, 900 and 1440 pixels wide it goes through every tab, every view, both settings of
+Flows only, every box, region and link of the figure (closed, then with every line, every flow and
+every line of every flow opened), a card of a type, the name of a box beside a called function,
+and some files, and expects: no console error; no text of the figure on a box or on other text; no
+name larger than its box; no two regions picked by the same name; every link between regions ends
+at the edge of both; a flow opened wherever one is written; at 375 pixels, nothing wider than the
+screen. It then draws the page
 inside a hidden frame, shows the frame, and expects the same figure as in a frame that was never
 hidden. Uses the Chrome already installed; downloads no browser.
 """
@@ -44,16 +47,27 @@ SWEEP = """(narrow) => { const bad = [], strip = document.getElementById('strip'
     texts.forEach(([t, r]) => boxes.forEach(([n, b]) => { if (hit(r, b)) bad.push(where + ': "' + t + '" is on the box ' + n); }));
     texts.forEach(([t, r], i) => texts.slice(i + 1).forEach(([u, q]) => { if (hit(r, q)) bad.push(where + ': "' + t + '" is on "' + u + '"'); })); });
   const wide = where => { states++; if (narrow && document.documentElement.scrollWidth > innerWidth + 1) bad.push(where + ': the page is ' + document.documentElement.scrollWidth + ' pixels wide'); };
-  let where = '';
+  let where = '', flows = 0, cards = 0;
+  const pop = document.getElementById('fcpop');
   try {
     for (const t of TABS) { mode = t.id;
-      for (const v of S.views) { go(v.id); where = t.label + ', ' + (v.name || v.id); overlaps(where);
-        for (const p of [null, ...own(v).map(b => 'node:' + b.folder)]) { pin = p; openT = []; show(); wide(where + ', ' + p);
-          openT = [...strip.querySelectorAll('[data-fold]')].map(e => e.dataset.fold); show(); wide(where + ', ' + p + ', opened'); }
-        for (const r of regionsOf(v)) { pin = 'region:' + r.id; openT = []; show(); wide(where + ', region ' + r.id); } }
-      for (let f = 0; f < S.flows.length; f++) { goFlow(f); where = t.label + ', flow ' + S.flows[f].name; pin = null; show(); wide(where);
-        for (let k = 0; k < S.flows[f].steps.length; k++) { pin = 'step:' + k; show(); wide(where + ', step ' + (k + 1)); } }
+      for (const fo of S.api ? [true, false] : [true]) { FONLY = fo;
+        for (const v of S.views) { go(v.id); where = t.label + ', ' + (v.name || v.id) + (fo ? '' : ', everything'); overlaps(where);
+          const picks = [null, ...own(v).map(b => 'node:' + b.folder), ...regionsOf(v).map(r => 'region:' + r.id), ...(LAY ? LAY.edges : []).map(e => e.pick || 'edge:' + e.id)];
+          for (const p of picks) { pin = p; openT = []; openF.clear(); show(); wide(where + ', ' + p);
+            openT = [...strip.querySelectorAll('[data-fold]')].map(e => e.dataset.fold); show();
+            strip.querySelectorAll('.fl.can').forEach(e => openF.add(e.dataset.key)); show(); wide(where + ', ' + p + ', opened');
+            flows += strip.querySelectorAll('.fc').length;
+            const ref = strip.querySelector('.ty[data-ty]'); if (ref) { ref.click(); if (pop.hidden) bad.push(where + ', ' + p + ': the reference to ' + ref.dataset.ty + ' opens no card'); else { cards++; wide(where + ', ' + p + ', a card'); const inner = pop.querySelector('.ty[data-ty]'); if (inner) { inner.click(); wide(where + ', ' + p + ', a card from a card'); } } hide(); } } } }
+      FONLY = true; go(''); openT = []; openF.clear();
+      for (const f of S.files.filter((x, i) => i % 3 === 0).slice(0, 60)) { pin = 'path:' + f.path; show(); wide(t.label + ', the file ' + f.path); }
+      // the name of a box beside a called function leads to that module, in whichever view draws it
+      pin = null; show(); openT = [...strip.querySelectorAll('[data-fold]')].map(e => e.dataset.fold); show(); strip.querySelectorAll('.fl.can').forEach(e => openF.add(e.dataset.key)); show();
+      const bx = strip.querySelector('.fc .fbx'); if (bx) { const to = bx.dataset.fbox; bx.click(); if (pin !== 'node:' + to) bad.push(t.label + ': the name of ' + to + ' beside a call does not select it'); wide(t.label + ', after the name of a box'); }
+      document.getElementById('fig').click(); if (openT.length || openF.size) bad.push(t.label + ': a tap on the empty figure leaves lines open');
       go(''); only = !only; render(); wide(t.label + ', the other setting of Changes only'); only = !only; render(); }
+    if (S.api && Object.keys(S.flows).length && !flows) bad.push('flows are written and none was opened');
+    if (S.types && Object.keys(S.types).length && !cards) bad.push('types are listed and no reference opened a card');
   } catch (e) { bad.push(where + ': ' + e); }
   return { bad, states }; }"""
 

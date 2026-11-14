@@ -1,14 +1,16 @@
 ---
 name: tressoir-system-view
-description: Keep the system view current, one page that draws the project's major parts, what is inside them, the interfaces between them, the files, and what changed or is planned. Use for every task that changes code (write its named changes and run the script before committing), when a plan is written or built, and before adding a component, a folder or a file that several components would share. Experimental.
+description: Keep the system view current, one page that draws the project's major parts and lists them as code (modules, their functions and types, and flows through them), with the files and what changed or is planned. Use for every task that changes code (write its named changes and run the script before committing), when a plan is written or built, and before adding a component, a folder or a file that several components would share. Experimental.
 ---
 
 # System view
 
 I no longer read most of the code, so I lose track of how a project is put together. The system
-view is how I keep the picture: one page, `WORK/SYSTEM_VIEW.html`, with a figure of the major
-parts, views inside the larger ones, flows, the interface each part offers, and a file view. Its
-tabs show the last commit, the current state, what changed between them, what changed since I last
+view is how I keep the picture: one page, `WORK/SYSTEM_VIEW.html`. At the top is a figure of the
+major parts, with a view inside each of the larger ones. Under it the same parts are listed as
+code: each box is a module, with the functions and types it offers; a function that has a flow
+opens into it, the body of that function as a short sketch. Beside them is a file view. The tabs
+show the last commit, the current state, what changed between them, what changed since I last
 looked, and what each plan would change.
 
 ```text
@@ -24,17 +26,18 @@ WORK/
 
 Commit `WORK/SYSTEM_VIEW/` together with the code, never separately. The page is not committed:
 anyone rebuilds it with the script. Three worked examples are in
-`WORK/skills/tressoir-system-view/examples/`: `tally/` (one view), `marlin/` (views inside boxes)
-and `pocket/` (all the code in one folder). Copy the shape of the one nearest to the project.
+`WORK/skills/tressoir-system-view/examples/`: `tally/` (one view), `marlin/` (boxes inside boxes)
+and `pocket/` (all the code in one folder). Each has flows. Copy the shape of the one nearest to
+the project.
 
 ## Two phases
 
-**Architecting, with me.** The regions, the boxes, what is inside a box, the flows and the
-interface listing are decided together and change rarely. They live in `system.json`.
+**Architecting, with me.** The regions, the boxes, what is inside a box, the interface listing and
+which functions have a flow are decided together and change rarely. They live in `system.json`.
 
 **Mechanical, on your own.** For every task you write entries in `changes.json` and run the
 script. You decide nothing about the figure, you ask me nothing, and you do not edit
-`system.json`: the script writes the entries' lines, boxes and moves into it.
+`system.json`: the script writes the entries' lines, boxes, flows and moves into it.
 
 **The files say what is true. They never say what changed.** The script finds what changed by
 comparing git, `system.json` at an earlier commit, and the planned entries. So never write a
@@ -64,6 +67,7 @@ The same shape for work that is planned and work that is done.
 | `affects` | listed functions whose signature is the same but whose code this change reaches | when there are any |
 | `interface` | a listed line as it is now, under its box's folder | when its signature or its words are new or different |
 | `boxes` | a box as it is now | when it is new, or its `line` changed, or it gains a path (`also`) |
+| `flows` | a flow as it is now, whole | when the steps of a function that has a flow changed |
 | `moves` | a box's old path, then its new one | when its code moved and it is otherwise the same box |
 | `plan` | the plan's name | only while it is not built |
 
@@ -85,6 +89,13 @@ An entry restates whatever is no longer true, and nothing else:
   were at the old path follow. The new path stays in the same row or region and outside every
   other box. Until it is said, the script keeps the box and gives an error that proposes the
   line. A box that changes region, splits, or joins another is not a move.
+- A flow under `flows` is matched by its function (`of`) and replaces that function's flow. State
+  it whole, as in `system.json` (see "Flows" below). Do it when the task changed the steps I would
+  name: a step added, removed, reordered, or now calling another listed function. A change inside
+  a step leaves the flow alone. Removing a function (`- name`) removes its flow; when the function
+  was renamed, state the flow again with its new name in the same entry. Do not give a flow to a
+  function that has none, and do not drop one, unless I asked: which functions have a flow is
+  architecture.
 - A renamed file is written once under `files`, with its new path.
 - A planned entry also says what git cannot know yet: a note that starts with `+ ` is a file the
   plan adds, `- ` one it removes.
@@ -132,6 +143,7 @@ uv run WORK/skills/tressoir-system-view/system_view.py            # fold, check,
 uv run WORK/skills/tressoir-system-view/system_view.py --check    # only print the checks
 uv run WORK/skills/tressoir-system-view/system_view.py --seen     # I have seen everything up to the last commit
 uv run WORK/skills/tressoir-system-view/system_view.py --from <commit>   # also show a delta from that commit
+uv run WORK/skills/tressoir-system-view/system_view.py --check --flows   # also print each flow and the calls found on its lines
 ```
 
 It needs only Python 3 and git; `python3` works in place of `uv run`. Once the last commit holds a
@@ -153,13 +165,15 @@ What the script prints:
 | a changed file under the figure that no entry explains (it prepares an entry) | a file under a region that belongs to no box |
 | a name in `affects` found nowhere, or in two boxes | a listed name that appears nowhere in its box's code |
 | a built entry's file that does not differ while its other files do | a planned entry that looks built |
-| a built entry with a `+ ` file that does not exist | a flow passing a box an entry changes: check it still reads true |
+| a built entry with a `+ ` file that does not exist | an entry changes a function that has a flow and does not state the flow: check it still reads true |
 | a planned path that does not exist and has no `+ ` | an open plan restates a line that has changed since the last commit |
 | a name twice in a box; a path in two boxes; a bare name with no single match | an entry replaced a line: what it was, what it is |
 | a new box the script will not place: inside a box, deeper than a row, or where regions share the folder | a link or a neighbour that points at nothing |
 | a box with no file left whose files were renamed (it proposes the `moves` line) | a box with no file; a figure whose regions give no folder |
-| a flow step at a path that is not a box | a box removed because its files were deleted |
-| `moves` to another region or row, onto or into another box, or of a box with boxes inside | no box written yet |
+| a flow of a function no box lists; two flows of one function; a flow with no line; a flow still written as steps | a box removed because its files were deleted; a function removed with its flow |
+| a call stated by hand in a sketch that names no listed function | a call in a sketch into a box that does not list it, or that two boxes answer to |
+| `moves` to another region or row, onto or into another box, or of a box with boxes inside | a sketch that began with its `def` line (the script takes it out); a sketch over 40 lines |
+| a box three levels deep | no box written yet |
 
 Reading a diff:
 
@@ -169,15 +183,16 @@ Reading a diff:
 | an edit inside a listed function, or in private code a listed function reaches | the name in `affects` |
 | a listed signature changed, a new function another box calls, a new command | the line under `interface` |
 | a listed line's words, or a box's `line`, no longer true | restate it |
+| the steps of a function that has a flow changed | the flow, whole, under `flows` |
 | a box's folder or file renamed, the box otherwise the same | `moves`, old path then new path |
 | a new folder inside a box | nothing |
 | a new folder directly in a row or a region | a box under `boxes`, with a name and a line |
 | a new file in a flat project | `also` on the only box that imports it |
 
 **Architecture is never decided mechanically:** a new row or region; a box that changes region,
-splits or merges; in a project whose code is one folder, a new box, or a file that two boxes
-import; a flow step that has become false. Leave the figure and the flows alone and tell me in
-your report. An error that is architecture stays until I have answered: commit the code with the
+splits or merges; a box that gains an inside; in a project whose code is one folder, a new box, or
+a file that two boxes import; a function that gains or loses a flow. Leave the figure alone and
+tell me in your report. An error that is architecture stays until I have answered: commit the code with the
 error left, and put it first in the hand-off. Once I have answered, write my answer into
 `system.json`.
 
@@ -196,8 +211,14 @@ Written with me. Four layers; each is optional and the page works without the la
    boxes it works with, each with a sentence.
 3. **Interface.** One string per line. A function is `name(arg: Type) → Type  // words`; a type
    is `Name = shape  // words`.
-4. **Flows.** Ordered steps: `at` (a box's folder), `gets` (what arrives), `does` (a sentence),
-   `calls` (the function called there, which that box must list).
+4. **Flows.** A flow is the body of one listed function, as a short sketch: `of` (the box's
+   folder, a colon, the function) and `sketch` (its lines). See "Flows" below.
+
+Boxes go two levels deep and no more. A box of the overview may have an inside; a box inside it
+has none, and the script stops on a third level. The rows of an inside only group its boxes in
+the figure, as the regions group the overview's: a row is not a module and lists nothing. Where
+the inner boxes sit directly in the box's folder, give the inside one row with the box's own
+folder.
 
 - A box has `name`, `folder` and `line`. `folder` is its main path and its identifier everywhere.
   In a project whose code is flat it may be a single file, and `also` lists further paths. A file
@@ -215,6 +236,52 @@ Written with me. Four layers; each is optional and the page works without the la
   one. A parent never writes out a signature that an inner box lists.
 - A name appears once per box; a type once in the file.
 - Tests, documents and scripts are in the file view and are never boxes.
+- Write types as the examples do: `[T]` is a list, `T?` may be absent, `{T}` is a set, `→` (or
+  `->`) gives the result. The page shows every signature as Python (`def`, `list[T]`,
+  `T | None`), whatever the project's language. Turning a C or Rust signature into such a line is
+  yours to do; keep the project's own names.
+
+### Flows
+
+```json
+{ "of": "src/core/transactions/durability/commit/: commit",
+  "sketch": [
+    "conflicts.check(txn)  # fails when another transaction wrote the same row first",
+    "at: Timestamp = next_timestamp()  # the commit time fixes the order other transactions see",
+    "lsn: Lsn = wal.append(records_of(txn, at))  # the changes are appended to the log",
+    "wal.flush_group(lsn)  # one flush serves every commit waiting in the group",
+    "replicas.ship(lsn)  # the other nodes receive the log",
+    "return at"
+  ] }
+```
+
+On the page the function carries a small mark; opened, its line becomes this sketch, and each
+line that has words or calls a listed function opens in turn.
+
+- `of` names the function: its box's folder, a colon, its name. That box must list it. A function
+  has one flow. Do not write the `def` line: the page writes it from the listed signature.
+- The sketch is Python, whatever the project's language: typed assignments, `if`, `for`, `while`,
+  `return`, four spaces a level. Two additions: `parallel for x in xs:` for work done at once, and
+  `xs.where(test)` for a filter. Keep the project's names.
+- One line per step I would name on a whiteboard. Leave out error handling, logging and private
+  detail that explains nothing. A flow is a sketch, not the code.
+- The words after `#` say why the step is there or what it decides. I read them when I open the
+  line. Do not repeat the code in words.
+- A call into another box is written `box.function(...)`: `box` is the last part of the box's
+  folder or its name, as an identifier (`wal`, `join_order`, `write_ahead_log`), and `function`
+  is a line that box lists. A box inside another may be reached through its parent when the
+  parent lists the bare name (`transactions.snapshot(...)`). A call to a listed function of the
+  flow's own box is written bare. The script finds these calls, and the page shows each called
+  function under the line, with its box. Private helpers are written bare and are not looked up.
+- Run with `--check --flows` to see which calls the script found on each line. Where it cannot
+  tell (two boxes answer to the same word, the call goes through a variable, a step reaches a
+  function its code does not name), state them by hand: write the line as an object,
+  `{ "code": "...", "says": "the words", "calls": ["<box folder>: <function>"] }`.
+  `"calls": []` says the line calls nothing listed.
+- A called function that has a flow of its own is not written out again: the page links to it.
+- Types are named as the interface lists them; the page links each to its card.
+- Which functions have a flow is decided with me: the entry points, and the few functions where
+  the order of the steps is the design.
 
 ### Starting in a project that already has code
 
@@ -223,7 +290,8 @@ further. Draw what a system architect would put on a whiteboard: a box is a part
 own, not a file, and its lines are what an architect needs to know to connect it to the others.
 That is around a dozen boxes; a simple project needs fewer, a complex one more. Once the
 figure is agreed, add the interface and one or two flows. Give a box an inside only when it has
-folders of its own that I would name; a box that is one file or one flat folder has none. Where a
+folders of its own that I would name; a box that is one file or one flat folder has none. Never
+go deeper than that. Where a
 component is spread out, give the box its main folder and list the rest under `also`. Leave
 `changes.json` as `[]`. Do not move code to make the first figure look tidy.
 

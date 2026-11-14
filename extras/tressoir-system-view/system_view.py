@@ -9,6 +9,7 @@
     system_view.py --check    print the checks and write nothing
     system_view.py --seen     move Seen to the last commit (done when a planned task starts)
     system_view.py --from C   also show a delta that starts at commit C
+    system_view.py --flows    also print every flow, with the listed functions found on each line
     system_view.py --work F   use this work folder instead of the nearest WORK/
 
 An error leaves its entry out of the fold and makes the script end with 1; a note is only printed.
@@ -23,8 +24,11 @@ entries. Standard library and the git command only.
 import argparse
 import copy
 import datetime
+import difflib
+import functools
 import html
 import json
+import math
 import os
 import re
 import subprocess
@@ -35,7 +39,7 @@ SLOT = {'entry': 'entry', 'core': 'core', 'external': 'ext', 'platform': 'plat'}
 TITLE = {'entry': 'Entry points', 'core': 'Core application', 'external': 'External services',
          'platform': 'Platform-<br>specific'}
 INNER_SLOTS = ['entry', 'core', 'ext', 'plat']
-HEAD_KEYS = ['name', 'folder', 'line', 'plan', 'shared']
+HEAD_KEYS = ['name', 'folder', 'line', 'plan', 'shared', 'of']
 # left out of the file view: the harness's links to the skills
 LINK_FOLDERS = ['.claude/skills/', '.agents/skills/']
 EMPTY_BLOB = 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391'
@@ -204,6 +208,8 @@ def write_line(p):
 
 
 TOP = './'      # how a region's folder is written when the code sits at the top of the repository
+TWO_LEVELS = ('Boxes go two levels deep and no more: a box of the overview may have boxes inside it, and those have none. '
+              'That is architecture: settle it with the owner.')
 
 
 def under(prefix, path):
@@ -253,6 +259,9 @@ class World:
                     problems.error('The box %s is written twice.' % b['folder'])
                 self.boxes[b['folder']] = b
                 self.parent[b['folder']] = parent['folder'] if parent else None
+                if parent and self.parent.get(parent['folder']) is not None and problems is not None:
+                    problems.error('The box %s is inside %s, which is itself inside %s. %s' % (
+                        b['folder'], parent['folder'], self.parent[parent['folder']], TWO_LEVELS))
         owner = {}
         for folder in self.boxes:
             for p in self.paths(folder):
@@ -344,6 +353,275 @@ class World:
         return best[0][0], None
 
 
+# ---------------------------------------------------------------- flows: the body of a listed function, as a sketch
+
+DEF_LINE = re.compile(r'^(?:async\s+)?def\b')
+CALL = re.compile(r'(?<![\w.])((?:[A-Za-z_]\w*\s*\.\s*)*[A-Za-z_]\w*)\s*\(')
+STRING = re.compile(r'''[rbfRBF]{0,2}(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')''')
+LONG_SKETCH = 40
+
+
+def flow_said(of):
+    """A flow's `of`, taken apart: (the box as written, the function's name)."""
+    where, _, name = (of if isinstance(of, str) else '').rpartition(': ')
+    return where.strip(), name.strip()
+
+
+def flow_name(flow):
+    where, name = flow_said(flow.get('of'))
+    return 'The flow of %s%s' % (name or '?', ' (%s)' % where if where else '')
+
+
+def box_said(world, said):
+    """The box a flow names: by its folder, or by its name when one box alone has it."""
+    for f in (said, said + '/'):
+        if f in world.boxes:
+            return f
+    named = [f for f, b in world.boxes.items() if b.get('name') == said]
+    return named[0] if len(named) == 1 else None
+
+
+def listed_fns(world, folder):
+    return [world.lines[i]['name'] for i in world.order.get(folder, []) if not world.lines[i]['type']]
+
+
+def flow_line(world, of):
+    """(the id of the listed function a flow is the body of, None), or (None, why it has none). A bare name in a box
+    stands for the function of a box inside it, and so does a flow of it."""
+    where, name = flow_said(of)
+    if not name:
+        return None, 'does not say which function it is the body of: write "of": "<box folder>: <function>"'
+    if where:
+        folder = box_said(world, where)
+        if folder is None:
+            named = sorted(f for f, b in world.boxes.items() if b.get('name') == where)
+            if len(named) > 1:
+                return None, 'names %s, which is the name of %s: write the box\'s folder' % (where, ' and '.join(named))
+            return None, 'names %s, which is not a box' % where
+        lid = folder + '#' + name
+        if lid not in world.lines:
+            return None, 'names %s, which %s does not list. Listed there: %s' % (name, folder, ', '.join(listed_fns(world, folder)) or 'nothing')
+    else:
+        ids = sorted(set(p['alias'] or i for i, p in world.lines.items() if not p['type'] and p['name'] == name))
+        if len(ids) != 1:
+            return None, ('names %s, which no box lists' % name if not ids else 'names %s, which %s list: write "<box folder>: %s"'
+                          % (name, ' and '.join(i.split('#')[0] for i in ids), name))
+        lid = ids[0]
+    return world.lines[lid]['alias'] or lid, None
+
+
+def find_flow(world, of):
+    """Where the flow named sits in a state's list of flows, or -1."""
+    lid, _why = flow_line(world, of)
+    for at, flow in enumerate(world.sys.get('flows') or []):
+        if not isinstance(flow, dict) or 'of' not in flow:
+            continue
+        other, _why = flow_line(world, flow['of'])
+        if (lid and other == lid) or flow_said(flow['of']) == flow_said(of):
+            return at
+    return -1
+
+
+def sketch_lines(sketch):
+    """A sketch, however it was written, as ([[indent level, code, the words after it, the calls stated or None]], whether
+    a first line that repeats the def was left out). It may be one text with line breaks, be indented with tabs or by any
+    regular step, and start at any depth."""
+    raw = []
+    for item in ([sketch] if isinstance(sketch, (str, dict)) else sketch or []):
+        if isinstance(item, dict):
+            raw.append((' '.join(str(item.get('code', '')).split('\n')), item.get('says') or '', item['calls'] if isinstance(item.get('calls'), list) else None))
+        else:
+            raw.extend((t, '', None) for t in str(item).split('\n'))
+    rows = []
+    for text, says, calls in raw:
+        text = text.replace('\t', '    ').rstrip()
+        body = text.lstrip(' ')
+        if not body:
+            continue
+        code, note = body, ''
+        if not body.startswith('#'):        # a line that is only a comment stays a line; else the words start at the first # outside a string
+            at = STRING.sub(lambda m: '_' * len(m.group(0)), body).find('#')
+            if at >= 0:
+                code, note = body[:at].rstrip(), body[at + 1:].strip()
+        rows.append([len(text) - len(body), code, str(says).strip() or note, calls])
+    had_def = bool(rows) and bool(DEF_LINE.match(rows[0][1]))
+    if had_def:
+        rows = rows[1:]
+    if rows:
+        base = min(r[0] for r in rows)
+        steps = [r[0] - base for r in rows if r[0] > base]
+        unit = functools.reduce(math.gcd, steps) if steps else 4
+        for r in rows:
+            r[0] = (r[0] - base) // unit
+    return rows, had_def
+
+
+def sketch_text(rows):
+    """A sketch as the script writes it: four spaces a level, the words after two spaces and a #. A line whose calls are
+    stated stays an object."""
+    out = []
+    for lv, code, note, calls in rows:
+        code = '    ' * lv + code
+        if calls is None:
+            out.append(code + ('  # ' + note if note else ''))
+        else:
+            out.append(dict([('code', code)] + ([('says', note)] if note else []) + [('calls', calls)]))
+    return out
+
+
+def ident(text):
+    return re.sub(r'[^0-9a-z]+', '_', text.lower()).strip('_')
+
+
+def box_words(world):
+    """What a sketch may call each box: its name and the last part of its folder, as identifiers. Write-ahead log is
+    write_ahead_log, src/core/storage/disk/wal/ is wal, pocket/cli.py is cli."""
+    out = {}
+    for folder, b in world.boxes.items():
+        last = folder.rstrip('/').split('/')[-1]
+        if not folder.endswith('/') and '.' in last:
+            last = last.rsplit('.', 1)[0]
+        out[folder] = set(w for w in (ident(b.get('name') or ''), ident(last)) if w)
+    return out
+
+
+def calls_in(world, words, home, code):
+    """The listed functions one line of a sketch calls: (their ids, what looked like a call into a box and was not found).
+    A call written bare is a function of the flow's own box. A call written box.function names the box by one of its
+    words. A listed name with a dot in it (youtube.minutes) is found wherever it is written out in full."""
+    ids, loose = [], []
+    for chain in CALL.findall(STRING.sub('""', code)):
+        parts = [p.strip() for p in chain.split('.')]
+        for i in range(len(parts)):
+            name, boxes = '.'.join(parts[i:]), []
+            if i == 0:
+                cands = [home + '#' + name] + ([k for k, p in world.lines.items() if p['name'] == name] if '.' in name else [])
+            else:
+                boxes = [f for f, w in words.items() if ident(parts[i - 1]) in w]
+                cands = [f + '#' + name for f in boxes]
+            found = sorted(set(world.lines[c]['alias'] or c for c in cands if c in world.lines and not world.lines[c]['type']))
+            if len(found) == 1:
+                if found[0] not in ids:
+                    ids.append(found[0])
+                break
+            if len(found) > 1:
+                loose.append('%s(), which %s list' % ('.'.join(parts), ' and '.join(c.split('#')[0] for c in found)))
+                break
+            if boxes and i == len(parts) - 1:
+                loose.append('%s(), which %s not list' % ('.'.join(parts), ' and '.join(boxes) + (' does' if len(boxes) == 1 else ' do')))
+    return ids, loose
+
+
+def flows_of(world, problems=None):
+    """{the id of a listed function: [[indent level, code, words, the ids of the listed functions it calls]]}: every flow
+    of a state that can be shown. With `problems`, says what is wrong with the others."""
+    out, words = {}, None
+    said = problems if problems is not None else Problems()
+    for flow in world.sys.get('flows') or []:
+        if not isinstance(flow, dict):
+            continue
+        if 'of' not in flow:
+            if 'steps' in flow:
+                said.error('The flow "%s" is written as steps, as flows were before they were code. It is not shown. Write it '
+                           'again as the body of one listed function: "of": "<box folder>: <function>", then "sketch", its '
+                           'lines. See "Flows" in the skill.' % flow.get('name', '?'))
+            else:
+                said.error('A flow does not say which function it is the body of. Write "of": "<box folder>: <function>".')
+            continue
+        who = flow_name(flow)
+        lid, why = flow_line(world, flow['of'])
+        if lid is None:
+            said.error('%s %s. It is not shown. If the function was renamed, state the flow in the entry, under "flows", with '
+                       'its new name. If the function is gone, the flow goes too: take it out of system.json.' % (who, why))
+            continue
+        if lid in out:
+            said.error('%s is written twice. A function has one flow.' % who)
+            continue
+        rows, _had = sketch_lines(flow.get('sketch'))
+        if not rows:
+            said.error('%s has no line under "sketch". Write its lines, or take the flow out.' % who)
+            continue
+        if words is None:
+            words = box_words(world)
+        home, lines = lid.split('#')[0], []
+        for lv, code, note, calls in rows:
+            ids = []
+            if calls is None:
+                ids, loose = calls_in(world, words, home, code)
+                for t in loose:
+                    said.note('%s calls %s. The line is shown without that call. If it is a listed function, write it as its '
+                              'box lists it; if the line calls nothing listed, say so: write the line as { "code": "...", '
+                              '"calls": [] }.' % (who, t))
+            else:
+                for c in calls:
+                    cid, cwhy = flow_line(world, c) if isinstance(c, str) else (None, 'holds something that is not text')
+                    if cid is None:
+                        said.error('%s: "calls" %s. A call is written "<box folder>: <function>".' % (who, cwhy))
+                    elif cid not in ids:
+                        ids.append(cid)
+            lines.append([lv, code, note, [i for i in ids if i != lid]])
+        if len(lines) > LONG_SKETCH:
+            said.note('%s is %d lines long. A flow is a sketch of the steps an architect would name, not the code.' % (who, len(lines)))
+        out[lid] = lines
+    return out
+
+
+def tidy_flows(system, world, problems):
+    """Sets every flow in the script's layout: the function named by its box's folder, the sketch one line per line."""
+    for flow in system.get('flows') or []:
+        if not isinstance(flow, dict) or 'of' not in flow:
+            continue
+        lid, _why = flow_line(world, flow['of'])
+        if lid:
+            flow['of'] = '%s: %s' % tuple(lid.split('#', 1))
+        rows, had_def = sketch_lines(flow.get('sketch'))
+        if had_def:
+            problems.note('%s: the first line of its sketch repeated the def. The page writes that line from the listed '
+                          'signature, so it is taken out of the sketch.' % flow_name(flow))
+        flow['sketch'] = sketch_text(rows)
+
+
+def diff_lines(a, b):
+    """The lines of a flow in two states as one list: a line only the first has ends with 'del', one only the second
+    has with 'add'. A line is the same when its depth and its code are."""
+    key = lambda l: (l[0], l[1])
+    out = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, [key(l) for l in a], [key(l) for l in b], autojunk=False).get_opcodes():
+        if tag == 'equal':
+            out.extend(b[j1:j2])
+        else:
+            out.extend(l + ['del'] for l in a[i1:i2])
+            out.extend(l + ['add'] for l in b[j1:j2])
+    return out
+
+
+def flow_state(listed, mine):
+    """What one state has of the flows listed: None for a flow that is not there, its lines where they differ."""
+    out = {}
+    for lid, lines in listed.items():
+        if lid not in mine:
+            out[lid] = None
+        elif mine[lid] != lines:
+            out[lid] = mine[lid]
+    return out
+
+
+def flow_delta(listed, a, b):
+    """From state a to state b: a flow both have with other lines is given line by line, marked."""
+    out = {}
+    for lid, lines in listed.items():
+        x, y = a.get(lid), b.get(lid)
+        if x is None and y is None:
+            out[lid] = None
+            continue
+        now = y if y is not None else x
+        if x is not None and y is not None and [l[:2] for l in x] != [l[:2] for l in y]:
+            now = diff_lines(x, y)
+        if now != lines:
+            out[lid] = now
+    return out
+
+
 # ---------------------------------------------------------------- folding
 
 def merge_lines(box, lines):
@@ -419,12 +697,50 @@ def fold(system, entries, problems, quiet=False):
                 if not quiet and not isinstance(was, str) and not e.get('plan'):
                     problems.note('%s replaced a line of %s. It was: %s. It is: %s.'
                                   % (e.get('name', '?'), folder, write_line(was[0]), write_line(was[1])))
+        fold_flows(out, e, problems, quiet)
     return out
+
+
+def fold_flows(out, e, problems, quiet):
+    """A function an entry removes takes its flow with it. A flow an entry states replaces the flow of that function, or is
+    added last; stated with no line, it is taken out."""
+    name = e.get('name', '?')
+    if out.get('flows'):
+        world = World(out)
+        gone = set((f, t[2:].strip()) for _lines, f, t in stated(e) if t.startswith('- '))
+        keep = []
+        for flow in out['flows']:
+            where, fn = flow_said(flow.get('of')) if isinstance(flow, dict) else ('', '')
+            folder = box_said(world, where) or where
+            if (folder, fn) in gone and folder + '#' + fn not in world.lines:
+                if not quiet:
+                    problems.note('%s removed %s from %s, and its flow with it. If the function was renamed, state the flow again '
+                                  'in the entry, under "flows", with its new name.' % (name, fn, folder))
+                continue
+            keep.append(flow)
+        out['flows'] = keep
+    for fl in e.get('flows') or []:
+        world = World(out)
+        at = find_flow(world, fl.get('of'))
+        rows, _had = sketch_lines(fl.get('sketch'))
+        if not rows:
+            if at >= 0:
+                del out['flows'][at]
+            continue
+        lid, why = flow_line(world, fl.get('of'))
+        if lid is None:
+            problems.error('%s: a flow under "flows" %s.' % (name, why))
+            continue
+        new = {'of': '%s: %s' % tuple(lid.split('#', 1)), 'sketch': sketch_text(rows)}
+        if at >= 0:
+            out['flows'][at] = new
+        else:
+            out.setdefault('flows', []).append(new)
 
 
 def move_box(out, old, new, name, problems):
     """An entry says a box is now at another path. The box stays in its row with its name, its line and its interface;
-    the flow steps and the neighbours that named the old path follow. Anything more than that is architecture."""
+    the flows and the neighbours that named the old path follow. Anything more than that is architecture."""
     world = World(out)
     box = world.boxes.get(old)
     if box is None:
@@ -460,10 +776,14 @@ def move_box(out, old, new, name, problems):
         for k in ('from', 'uses'):
             if old in ((b.get(k) or {}).get('boxes') or []):
                 b[k]['boxes'] = [new if x == old else x for x in b[k]['boxes']]
+    there = lambda said: '%s: %s' % (new, flow_said(said)[1]) if flow_said(said)[0] in (old, old.rstrip('/')) else said
     for flow in out.get('flows') or []:
-        for step in flow.get('steps') or []:
-            if step.get('at') == old:
-                step['at'] = new
+        if not isinstance(flow, dict) or not isinstance(flow.get('of'), str):
+            continue
+        flow['of'] = there(flow['of'])
+        for item in flow['sketch'] if isinstance(flow.get('sketch'), list) else []:
+            if isinstance(item, dict) and isinstance(item.get('calls'), list):
+                item['calls'] = [there(c) if isinstance(c, str) else c for c in item['calls']]
 
 
 def drop_removed(system, had, has, moved=None):
@@ -481,6 +801,9 @@ def drop_removed(system, had, has, moved=None):
     out = copy.deepcopy(system)
     for row, _parent, _key in rows_of(out):
         row['boxes'] = [b for b in row.get('boxes') or [] if b['folder'] not in gone]
+    if out.get('flows'):
+        home = lambda flow: (flow_line(world, flow.get('of'))[0] or '').split('#')[0] if isinstance(flow, dict) else ''
+        out['flows'] = [f for f in out['flows'] if home(f) not in gone]
     return out, gone, kept
 
 
@@ -525,7 +848,8 @@ def pretty(v, ind='', width=150):
     if not rest or (not head and not deep and len(ind) + len(one) <= width):
         return one
     hl = ', '.join(js(k) + ': ' + js(x) for k, x in head)
-    rl = ',\n'.join(n + js(k) + ': ' + pretty(x, n, width) for k, x in rest)
+    tall = lambda x: '[\n' + ',\n'.join(n + '  ' + flat(y) for y in x) + '\n' + n + ']'
+    rl = ',\n'.join(n + js(k) + ': ' + (tall(x) if k == 'sketch' and isinstance(x, list) and x else pretty(x, n, width)) for k, x in rest)
     return '{ ' + hl + ',\n' + rl + ' }' if head else '{\n' + rl + '\n' + ind + '}'
 
 
@@ -613,6 +937,10 @@ def hits_of(entry, world, problems=None, base=None):
         hit.extend(world.order.get(new, []))
         if base is not None:
             hit.extend(base.order.get(old, []))
+    for fl in entry.get('flows') or []:
+        lid = flow_line(world, fl.get('of'))[0] or (flow_line(base, fl.get('of'))[0] if base is not None else None)
+        if lid:
+            hit.append(lid)
     if base is not None:
         for f in base.boxes:
             if f not in world.boxes and any(base.holds(f, p) for p in entry.get('files') or {}):
@@ -798,16 +1126,6 @@ def emit_views(system):
     return views
 
 
-def emit_flows(system):
-    out = []
-    for f in system.get('flows') or []:
-        steps = []
-        for s in f.get('steps') or []:
-            steps.append([s.get('at', ''), s.get('gets', ''), s.get('does', '')] + ([s['calls']] if s.get('calls') else []))
-        out.append({'name': f.get('name', ''), 'line': f.get('line', ''), 'steps': steps})
-    return out
-
-
 # ---------------------------------------------------------------- the checks
 
 def texts(v):
@@ -831,7 +1149,7 @@ def links_fault(v, where):
     return None
 
 
-def row_fault(r, where):
+def row_fault(r, where, deep=1):
     if not isinstance(r, dict) or not isinstance(r.get('boxes', []), list):
         return '%s must be an object with a list under "boxes"' % where
     fault = fields_fault(r, where, ('folder', 'name', 'line'))
@@ -840,13 +1158,28 @@ def row_fault(r, where):
     if r.get('folder') in ('.', '/'):
         return '%s has the folder "%s". The top of the repository is written "%s"' % (where, r['folder'], TOP)
     for b in r.get('boxes', []):
-        fault = box_fault(b, where)
+        fault = box_fault(b, where, deep)
         if fault:
             return fault
     return None
 
 
-def box_fault(b, where):
+def flow_fault(f, where):
+    """What is wrong with the shape of one flow, or None. A flow in the form before flows were code is let through."""
+    if not isinstance(f, dict):
+        return 'a flow %s is not an object' % where
+    if 'of' in f and not isinstance(f['of'], str):
+        return '"of" of a flow %s must be text: "<box folder>: <function>"' % where
+    sk = f.get('sketch', [])
+    line = lambda x: isinstance(x, str) or (isinstance(x, dict) and isinstance(x.get('code'), str) and isinstance(x.get('says', ''), str)
+                                            and isinstance(x.get('calls', []), list))
+    if not (isinstance(sk, str) or (isinstance(sk, list) and all(line(x) for x in sk))):
+        return ('"sketch" of %s must be a list of lines, each a text or an object with "code", and "says" and "calls" when needed'
+                % flow_name(f).replace('The flow', 'the flow'))
+    return None
+
+
+def box_fault(b, where, deep=1):
     if not isinstance(b, dict) or not isinstance(b.get('folder'), str) or not b['folder']:
         return 'a box in %s has no "folder"%s' % (where, ' (%s)' % b['name'] if isinstance(b, dict) and b.get('name') and isinstance(b['name'], str) else '')
     f = b['folder']
@@ -860,8 +1193,10 @@ def box_fault(b, where):
     if 'inside' in b:
         if not isinstance(b['inside'], list):
             return '"inside" of %s must be a list of rows' % f
+        if deep > 1 and b['inside']:
+            return 'the box %s is inside another box and has boxes inside it. %s' % (f, TWO_LEVELS.rstrip('.'))
         for r in b['inside']:
-            fault = row_fault(r, 'the rows inside ' + f)
+            fault = row_fault(r, 'the rows inside ' + f, deep + 1)
             if fault:
                 return fault
     if 'links' in b:
@@ -895,18 +1230,12 @@ def system_fault(system):
         if fault:
             return fault
     flows = system.get('flows', [])
-    if not isinstance(flows, list) or not all(isinstance(f, dict) and isinstance(f.get('steps', []), list) for f in flows):
-        return '"flows" must be a list of objects, each with a list under "steps"'
+    if not isinstance(flows, list):
+        return '"flows" must be a list of flows, each with "of" and "sketch"'
     for f in flows:
-        fault = fields_fault(f, 'a flow', ('name', 'line'))
+        fault = flow_fault(f, 'of system.json')
         if fault:
             return fault
-        for st in f.get('steps', []):
-            if not isinstance(st, dict):
-                return 'a step of the flow "%s" is not an object' % f.get('name', '?')
-            fault = fields_fault(st, 'a step of the flow "%s"' % f.get('name', '?'), ('at', 'gets', 'does', 'calls'))
-            if fault:
-                return fault
     return None
 
 
@@ -921,14 +1250,19 @@ def entry_fault(e):
           and isinstance(e.get('files', {}), dict) and all(isinstance(n, str) for n in e.get('files', {}).values())
           and texts(e.get('affects', []))
           and isinstance(e.get('interface', {}), dict) and all(texts(l) for l in e.get('interface', {}).values())
-          and isinstance(e.get('boxes', []), list)
+          and isinstance(e.get('boxes', []), list) and isinstance(e.get('flows', []), list)
           and isinstance(e.get('moves', {}), dict) and all(isinstance(n, str) and n for n in e.get('moves', {}).values()))
     if not ok:
         return ('%s is not in the shape the skill gives: "files" is an object of notes, "affects" a list of names, '
-                '"interface" an object of lists of lines, "boxes" a list of boxes, "moves" an object: a box\'s old path, '
-                'then its new one' % name)
+                '"interface" an object of lists of lines, "boxes" a list of boxes, "flows" a list of flows, "moves" an object: '
+                'a box\'s old path, then its new one' % name)
     for b in e.get('boxes', []):
         fault = box_fault(b, name)
+        if fault:
+            return fault
+    for f in e.get('flows', []):
+        fault = flow_fault(f, 'of ' + name) or (None if isinstance(f, dict) and isinstance(f.get('of'), str) else
+                                                 'a flow of %s has no "of": "<box folder>: <function>"' % name)
         if fault:
             return fault
     return None
@@ -1042,6 +1376,9 @@ def settled(built, at_head, raw):
             ok = ok and f in at_head.boxes and f in after.boxes and plain(at_head.boxes[f]) == plain(after.boxes[f])
         for old, new in (e.get('moves') or {}).items():
             ok = ok and new in at_head.boxes and old not in at_head.boxes
+        for fl in e.get('flows') or []:
+            x, y = find_flow(at_head, fl.get('of')), find_flow(after, fl.get('of'))
+            ok = ok and (x < 0) == (y < 0) and (x < 0 or sketch_lines(at_head.sys['flows'][x].get('sketch')) == sketch_lines(after.sys['flows'][y].get('sketch')))
         if ok:
             out.append(e)
     return out, same
@@ -1142,21 +1479,19 @@ def note_empty_boxes(world, now_files, problems, moved=()):
             problems.note('No file is in the box %s. If its code is gone, the box goes too: take it out of system.json.' % folder)
 
 
-def note_flows(system, built, world, problems):
-    """A flow that passes a box a built entry states a line of, or calls a function it marks."""
-    for f in system.get('flows') or []:
+def note_flows(flows, built, world, problems):
+    """A flow whose function a built entry marks, unless the entry states the flow. A change beneath a function the flow
+    calls does not change the flow's own steps, and is not said."""
+    for lid in flows:
+        folder, fn = lid.split('#', 1)
         for e in built:
-            boxes = set(folder for _l, folder, _t in stated(e))
-            marks = set(hits_of(e, world))
-            where = [s.get('at') for s in f.get('steps') or []
-                     if s.get('at') in boxes or (s.get('calls') and '%s#%s' % (s.get('at'), s['calls']) in marks)]
-            if where:
-                problems.note('The flow "%s" passes %s, which "%s" changes. Check that the flow still reads true.'
-                              % (f.get('name', '?'), some(sorted(set(where)), 3), e.get('name', '?')))
+            if lid in hits_of(e, world) and not any(flow_line(world, fl.get('of'))[0] == lid for fl in e.get('flows') or []):
+                problems.note('"%s" changes %s, which has a flow (%s). Check that the flow still reads true; if its steps changed, '
+                              'state it again in the entry, under "flows".' % (e.get('name', '?'), fn, folder))
 
 
 def note_dangling(system, world, problems):
-    """A flow step, a link or a neighbour that points at nothing."""
+    """A link or a neighbour that points at nothing."""
     regions = system.get('regions') or {}
     for l in system.get('links') or []:
         for k in ('from', 'to'):
@@ -1174,16 +1509,6 @@ def note_dangling(system, world, problems):
             for x in (b.get(k) or {}).get('boxes') or []:
                 if x not in world.boxes:
                     problems.note('%s: "%s" names %s, which is not a box.' % (folder, k, x))
-    for f in system.get('flows') or []:
-        for n, s in enumerate(f.get('steps') or []):
-            at = s.get('at')
-            if at not in world.boxes:
-                problems.error('The flow "%s", step %d, is at %s, which is not a box. If the box moved, say so in the entry: "moves", '
-                               'its old path, then its new one. If it is gone, the flow is no longer true: that is architecture, '
-                               'so settle the flow with the owner.' % (f.get('name', '?'), n + 1, at))
-            elif s.get('calls') and '%s#%s' % (at, s['calls']) not in world.lines:
-                problems.note('The flow "%s", step %d, calls %s, which %s does not list. The page draws the step without its call.'
-                              % (f.get('name', '?'), n + 1, s['calls'], at))
 
 
 # ---------------------------------------------------------------- what the text of the code shows
@@ -1465,6 +1790,8 @@ def build(args):
         passing = [e for e in passing if not any(e is x for x, _errors in bad)]
     for t in notes:
         problems.note(t)
+    was_folded = folded != system
+    tidy_flows(folded, World(folded), problems)
     rewritten = later_wins(passing, World(folded), problems)
     for e in passing:
         # a moved box's few words follow it
@@ -1493,7 +1820,7 @@ def build(args):
     if text != before and not args.check and system:
         with open(path, 'w', encoding='utf-8') as f:
             f.write(text)
-        print(('Folded the built changes into %s.' if folded != system else 'Set %s in the script\'s layout; nothing in it changed.') % shown('system.json'))
+        print(('Folded the built changes into %s.' if was_folded else 'Set %s in the script\'s layout; nothing in it changed.') % shown('system.json'))
     if not args.check:
         if rewritten or dropped:
             with open(os.path.join(here, 'changes.json'), 'w', encoding='utf-8') as f:
@@ -1542,7 +1869,8 @@ def build(args):
     note_loose_files(current, now_files, problems, root)
     note_unseen_names(current, code, now_files, problems)
     note_empty_boxes(current, now_files, problems, kept)
-    note_flows(folded, built, current, problems)
+    flows_now = flows_of(current, problems)
+    note_flows(flows_now, [e for e in built if not any(e is f for f in failed)], current, problems)
     note_dangling(folded, current, problems)
 
     plan_worlds = []
@@ -1594,6 +1922,24 @@ def build(args):
         w = at_commit(c) or committed or current
         lists.add(w)
         start_worlds.append((tab, label, c, w, git.files_at(c)) + git.changed_since(c))
+    # every flow any tab shows, as the current state has it; then what another state alone has
+    seen_flows = {id(current): flows_now}
+
+    def flows_in(w):
+        if id(w) not in seen_flows:
+            seen_flows[id(w)] = flows_of(w)
+        return seen_flows[id(w)]
+
+    flows = dict(flows_now)
+    for w in [x[2] for x in plan_worlds] + ([committed] if committed is not None else []) + [x[3] for x in start_worlds]:
+        for lid, lines in flows_in(w).items():
+            flows.setdefault(lid, lines)
+
+    def with_flows(s, part):
+        if part:
+            s['flows'] = part
+        return s
+
     all_files = set(now_files)
     if head_files is not None:
         all_files |= head_files
@@ -1615,29 +1961,29 @@ def build(args):
     tabs, snap = [], {}
     if committed is not None:
         tabs.append({'id': 'committed', 'label': 'Committed', 'idle': 'as of the last commit.'})
-        snap['committed'] = state_snap(lists, committed, head_files, all_files)
+        snap['committed'] = with_flows(state_snap(lists, committed, head_files, all_files), flow_state(flows, flows_in(committed)))
     tabs.append({'id': 'current', 'label': 'Current', 'idle': 'as it is now, committed or not.'})
-    snap['current'] = state_snap(lists, current, now_files, all_files)
+    snap['current'] = with_flows(state_snap(lists, current, now_files, all_files), flow_state(flows, flows_now))
     if committed is not None:
         tabs.append({'id': 'cc', 'label': 'Committed → Current', 'delta': True})
         s = delta_snap(lists, committed, current, head_files, now_files, changed, all_files, moved)
         s['changes'] = [change(e) for e in built]
         s['hits'] = {str(change(e)): hits_of(e, current, base=committed) for e in built}
-        snap['cc'] = s
+        snap['cc'] = with_flows(s, flow_delta(flows, flows_in(committed), flows_now))
     for tab, label, c, w, files, ch, mv in start_worlds:
         tabs.append({'id': tab, 'label': label, 'delta': True})
         s = delta_snap(lists, w, current, files, now_files, ch, all_files, mv)
         since = built + [e for e in entries_since(git, name, c, problems) if (e.get('name', ''), '') not in set((b.get('name', ''), '') for b in built)]
         s['changes'] = [change(e) for e in since]
         s['hits'] = {str(change(e)): hits_of(e, current, base=w) for e in since}
-        snap[tab] = s
+        snap[tab] = with_flows(s, flow_delta(flows, flows_in(w), flows_now))
     for k, (pl, mine, w, files, after) in enumerate(plan_worlds):
         tab = 'plan:%d' % k
         tabs.append({'id': tab, 'label': 'Current → Plan' if len(plan_worlds) == 1 else 'Current → Plan: ' + pl, 'delta': True})
         s = delta_snap(lists, current, w, now_files, after, files, all_files)
         s['changes'] = [change(e) for e in mine]
         s['hits'] = {str(change(e)): hits_of(e, w, problems, base=current) for e in mine}
-        snap[tab] = s
+        snap[tab] = with_flows(s, flow_delta(flows, flows_now, flows_in(w)))
 
     # ---- the file view: a line of words per file; a new file's line is its change note
     said = {}
@@ -1647,7 +1993,7 @@ def build(args):
     file_rows = [[p, words.get(p) or (said.get(p, '') if p not in (head_files or ()) else '')] for p in sorted(all_files)]
 
     listed = World(lists.sys)
-    data = {'name': system.get('name') or os.path.basename(root), 'views': emit_views(lists.sys), 'flows': emit_flows(folded)}
+    data = {'name': system.get('name') or os.path.basename(root), 'views': emit_views(lists.sys), 'flows': flows}
     if lists.lines:
         data['api'], data['types'] = {}, {}
         for folder in listed.boxes:
@@ -1682,6 +2028,13 @@ def build(args):
         print('\n'.join(prepared[1]))
         if prepared[0].get('affects'):
             print('  A name under "affects" whose signature or words changed goes under "interface" instead, written as it is now.')
+    if args.flows:
+        for lid, lines in flows_now.items():
+            print('\nThe flow of %s (%s):' % tuple(reversed(lid.split('#', 1))))
+            for lv, code, note, calls in lines:
+                print('  %s%s%s' % ('    ' * lv, code, '    -> ' + ', '.join('%s: %s' % tuple(c.split('#', 1)) for c in calls) if calls else ''))
+        if not flows_now:
+            print('\nNo flow is written.')
     if problems.errors:
         print('%d %s.%s Fix %s and run again.' % (
             len(problems.errors), 'error' if len(problems.errors) == 1 else 'errors',
@@ -1697,7 +2050,7 @@ def build(args):
     out = os.path.join(work, 'SYSTEM_VIEW.html')
     with open(out, 'w', encoding='utf-8') as f:
         f.write(page)
-    print('Wrote %s/SYSTEM_VIEW.html: %d boxes, %d flows.' % (name, len(current.boxes), len(folded.get('flows') or [])))
+    print('Wrote %s/SYSTEM_VIEW.html: %d boxes, %d flows.' % (name, len(current.boxes), len(flows_now)))
     return 1 if problems.errors else 0
 
 
@@ -1768,6 +2121,7 @@ def main():
     ap.add_argument('--check', action='store_true', help='print the checks and write nothing')
     ap.add_argument('--seen', action='store_true', help='move Seen to the last commit')
     ap.add_argument('--from', dest='start', metavar='COMMIT', help='also show a delta that starts at this commit')
+    ap.add_argument('--flows', action='store_true', help='also print every flow, with the listed functions found on each line')
     ap.add_argument('--work', metavar='FOLDER', help='the work folder, when it is not the nearest WORK/')
     args = ap.parse_args()
     for stream in (sys.stdout, sys.stderr):

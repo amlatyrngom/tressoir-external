@@ -232,7 +232,53 @@ def marlin(tmp):
     cc = data['snap']['cc']['files']
     count = lambda s: sum(1 for v in cc.values() if v == s)
     check('marlin: Committed → Current counts +6 ~15 −0', (count('add'), count('chg'), count('del')) == (6, 15, 0), (count('add'), count('chg'), count('del')))
-    check('marlin: flows are carried as written', [f['name'] for f in data['flows']] == [f['name'] for f in want.get('flows', [])] and data['flows'])
+    # ---- flows: the page carries each one under the id of the function it is the body of
+    flows, snap = data['flows'], data['snap']
+    wire, sched, commit_id = 'src/entry/wire/#handle', 'src/core/execution/pipelines/scheduler/#run', 'src/core/transactions/durability/commit/#commit'
+    codes = lambda lines: [l[1] for l in lines or []]
+    called = lambda lines, code: next((l[3] for l in lines or [] if l[1] == code), None)
+    check('marlin: the folded flows are the example\'s, and the flow an entry states is written into system.json',
+          got.get('flows') == want['flows'] and 'wal.flush_group(lsn)  # one flush serves every commit waiting in the group' in got['flows'][3]['sketch'], got.get('flows'))
+    check('marlin: the page carries every flow under the id of its function, a list of [level, code, words, calls]',
+          list(flows) == [wire, 'src/core/optimizer/#optimize', sched, commit_id]
+          and all(len(l) == 4 and isinstance(l[0], int) and isinstance(l[3], list) for lines in flows.values() for l in lines), list(flows))
+    check('marlin: a flow\'s lines keep their depth, their code and the words after the #',
+          flows[wire][:3] == [[0, 'plan: Plan | None = sql.cached_plan(session, message.sql)',
+                               'the same text run before keeps its plan, so most statements skip the next two steps', ['src/core/sql/#cached_plan']],
+                              [0, 'if plan is None:', '', []],
+                              [1, 'stmt: Statement = sql.compile(message.sql, catalog)', 'text to a checked, bound statement', ['src/core/sql/#compile']]], flows[wire][:3])
+    check('marlin: a call written bare is a function of the flow\'s own box', called(flows[wire], 'send(session, batch)') == ['src/entry/wire/#send'], flows[wire])
+    check('marlin: a call through a box that lists a bare name is the function of the box inside',
+          called(flows[wire], 'rows: RowStream = execution.run(plan, snapshot)') == [sched]
+          and called(flows[wire], 'snapshot: Snapshot = transactions.snapshot(session.txn)') == ['src/core/transactions/isolation/snapshots/#snapshot'], flows[wire])
+    check('marlin: a box is called by the last part of its folder (wal, replicas, conflicts)',
+          [l[3] for l in flows[commit_id]] == [['src/core/transactions/isolation/conflicts/#check'], [], ['src/core/storage/disk/wal/#append'],
+                                               ['src/core/storage/disk/wal/#flush_group'], ['src/connectors/replicas/#ship'], []], flows[commit_id])
+    check('marlin: calls stated by hand are carried as stated, with the words under "says"',
+          flows['src/core/optimizer/#optimize'][1] == [0, 'tree: JoinTree = join_order.order(stmt)', 'which tables to join first, by how many rows each join should yield',
+                                                       ['src/core/optimizer/search/join-order/#order', 'src/core/optimizer/estimates/cardinality/#estimate']],
+          flows['src/core/optimizer/#optimize'])
+    check('marlin: the Current tab has every flow as listed', 'flows' not in snap['current'], snap['current'].get('flows'))
+    was = (snap['committed'].get('flows') or {}).get(commit_id)
+    check('marlin: the Committed tab has the flow of commit as it was, without the line the entry adds',
+          codes(was) == [c for c in codes(flows[commit_id]) if c != 'wal.flush_group(lsn)'] and len(codes(was)) == 5 and all(len(l) == 4 for l in was), was)
+    wire_delta = (snap['cc'].get('flows') or {}).get(wire) or []
+    check('marlin: the flow of handle, which another entry states, is given line by line: two lines out, four in',
+          [l[1] for l in wire_delta if l[4:] == ['del']] == ['stmt: Statement = sql.compile(message.sql, catalog)', 'plan: Plan = optimizer.optimize(stmt, catalog)']
+          and [l[1] for l in wire_delta if l[4:] == ['add']] == ['plan: Plan | None = sql.cached_plan(session, message.sql)', 'if plan is None:',
+                                                                 'stmt: Statement = sql.compile(message.sql, catalog)', 'plan = optimizer.optimize(stmt, catalog)']
+          and 'cached_plan' not in ' '.join(codes((snap['committed'].get('flows') or {}).get(wire))), wire_delta)
+    delta = (snap['cc'].get('flows') or {}).get(commit_id) or []
+    check('marlin: in Committed → Current the line the entry adds to the flow of commit ends with "add", and no other line is marked',
+          codes(delta) == codes(flows[commit_id]) and [l[1] for l in delta if len(l) == 5] == ['wal.flush_group(lsn)']
+          and [l[4] for l in delta if len(l) == 5] == ['add'], delta)
+    check('marlin: a flow whose code did not change is not in the delta', list(snap['cc'].get('flows') or {}) == [wire, commit_id], list(snap['cc'].get('flows') or {}))
+    check('marlin: the plan states no flow, so its tab has every flow as listed', 'flows' not in snap['plan:0'], snap['plan:0'].get('flows'))
+    check('marlin: an entry that marks a function with a flow and does not state the flow is told to check it',
+          'note   "Parallel hash join" changes run, which has a flow (src/core/execution/pipelines/scheduler/). Check that the flow still reads true' in out
+          and '"Prepared statement cache" changes handle' not in out, out)
+    check('marlin: the entry that states the flow is not told, nor one that changes another function of the same name',
+          '"Group commit" changes commit' not in out and '"Backups to object storage" changes run' not in out, out)
     before = read(os.path.join(root, 'WORK/SYSTEM_VIEW/system.json'))
     code, out, err = run(root)
     check('marlin: a second run changes nothing in system.json', code == 0 and 'Folded' not in out
@@ -254,9 +300,14 @@ MINI = {
             {'name': 'Reports', 'folder': 'src/core/reports/', 'line': 'totals',
              'interface': ['monthly(month: Month) → Report  // one month']}]}},
     'links': [{'from': 'src/entry/', 'to': 'src/core/', 'label': 'commands', 'says': 'The command line calls the core.'}],
-    'flows': [{'name': 'Adding an entry', 'line': 'from the command to the record', 'steps': [
-        {'at': 'src/entry/cli/', 'does': 'reads the command', 'calls': 'main'},
-        {'at': 'src/core/entries/', 'gets': 'the entry', 'does': 'records it', 'calls': 'add'}]}]}
+    'flows': [
+        {'of': 'src/entry/cli/: main', 'sketch': [
+            'entry = NewEntry(argv)  # reads the command',
+            'return entries.add(entry)  # records it']},
+        {'of': 'src/core/entries/: add', 'sketch': [
+            'key = _key(entry)  # the same entry gets the same key',
+            'return _store(entry, key)']}]}
+MAIN, ADD = 'src/entry/cli/#main', 'src/core/entries/#add'
 MINI_FILES = {
     'src/entry/cli/main.py': 'def main(argv):\n    return add(argv)\n',
     'src/core/entries/entries.py': 'class NewEntry:\n    pass\n\n\ndef add(entry):\n    return _store(entry)\n\n\n'
@@ -269,11 +320,11 @@ ENTRIES_PY, MONTHLY_PY = 'src/core/entries/entries.py', 'src/core/reports/monthl
 SV = 'WORK/SYSTEM_VIEW/'
 
 
-def mini(tmp, name='mini'):
+def mini(tmp, name='mini', figure=None, files=None):
     root = os.path.join(tmp, name)
-    for path, text in MINI_FILES.items():
+    for path, text in (files or MINI_FILES).items():
         write(root, path, text)
-    write(root, SV + 'system.json', json.dumps(MINI, ensure_ascii=False))
+    write(root, SV + 'system.json', json.dumps(figure or MINI, ensure_ascii=False))
     write(root, SV + 'changes.json', '[]\n')
     write(root, SV + 'lines.json', '{}\n')
     git(root, 'init', '-q')
@@ -311,6 +362,23 @@ def lines_of(root, folder):
             if b['folder'] == folder:
                 return b.get('interface', [])
     return None
+
+
+def put(root, change):
+    """system.json with one thing changed by hand."""
+    s = system(root)
+    change(s)
+    write(root, SV + 'system.json', json.dumps(s, ensure_ascii=False))
+
+
+def flows_of(root):
+    return system(root).get('flows', [])
+
+
+def shown_flows(data, tab='current'):
+    """The flows one tab shows: the page lists the flows of every state, and a tab has null for one its state lacks."""
+    mine = data['snap'][tab].get('flows') or {}
+    return [i for i in data['flows'] if mine.get(i, '') is not None]
 
 
 def checks(tmp):
@@ -351,8 +419,11 @@ def checks(tmp):
     check('the entries that pass are folded all the same', 'count() → Int  // how many entries' in lines_of(root, ent), lines_of(root, ent))
     check('the page is still written, and lists both changes',
           [c['name'] for c in page_data(root)['changes']] == ['Keys are stable', 'Totals by year'])
-    check('a flow that passes a box an entry changes is said',
-          'note   The flow "Adding an entry" passes src/core/entries/, which "Keys are stable" changes.' in out, out)
+    check('a built entry that marks a function with a flow, and does not state the flow, is told to check the flow',
+          'note   "Keys are stable" changes add, which has a flow (src/core/entries/). Check that the flow still reads true; if its steps changed, '
+          'state it again in the entry, under "flows".' in out, out)
+    check('a change beneath a function a flow calls is not said of that flow, nor is anything said for an entry that was not folded',
+          'changes main, which has a flow' not in out and '"Totals by year" changes' not in out and 'The flow "' not in out, out)
     check('a listed name found nowhere in its box is said', 'note   Listed in src/core/entries/ and found nowhere in its files: count.' in out, out)
 
     back(root)
@@ -404,15 +475,19 @@ def checks(tmp):
     # ---- notes
     bad = json.loads(json.dumps(good))
     bad['links'].append({'from': 'src/entry/', 'to': 'src/nowhere/', 'says': 'nothing'})
-    bad['flows'][0]['steps'] += [{'at': 'src/core/nowhere/', 'does': 'nothing'}, {'at': rep, 'does': 'totals a year', 'calls': 'yearly'}]
+    bad['flows'][0]['sketch'] += ['nowhere.go()  # no box is called that', 'reports.yearly(2026)  # totals a year']
     bad['regions']['core']['boxes'][1]['uses'] = {'boxes': ['src/gone/'], 'says': 'nothing'}
     write(root, SV + 'system.json', json.dumps(bad, ensure_ascii=False))
     write(root, 'src/core/loose.py', 'x = 1\n')
     code, out, err = run(root)
-    check('a link, a neighbour or a flow step that points at nothing is said, and the page is built',
-          'A link of the overview points at src/nowhere/' in out and 'step 3, is at src/core/nowhere/, which is not a box' in out
-          and 'step 4, calls yearly, which src/core/reports/ does not list. The page draws the step without its call.' in out
+    check('a link, a neighbour or a flow line that points at nothing is said, and the page is built',
+          'A link of the overview points at src/nowhere/' in out
+          and 'note   The flow of main (src/entry/cli/) calls reports.yearly(), which src/core/reports/ does not list. The line is shown without that call. '
+              'If it is a listed function, write it as its box lists it; if the line calls nothing listed, say so: write the line as { "code": "...", "calls": [] }.' in out
           and 'src/core/reports/: "uses" names src/gone/' in out and os.path.exists(os.path.join(root, 'WORK/SYSTEM_VIEW.html')), out + err)
+    check('a call through a word that names no box is not said: it is not a call into the figure', 'nowhere.go' not in out, out)
+    check('the page shows such lines without a call',
+          page_data(root)['flows'][MAIN][2:] == [[0, 'nowhere.go()', 'no box is called that', []], [0, 'reports.yearly(2026)', 'totals a year', []]], page_data(root)['flows'].get(MAIN))
     check('a file under a region that belongs to no box is said', 'note   1 file under src/core/ belongs to no box: src/core/loose.py.' in out, out)
 
     back(root)
@@ -740,9 +815,13 @@ def review(tmp):
         'also holds null': at(box, 'also', [None]), 'also a text': at(box, 'also', 'src/util.py'), 'inside a number': at(box, 'inside', 5),
         'links of a box hold text': at(box, 'links', ['x']), 'from a list': at(box, 'from', [rep]),
         'links an object': at(top, 'links', {'from': 'src/entry/', 'to': 'src/core/'}), 'links hold text': at(top, 'links', ['a']),
-        'flows an object': at(top, 'flows', {'name': 'x', 'steps': []}), 'steps hold text': at(top, 'flows', [{'name': 'x', 'steps': [ent]}]),
-        'a step at a list': at(top, 'flows', [{'name': 'x', 'steps': [{'at': [ent]}]}]), 'a line a number': at(box, 'interface', [5]),
-        'a region folder "."': at(core, 'folder', '.')}
+        'flows an object': at(top, 'flows', {'of': ent + ': add', 'sketch': ['return 1']}), 'a flow that is text': at(top, 'flows', [ent + ': add']),
+        'of a list': at(top, 'flows', [{'of': [ent, 'add'], 'sketch': ['return 1']}]), 'a sketch a number': at(top, 'flows', [{'of': ent + ': add', 'sketch': 5}]),
+        'a sketch line a number': at(top, 'flows', [{'of': ent + ': add', 'sketch': ['return 1', 5]}]),
+        'a sketch line with no code': at(top, 'flows', [{'of': ent + ': add', 'sketch': [{'says': 'records it'}]}]),
+        'says of a sketch line a list': at(top, 'flows', [{'of': ent + ': add', 'sketch': [{'code': 'x()', 'says': ['a']}]}]),
+        'calls of a sketch line a text': at(top, 'flows', [{'of': ent + ': add', 'sketch': [{'code': 'x()', 'calls': ent + ': add'}]}]),
+        'a line a number': at(box, 'interface', [5]), 'a region folder "."': at(core, 'folder', '.')}
     wrong = ['%s (%s)' % (k, r) for k, r in ((k, stops(sysmod=f)) for k, f in shapes.items()) if r]
     check('a system.json in a wrong shape stops with one sentence: %d shapes' % len(shapes), not wrong, '; '.join(wrong))
     shapes = {
@@ -752,7 +831,11 @@ def review(tmp):
         'new box inside holds text': [entry(boxes=[{'folder': 'src/core/n/', 'inside': ['x']}])],
         'inner box without folder': [entry(boxes=[{'folder': 'src/core/n/', 'inside': [{'folder': 'src/core/n/r/', 'boxes': [{'name': 'z'}]}]}])],
         'plan a list': [entry(plan=['p'])], 'plan true': [entry(plan=True), entry(name='B', plan='x')], 'files a list': [entry(files=[ENTRIES_PY])],
-        'affects a text': [entry(affects='add')], 'an entry that is text': ['A']}
+        'affects a text': [entry(affects='add')], 'an entry that is text': ['A'],
+        'flows an object': [entry(flows={'of': ent + ': add', 'sketch': ['return 1']})], 'a flow that is text': [entry(flows=[ent + ': add'])],
+        'a flow with no of': [entry(flows=[{'sketch': ['return 1']}])], 'a flow whose of is a list': [entry(flows=[{'of': [ent, 'add'], 'sketch': ['return 1']}])],
+        'a flow whose sketch holds a number': [entry(flows=[{'of': ent + ': add', 'sketch': [5]}])],
+        'a flow whose line states its calls as text': [entry(flows=[{'of': ent + ': add', 'sketch': [{'code': 'x()', 'calls': 'add'}]}])]}
     wrong = ['%s (%s)' % (k, r) for k, r in ((k, stops(es=v)) for k, v in shapes.items()) if r]
     check('a changes.json in a wrong shape stops with one sentence, and nothing of it is folded: %d shapes' % len(shapes), not wrong, '; '.join(wrong))
     wrong = [k for k, raw in (('changes.json as Latin-1', ('changes.json', '[{"name":"Café","line":"é","files":{}}]'.encode('latin-1'))),
@@ -841,11 +924,18 @@ def review(tmp):
     entries(root, {'name': 'No entries', 'line': 'gone', 'files': {ENTRIES_PY: 'removed'}, 'interface': {ent: ['- add', '- listing', '- NewEntry']}})
     code, out, err = run(root)
     code2, out2, err2 = run(root)
-    flow_error = 'ERROR  The flow "Adding an entry", step 2, is at src/core/entries/, which is not a box.'
     check('an entry that removes the lines of a box whose files are gone gives the same result on a second run',
-          code == code2 and 'The box src/core/entries/ is removed' in out and out.count('ERROR') == 1 and out2.count('ERROR') == 1, out + err + out2 + err2)
-    check('a flow step left at a box that is gone is an error, on every run', code == 1 and flow_error in out and flow_error in out2, out + out2)
-    cc = page_data(root)['snap']['cc']
+          code == code2 == 0 and 'The box src/core/entries/ is removed' in out and 'ERROR' not in out + out2, out + err + out2 + err2)
+    check('the flow of a function that goes with its box goes too, and no flow is left at a box that is gone',
+          'note   No entries removed add from src/core/entries/, and its flow with it.' in out
+          and [f['of'] for f in system(root)['flows']] == ['src/entry/cli/: main'], out + str(system(root)['flows']))
+    data = page_data(root)
+    cc = data['snap']['cc']
+    check('a line that called into the box that is gone is shown without the call, and nothing is said of it',
+          data['flows'][MAIN][1] == [0, 'return entries.add(entry)', 'records it', []] and 'entries.add' not in out + out2, out + out2)
+    check('the page still has the flow that is gone, for the tabs that had it: it is null in the Current tab',
+          ADD in data['flows'] and data['snap']['current'].get('flows', {}).get(ADD, '') is None
+          and [l[3] for l in data['snap']['committed'].get('flows', {}).get(MAIN, [])] == [[], [ADD]], data['snap']['current'].get('flows'))
     check('and its lines are marked as the entry\'s', cc['boxes'].get(ent) == 'del' and 'src/core/entries/#add' in cc['hits']['0'] and 'NewEntry' in cc['hits']['0'], cc['hits'])
 
     root = new()
@@ -947,6 +1037,19 @@ def tally(tmp):
     check('tally: a second run changes nothing in system.json', code == 0 and 'Folded' not in out
           and read(os.path.join(root, 'WORK/SYSTEM_VIEW/system.json')) == before, out + err)
     check('tally: nothing of WORK/ is in the file view', not any(f[0].startswith('WORK/') for f in data['files']))
+    add = 'src/core/entries/#add'
+    was, delta = (data['snap']['committed'].get('flows') or {}).get(add) or [], (data['snap']['cc'].get('flows') or {}).get(add) or []
+    check('tally: the Committed tab has the flow of add as it was, and Committed → Current marks the two lines the entry adds',
+          [l[1] for l in was] == ['id: EntryId = next_id()', 'store.write(Change.insert(id, entry))', 'return id']
+          and [l[1:2] + l[4:] for l in delta] == [['if already_recorded(entry):', 'add'], ['return None', 'add'], ['id: EntryId = next_id()'],
+                                                 ['store.write(Change.insert(id, entry))'], ['return id']]
+          and list(data['snap']['cc']['flows']) == [add] and 'flows' not in data['snap']['current'], str(was) + str(delta))
+    code, out, err = run(root, '--check', '--flows')
+    check('tally: --flows prints the flows, each line at its depth with the calls found',
+          code == 0 and '\nThe flow of main (src/entry/cli/):\n  command = read(args)\n  if command.name == "import":\n'
+                        '      found: list[NewEntry] = bank_files.parse(command.path)    -> src/connectors/bank-files/: parse\n      for entry in found:\n'
+                        '          categories.categorize(entry)    -> src/core/categories/: categorize\n' in out
+          and '\nThe flow of add (src/core/entries/):\n  if already_recorded(entry):\n      return None\n' in out, out + err)
 
     # an unreadable file: where, and what is wrong, in plain words
     good = read(os.path.join(root, 'WORK/SYSTEM_VIEW/changes.json'))
@@ -978,6 +1081,9 @@ def tally(tmp):
     check('Committed → Current shows only what came after the milestone',
           cc['files'].get('src/core/budgets/budgets.py') == 'chg' and cc['files'].get('src/core/entries/dedupe.py', '') == ''
           and 'src/core/entries/#add' not in cc['lines'], cc)
+    check('Seen → Current still marks the lines the milestone added to the flow of add; Committed → Current has no flow to mark',
+          [l[1] for l in (seen.get('flows') or {}).get(add) or [] if l[4:] == ['add']] == ['if already_recorded(entry):', 'return None']
+          and 'flows' not in cc, str(seen.get('flows')) + str(cc.get('flows')))
 
 
 def no_repository(tmp):
@@ -997,9 +1103,11 @@ def flat_app(tmp, name, links=None):
         'core': {'folder': 'app/', 'line': 'does', 'boxes': [box('Store', 'app/store.py', 'save(x: Text)  // saves')]},
         'platform': {'folder': 'app/', 'line': 'one system only', 'boxes': [box('Blocker', 'app/block.py', 'block(seconds: Int)  // blocks')]}},
         'links': links or [],
-        'flows': [{'name': 'Blocking', 'line': 'from the command to the block', 'steps': [
-            {'at': 'app/cli.py', 'does': 'reads the command', 'calls': 'main'},
-            {'at': 'app/block.py', 'gets': 'seconds', 'does': 'blocks', 'calls': 'block'}]}]}))
+        'flows': [
+            {'of': 'app/cli.py: main', 'sketch': [
+                'seconds = store.save(argv)  # reads the command',
+                {'code': 'block.block(seconds)', 'says': 'blocks', 'calls': ['app/block.py: block']}]},
+            {'of': 'app/block.py: block', 'sketch': ['sleep(seconds)  # keeps the apps closed']}]}))
     for path, text in {'app/__init__.py': '', 'app/cli.py': 'def main(argv):\n    return block(save(argv))\n',
                        'app/store.py': 'def save(x):\n    return x\n', 'app/block.py': 'def block(seconds):\n    return seconds\n'}.items():
         write(root, path, text)
@@ -1026,7 +1134,9 @@ def trial(tmp):
     def renamed():
         root = new()
         s = system(root)
-        s['flows'].append({'name': 'A monthly report', 'line': 'totals', 'steps': [{'at': rep, 'does': 'totals the month', 'calls': 'monthly'}]})
+        s['flows'].append({'of': rep + ': monthly', 'sketch': ['return total(month)  # totals the month']})
+        s['flows'][0]['sketch'].append({'code': 'show(this_month())', 'says': 'prints the month', 'calls': [rep + ': monthly']})
+        s['flows'][0]['sketch'].append('reports.monthly(last_month())')
         write(root, SV + 'system.json', json.dumps(s, ensure_ascii=False))
         write(root, SV + 'lines.json', json.dumps({rep: 'the reports', MONTHLY_PY: 'the monthly total'}))
         run(root)
@@ -1051,7 +1161,16 @@ def trial(tmp):
     check('"moves" carries the box to its new path, with its name, line and interface',
           code == 0 and 'ERROR' not in out and box_at(root, rep) is None and moved is not None and moved['name'] == 'Reports'
           and moved['interface'] == ['monthly(month: Month) → Report  // one month'], out + err)
-    check('the flow step that was at the box follows it', s['flows'][1]['steps'][0]['at'] == summ, s['flows'])
+    check('the flow of a function of the box follows it, and so does a call stated by hand',
+          [f['of'] for f in s['flows']] == ['src/entry/cli/: main', 'src/core/entries/: add', summ + ': monthly']
+          and s['flows'][0]['sketch'][2] == {'code': 'show(this_month())', 'says': 'prints the month', 'calls': [summ + ': monthly']}, s['flows'])
+    data = page_data(root)
+    flows = data['flows']
+    check('on the page the calls into the box are at its new path, a call written by the box\'s name among them',
+          [l[3] for l in flows[MAIN][2:]] == [[summ + '#monthly'], [summ + '#monthly']]
+          and [l[3] for l in data['snap']['committed']['flows'][MAIN][2:]] == [[rep + '#monthly'], [rep + '#monthly']], flows)
+    check('and the flow is at its new path now, at its old one at the last commit',
+          shown_flows(data) == [MAIN, ADD, summ + '#monthly'] and shown_flows(data, 'committed') == [MAIN, ADD, rep + '#monthly'], data['snap']['current'].get('flows'))
     words = json.loads(read(os.path.join(root, SV + 'lines.json')))
     check('the few words of the folder and of its renamed file follow too',
           words == {summ: 'the reports', summ + 'monthly.py': 'the monthly total'}, words)
@@ -1107,7 +1226,7 @@ def trial(tmp):
     s = system(root)
     check('with "moves" the box stays in its region although the regions share the folder',
           code == 0 and 'ERROR' not in out and [b['folder'] for b in s['regions']['platform']['boxes']] == ['app/blocking/']
-          and s['flows'][0]['steps'][1]['at'] == 'app/blocking/', out + err)
+          and s['flows'][1]['of'] == 'app/blocking/: block' and s['flows'][0]['sketch'][1]['calls'] == ['app/blocking/: block'], out + err)
     check('an empty file, such as a package marker, is not said to belong to no box', 'belong' not in out, out)
     check('the renamed file keeps its few words', json.loads(read(os.path.join(root, SV + 'lines.json'))).get('app/blocking/block.py') == 'keeps the apps closed')
 
@@ -1126,13 +1245,14 @@ def trial(tmp):
           code == 0 and 'points at app/, which is the folder of entry and core and platform. Name the region by its key' in out
           and page_data(root)['views'][0]['links'] == [], out + err)
 
-    # ---- a flow step at nothing
+    # ---- a flow of nothing
     root = new()
     s = system(root)
-    s['flows'][0]['steps'][1]['at'] = 'src/core/nothing/'
+    s['flows'][1]['of'] = 'src/core/nothing/: add'
     write(root, SV + 'system.json', json.dumps(s, ensure_ascii=False))
     code, out, err = run(root, '--check')
-    check('a flow step at a path that is not a box is an error', code == 1 and 'step 2, is at src/core/nothing/, which is not a box' in out, out + err)
+    check('a flow of a path that is not a box is an error',
+          code == 1 and 'ERROR  The flow of add (src/core/nothing/) names src/core/nothing/, which is not a box. It is not shown.' in out, out + err)
 
     # ---- a renamed file keeps its words; what the script says of itself
     root = new()
@@ -1173,9 +1293,6 @@ def pocket_repository(tmp):
         b['folder'] = 'pocket/notify.py'
     for b in was['regions']['core']['boxes']:
         b.pop('also', None)
-    for step in was['flows'][0]['steps']:
-        if step['at'] == 'pocket/notify/':
-            step['at'] = 'pocket/notify.py'
     code_of = {'pocket/search.py': 'def find(words):\n    return []\n', 'pocket/notify.py': 'def notify(title):\n    return title\n'}
     for path, w in words.items():
         if not path.endswith('/') and not path.startswith('pocket/notify/') and path != 'pocket/stopwords.txt':
@@ -1217,9 +1334,459 @@ def pocket(tmp):
     check('pocket: the moved box is marked as its change\'s', 'pocket/notify/#notify' in cc['hits']['0'] and cc['boxes'].get('pocket/notify/') == 'add', cc['hits'])
     got = json.loads(read(os.path.join(root, SV + 'lines.json')))
     check('pocket: the moved file keeps its few words', got.get('pocket/notify/macos.py') == words['pocket/notify/macos.py'] and 'pocket/notify.py' not in got, got)
+    save = 'pocket/pages.py#save'
+    check('pocket: the flows are the example\'s, each under the id of its function', system(root)['flows'] == want['flows']
+          and list(data['flows']) == ['pocket/cli.py#cmd_add', save], list(data['flows']))
+    check('pocket: a box that is one file is called by the file\'s name without its ending',
+          [l[3] for l in data['flows']['pocket/cli.py#cmd_add']] == [[save], []]
+          and [l[3] for l in data['flows'][save]] == [['pocket/fetch.py#fetch'], ['pocket/clean.py#clean'], ['pocket/store.py#put'], ['pocket/notify/#notify'], []],
+          data['flows'])
+    was = (data['snap']['committed'].get('flows') or {}).get(save) or []
+    check('pocket: a call into the moved box follows it: the Committed tab has it at the old path, the delta has no line to mark',
+          [l[3] for l in was][3:4] == [['pocket/notify.py#notify']] and 'flows' not in cc and 'flows' not in data['snap']['current'], data['snap']['committed'].get('flows'))
     commit(root, 'the two changes')
     code, out, err = run(root)
     check('pocket: once committed both entries leave the list', code == 0 and 'Took 2 built entries out' in out and changes(root) == [], out + err)
+
+
+# ---------------------------------------------------------------- flows: the body of a listed function, as a sketch
+
+def flows(tmp):
+    """A flow is the body of one listed function, written as a sketch: how it names its function, how its lines are
+    written, what is wrong with one, and what an entry of changes.json does to it. One case each."""
+    count = [0]
+
+    def new():
+        count[0] += 1
+        return mini(tmp, 'flows-%d' % count[0])
+
+    ent, rep, cli = 'src/core/entries/', 'src/core/reports/', 'src/entry/cli/'
+    monthly = rep + '#monthly'
+    main_flow, add_flow = MINI['flows']
+
+    # ---- how a flow names its function
+    root = new()
+    put(root, lambda s: s.update(flows=[{'of': 'Command line: main', 'sketch': ['return entries.add(argv)']},
+                                        {'of': 'monthly', 'sketch': ['return total(month)']},
+                                        {'of': 'src/core/entries: add', 'sketch': ['return _store(entry)']}]))
+    code, out, err = run(root)
+    check('a flow may name its box by the box\'s name, or the function alone when one box lists it: the script writes the folder',
+          code == 0 and 'ERROR' not in out and [f['of'] for f in flows_of(root)] == [cli + ': main', rep + ': monthly', ent + ': add'], out + err + str(flows_of(root)))
+    check('and the page has each flow under the id of its function', list(page_data(root)['flows']) == [MAIN, monthly, ADD], list(page_data(root)['flows']))
+
+    def twice(s):
+        for b in s['regions']['core']['boxes']:
+            b['interface'].append('export() → Text  // as text')
+        s['flows'] = [{'of': 'export', 'sketch': ['return text()']}, {'of': 'Nowhere: add', 'sketch': ['return 1']}]
+    back(root)
+    put(root, twice)
+    code, out, err = run(root)
+    check('a flow that names only a function two boxes list is an error that asks for the box',
+          code == 1 and 'ERROR  The flow of export names export, which src/core/entries/ and src/core/reports/ list: write "<box folder>: export". It is not shown.' in out
+          and 'ERROR  The flow of add (Nowhere) names Nowhere, which is not a box. It is not shown.' in out and shown_flows(page_data(root)) == [], out + err)
+
+    def same_name(s):
+        s['regions']['core']['boxes'][1]['name'] = 'Entries'
+        s['flows'][1]['of'] = 'Entries: add'
+    back(root)
+    put(root, same_name)
+    code, out, err = run(root, '--check')
+    check('a flow that names its box by a name two boxes have is an error that asks for the folder',
+          code == 1 and 'ERROR  The flow of add (Entries) names Entries, which is the name of src/core/entries/ and src/core/reports/: write the box\'s folder. '
+                        'It is not shown.' in out, out + err)
+
+    # ---- how a sketch may be written, and how the script writes it back
+    root = new()
+    put(root, lambda s: s.update(flows=[
+        {'of': cli + ': main', 'sketch': 'def main(argv):\n\t\tif argv:\n\t\t\treturn entries.add(argv)  # records it\n\n\t\treturn usage()\n'},
+        {'of': ent + ': add', 'sketch': ['      async def add(entry):', '        # only words', '        if new(entry):',
+                                         '          key = _key(entry, "#1")  # a key', '        return key']},
+        {'of': rep + ': monthly', 'sketch': ['  rows = load(month)', {'code': '  for row in rows:', 'calls': []},
+                                             {'code': '   total += row', 'says': 'adds it up', 'calls': [rep + ': monthly']}, '  return total']}]))
+    code, out, err = run(root)
+    wrote = [f.get('sketch') for f in flows_of(root)]
+    check('a sketch written as one text, with tabs, is written back one line per line, four spaces a level',
+          code == 0 and 'ERROR' not in out and wrote[0] == ['if argv:', '    return entries.add(argv)  # records it', 'return usage()'], out + err + str(wrote[:1]))
+    check('a sketch that starts at any depth, indented by any regular step, is written back the same way',
+          wrote[1] == ['# only words', 'if new(entry):', '    key = _key(entry, "#1")  # a key', 'return key'], wrote[1:2])
+    check('a line that states its calls stays an object, with its code at its depth',
+          wrote[2] == ['rows = load(month)', {'code': 'for row in rows:', 'calls': []},
+                       {'code': '    total += row', 'says': 'adds it up', 'calls': [rep + ': monthly']}, 'return total'], wrote[2:])
+    check('a first line that repeats the def, async or not, is taken out of the sketch, and it is said',
+          'note   The flow of main (src/entry/cli/): the first line of its sketch repeated the def.' in out
+          and 'note   The flow of add (src/core/entries/): the first line of its sketch repeated the def.' in out and 'The flow of monthly' not in out, out)
+    text = read(os.path.join(root, SV + 'system.json'))
+    check('system.json keeps a sketch one line per line, however short it is',
+          '    { "of": "src/core/entries/: add",\n      "sketch": [\n        "# only words",\n        "if new(entry):",\n'
+          '        "    key = _key(entry, \\"#1\\")  # a key",\n        "return key"\n      ] }' in text
+          and '        { "code": "for row in rows:", "calls": [] },\n' in text, text[text.find('"flows"'):])
+    got = page_data(root)['flows']
+    check('a line that is only a comment stays a line, and the words of a line start at the first # outside a string',
+          got.get(ADD) == [[0, '# only words', '', []], [0, 'if new(entry):', '', []], [1, 'key = _key(entry, "#1")', 'a key', []], [0, 'return key', '', []]], got.get(ADD))
+    check('the page has each line as [level, code, words, calls], and a call to the flow\'s own function is left out',
+          got.get(MAIN) == [[0, 'if argv:', '', []], [1, 'return entries.add(argv)', 'records it', [ADD]], [0, 'return usage()', '', []]]
+          and got.get(monthly) == [[0, 'rows = load(month)', '', []], [0, 'for row in rows:', '', []], [1, 'total += row', 'adds it up', []], [0, 'return total', '', []]], got)
+    code, out, err = run(root)
+    check('a second run finds the sketches as it wrote them: nothing is said and nothing changes',
+          code == 0 and 'note' not in out and read(os.path.join(root, SV + 'system.json')) == text, out + err)
+
+    # ---- what is wrong with a flow: an error, the page is built, and the flow is not shown
+    root = new()
+    old = {'name': 'Adding an entry', 'line': 'from the command to the record', 'steps': [
+        {'at': cli, 'does': 'reads the command', 'calls': 'main'}, {'at': ent, 'gets': 'the entry', 'does': 'records it', 'calls': 'add'}]}
+    for what, change, said, shown in [
+            ('of a function its box does not list', lambda s: s['flows'][1].update(of=rep + ': yearly'),
+             'The flow of yearly (src/core/reports/) names yearly, which src/core/reports/ does not list. Listed there: monthly. It is not shown.', [MAIN]),
+            ('with no line', lambda s: s['flows'][1].update(sketch=[]),
+             'The flow of add (src/core/entries/) has no line under "sketch". Write its lines, or take the flow out.', [MAIN]),
+            ('with no sketch at all', lambda s: s['flows'][1].pop('sketch'), 'The flow of add (src/core/entries/) has no line under "sketch".', [MAIN]),
+            ('still written as steps', lambda s: s['flows'].__setitem__(1, old),
+             'The flow "Adding an entry" is written as steps, as flows were before they were code. It is not shown. Write it again as the body of one '
+             'listed function: "of": "<box folder>: <function>", then "sketch", its lines.', [MAIN]),
+            ('that does not say which function it is the body of', lambda s: s['flows'][1].pop('of'),
+             'A flow does not say which function it is the body of. Write "of": "<box folder>: <function>".', [MAIN])]:
+        back(root)
+        put(root, change)
+        os.remove(os.path.join(root, 'WORK/SYSTEM_VIEW.html'))
+        code, out, err = run(root)
+        built = os.path.exists(os.path.join(root, 'WORK/SYSTEM_VIEW.html'))
+        check('a flow %s is an error; the page is built without it' % what,
+              code == 1 and 'ERROR  ' + said in out and built and shown_flows(page_data(root)) == shown, out + err)
+    back(root)
+    put(root, lambda s: s.update(flows=[old]))
+    run(root)
+    commit(root, 'the flows still as steps')
+    put(root, lambda s: s.update(flows=MINI['flows']))
+    code, out, err = run(root)
+    data = page_data(root)
+    check('once a flow is written again as code, a last commit that still has it as steps is no error: the Committed tab has no flow',
+          code == 0 and 'ERROR' not in out and shown_flows(data) == [MAIN, ADD] and shown_flows(data, 'committed') == [] and 'flows' not in data['snap']['cc'], out + err)
+    back(root)
+    put(root, lambda s: s['flows'].append({'of': 'Entries: add', 'sketch': ['return 1']}))
+    code, out, err = run(root)
+    check('two flows of one function are an error, however each names it; the first is the one shown',
+          code == 1 and 'ERROR  The flow of add (src/core/entries/) is written twice. A function has one flow.' in out
+          and [l[1] for l in page_data(root)['flows'].get(ADD, [])] == ['key = _key(entry)', 'return _store(entry, key)'], out + err)
+    back(root)
+    put(root, lambda s: s['flows'][0]['sketch'].append({'code': 'show(total)', 'calls': [rep + ': yearly', ent + ': add']}))
+    code, out, err = run(root)
+    check('a call stated by hand that names nothing listed is an error that says what is listed',
+          code == 1 and 'ERROR  The flow of main (src/entry/cli/): "calls" names yearly, which src/core/reports/ does not list. Listed there: monthly. '
+                        'A call is written "<box folder>: <function>".' in out and os.path.exists(os.path.join(root, 'WORK/SYSTEM_VIEW.html')), out + err)
+    back(root)
+    put(root, lambda s: s['flows'][1].update(sketch=['step_%d()' % i for i in range(40)]))
+    code, out, err = run(root, '--check')
+    check('a sketch of 40 lines is not said to be long', code == 0 and 'lines long' not in out, out + err)
+    put(root, lambda s: s['flows'][1].update(sketch=['step_%d()' % i for i in range(41)]))
+    code, out, err = run(root, '--check')
+    check('a sketch of more than 40 lines is only said',
+          code == 0 and 'note   The flow of add (src/core/entries/) is 41 lines long. A flow is a sketch of the steps an architect would name, not the code.' in out, out + err)
+
+    # ---- --flows prints every flow with the calls found
+    back(root)
+    code, out, err = run(root, '--check', '--flows')
+    check('--flows prints every flow, and beside each line the listed functions found on it',
+          code == 0 and '\nThe flow of main (src/entry/cli/):\n  entry = NewEntry(argv)\n  return entries.add(entry)    -> src/core/entries/: add\n' in out
+          and '\nThe flow of add (src/core/entries/):\n  key = _key(entry)\n  return _store(entry, key)\n' in out, out + err)
+    code, out, err = run(root, '--check')
+    check('without --flows no flow is printed', code == 0 and 'The flow of' not in out, out + err)
+    put(root, lambda s: s.update(flows=[]))
+    code, out, err = run(root, '--check', '--flows')
+    check('--flows says so when no flow is written', code == 0 and 'No flow is written.' in out, out + err)
+
+    # ---- an entry states a flow: it replaces the flow of that function
+    root = new()
+    edit(root, ENTRIES_PY, 'return 1', 'return 2')
+    stated = {'name': 'Adds are checked', 'line': 'an entry already there is not recorded again', 'files': {ENTRIES_PY: 'looks before it records'},
+              'flows': [{'of': 'add', 'sketch': 'if taken(entry):\n\treturn None\nreturn _store(entry, key)'}]}
+    entries(root, stated)
+    code, out, err = run(root)
+    now_add = {'of': ent + ': add', 'sketch': ['if taken(entry):', '    return None', 'return _store(entry, key)']}
+    check('a flow an entry states replaces the flow of that function, written in the script\'s layout',
+          code == 0 and 'ERROR' not in out and 'Folded the built changes' in out and flows_of(root) == [main_flow, now_add], out + err + str(flows_of(root)))
+    check('the entry that states the flow is not told to check it', 'which has a flow' not in out, out)
+    data = page_data(root)
+    cc = data['snap']['cc']
+    check('an entry that states a flow marks that function', cc['hits'] == {'0': [ADD]} and 'src/core/entries/#add' not in cc['lines'], cc['hits'])
+    check('Committed → Current gives the flow line by line: a line only the last commit has ends with "del", one only the current state has with "add"',
+          cc.get('flows') == {ADD: [[0, 'key = _key(entry)', 'the same entry gets the same key', [], 'del'], [0, 'if taken(entry):', '', [], 'add'],
+                                    [1, 'return None', '', [], 'add'], [0, 'return _store(entry, key)', '', []]]}, cc.get('flows'))
+    check('the Committed tab has the flow as it was, and the Current tab as it is listed',
+          data['snap']['committed'].get('flows') == {ADD: [[0, 'key = _key(entry)', 'the same entry gets the same key', []], [0, 'return _store(entry, key)', '', []]]}
+          and 'flows' not in data['snap']['current'] and [l[1] for l in data['flows'][ADD]] == ['if taken(entry):', 'return None', 'return _store(entry, key)'],
+          data['snap']['committed'].get('flows'))
+    code, out, err = run(root)
+    check('a second run changes nothing and folds nothing', code == 0 and 'Folded' not in out and flows_of(root) == [main_flow, now_add] and changes(root) == [stated], out + err)
+    git(root, 'checkout', 'HEAD', '--', SV + 'system.json')
+    commit(root, 'committed with system.json not folded')
+    code, out, err = run(root)
+    check('an entry that states a flow stays while system.json at the last commit has the flow as it was',
+          code == 0 and 'Took' not in out and changes(root) == [stated] and flows_of(root) == [main_flow, now_add]
+          and [data['changes'][i]['name'] for i in page_data(root)['snap']['cc']['changes']] == ['Adds are checked'], out + err)
+    commit(root, 'the fold')
+    code, out, err = run(root, '--from', 'base')
+    data = page_data(root)
+    check('and leaves once the last commit holds the flow', code == 0 and 'Took 1 built entry out' in out and changes(root) == []
+          and flows_of(root) == [main_flow, now_add] and 'flows' not in data['snap']['cc'], out + err)
+    tab = data['snap'].get('from', {})
+    check('a delta from an earlier commit still gives the flow line by line, and marks the function for the change',
+          [l[4:] for l in (tab.get('flows') or {}).get(ADD, [])] == [['del'], ['add'], ['add'], []]
+          and [tab['hits'][str(i)] for i in tab.get('changes', []) if data['changes'][i]['name'] == 'Adds are checked'] == [[ADD]], tab.get('flows'))
+
+    # ---- an entry adds a flow, and takes one out
+    root = new()
+    redrawn = {'name': 'Flows redrawn', 'line': 'f', 'files': {}, 'flows': [
+        {'of': rep + ': monthly', 'sketch': ['return total(month)  # adds up the month']}, {'of': ent + ': add', 'sketch': []}, {'of': 'main'}]}
+    entries(root, redrawn)
+    code, out, err = run(root)
+    data = page_data(root)
+    check('an entry adds the flow of a function that had none, and takes a flow out by stating it with no line or with no sketch',
+          code == 0 and 'ERROR' not in out and flows_of(root) == [{'of': rep + ': monthly', 'sketch': ['return total(month)  # adds up the month']}], out + err + str(flows_of(root)))
+    check('each of those functions is marked for the entry', sorted(data['snap']['cc']['hits']['0']) == sorted([MAIN, ADD, monthly]), data['snap']['cc']['hits'])
+    check('the page keeps a flow only one state has: null in the tab of the state that lacks it',
+          sorted(data['flows']) == sorted([MAIN, ADD, monthly]) and data['snap']['current'].get('flows') == {MAIN: None, ADD: None}
+          and data['snap']['committed'].get('flows') == {monthly: None}, str(data['snap']['current'].get('flows')) + str(data['snap']['committed'].get('flows')))
+    commit(root, 'the fold')
+    code, out, err = run(root)
+    check('an entry that takes a flow out leaves once the last commit no longer has the flow', code == 0 and 'Took 1 built entry out' in out and changes(root) == [], out + err)
+
+    # ---- a function an entry removes takes its flow with it
+    root = new()
+    edit(root, ENTRIES_PY, 'def add(entry):', 'def record(entry):')
+    renamed = {'name': 'Add becomes record', 'line': 'r', 'files': {ENTRIES_PY: 'add is now record'},
+               'interface': {ent: ['- add', 'record(entry: NewEntry) → EntryId  // records one entry']}}
+    entries(root, renamed)
+    code, out, err = run(root)
+    check('a function an entry removes takes its flow with it, and the entry is told how to keep the flow if the function was renamed',
+          code == 0 and 'note   Add becomes record removed add from src/core/entries/, and its flow with it. If the function was renamed, state the flow again '
+                        'in the entry, under "flows", with its new name.' in out and flows_of(root) == [main_flow], out + err + str(flows_of(root)))
+    check('a line that called the function that is gone is said, and shown without the call',
+          'note   The flow of main (src/entry/cli/) calls entries.add(), which src/core/entries/ does not list. The line is shown without that call.' in out
+          and page_data(root)['flows'][MAIN][1][3] == [], out)
+    entries(root, dict(renamed, flows=[{'of': ent + ': record', 'sketch': add_flow['sketch']}]))
+    code, out, err = run(root)
+    check('stated again under its new name, the flow is back', code == 0 and 'ERROR' not in out
+          and flows_of(root) == [main_flow, {'of': ent + ': record', 'sketch': add_flow['sketch']}] and ent + '#record' in page_data(root)['flows'], out + err + str(flows_of(root)))
+    back(root)
+    edit(root, ENTRIES_PY, 'def add(entry):', 'def record(entry):')
+    entries(root, dict(renamed, flows=[{'of': ent + ': record', 'sketch': add_flow['sketch']}]))
+    code, out, err = run(root)
+    check('the same in one run: the old flow goes with the function, the entry\'s flow of the new one is added',
+          code == 0 and 'ERROR' not in out and [f['of'] for f in flows_of(root)] == [cli + ': main', ent + ': record'], out + err + str(flows_of(root)))
+
+    # ---- an entry's flow that names nothing listed
+    root = new()
+    edit(root, ENTRIES_PY, 'return 1', 'return 2\n\n\ndef count():\n    return 0')
+    counts = {'name': 'Counts', 'line': 'c', 'files': {ENTRIES_PY: 'counts the entries'}, 'interface': {ent: ['count() → Int  // how many entries']}}
+    entries(root, dict(counts, flows=[{'of': ent + ': tally', 'sketch': ['return len(rows)']}]))
+    before = read(os.path.join(root, SV + 'system.json'))
+    code, out, err = run(root)
+    check('an entry whose flow names a function its box does not list is an error, and nothing of the entry is folded',
+          code == 1 and 'ERROR  Counts: a flow under "flows" names tally, which src/core/entries/ does not list. Listed there: add, listing, count.' in out
+          and 'Nothing was folded from: Counts.' in out and read(os.path.join(root, SV + 'system.json')) == before, out + err)
+    entries(root, dict(counts, flows=[{'of': 'Nowhere: count', 'sketch': ['return len(rows)']}]))
+    code, out, err = run(root, '--check')
+    check('and so is one whose flow names a box that is not there', code == 1 and 'ERROR  Counts: a flow under "flows" names Nowhere, which is not a box.' in out, out + err)
+    entries(root, dict(counts, flows=[{'of': ent + ': count', 'sketch': ['return len(listing())  # one for every entry']}]))
+    code, out, err = run(root)
+    check('an entry may state the flow of a function it brings',
+          code == 0 and 'ERROR' not in out and flows_of(root)[2:] == [{'of': ent + ': count', 'sketch': ['return len(listing())  # one for every entry']}]
+          and page_data(root)['flows'].get(ent + '#count') == [[0, 'return len(listing())', 'one for every entry', [ent + '#listing']]], out + err + str(flows_of(root)))
+
+    # ---- a planned entry states a flow: only its tab shows it
+    root = new()
+    before = read(os.path.join(root, SV + 'system.json'))
+    yearly = rep + '#yearly'
+    entries(root, {'name': 'Adds are checked', 'line': 'a', 'plan': 'Checks', 'files': {ENTRIES_PY: 'looks before it records'},
+                   'flows': [{'of': ent + ': add', 'sketch': ['if taken(entry):', '    return None', 'return _store(entry, key)']}]},
+            {'name': 'Totals by year', 'line': 'a year at a time', 'plan': 'Checks', 'files': {rep + 'yearly.py': '+ adds up the months'},
+             'interface': {rep: ['yearly(year: Int) → Report  // one year']},
+             'flows': [{'of': rep + ': yearly', 'sketch': ['for month in months(year):', '    total += monthly(month)  # month by month', 'return total']}]})
+    code, out, err = run(root)
+    data = page_data(root)
+    pl = data['snap'].get('plan:0', {})
+    check('a planned entry that states a flow is not folded', code == 0 and 'ERROR' not in out and read(os.path.join(root, SV + 'system.json')) == before, out + err)
+    check('the plan tab gives the flow line by line: a line the plan takes out ends with "del", one it adds with "add"',
+          (pl.get('flows') or {}).get(ADD) == [[0, 'key = _key(entry)', 'the same entry gets the same key', [], 'del'], [0, 'if taken(entry):', '', [], 'add'],
+                                              [1, 'return None', '', [], 'add'], [0, 'return _store(entry, key)', '', []]], pl.get('flows'))
+    check('the planned entry marks the function whose flow it states', pl.get('hits', {}).get('0') == [ADD] and yearly in pl.get('hits', {}).get('1', []), pl.get('hits'))
+    check('the other tabs have the flow as it is now', [l[1] for l in data['flows'][ADD]] == ['key = _key(entry)', 'return _store(entry, key)']
+          and ADD not in (data['snap']['current'].get('flows') or {}) and ADD not in (data['snap']['cc'].get('flows') or {}), data['snap']['cc'].get('flows'))
+    check('the flow of a function the plan brings is on the page, with its calls, and is null in the tabs before the plan',
+          data['flows'].get(yearly) == [[0, 'for month in months(year):', '', []], [1, 'total += monthly(month)', 'month by month', [monthly]], [0, 'return total', '', []]]
+          and data['snap']['current'].get('flows') == {yearly: None} and data['snap']['committed'].get('flows') == {yearly: None}
+          and data['snap']['cc'].get('flows') == {yearly: None} and list(pl.get('flows') or {}) == [ADD], str(data['flows'].get(yearly)) + str(data['snap']['current'].get('flows')))
+
+    # ---- a box that goes with its files takes its flows with it
+    root = new()
+    put(root, lambda s: s['flows'].append({'of': rep + ': monthly', 'sketch': ['return total(month)  # adds up the month']}))
+    run(root)
+    commit(root, 'a flow of monthly')
+    shutil.rmtree(os.path.join(root, rep))
+    entries(root, {'name': 'No reports', 'line': 'gone', 'files': {MONTHLY_PY: 'removed'}})
+    code, out, err = run(root)
+    data = page_data(root)
+    check('a box removed because its files are gone takes its flows with it, with no error',
+          code == 0 and 'ERROR' not in out and 'The box src/core/reports/ is removed' in out and flows_of(root) == [main_flow, add_flow], out + err + str(flows_of(root)))
+    check('the page still has that flow for the Committed tab: it is null in the Current tab',
+          monthly in data['flows'] and data['snap']['current'].get('flows') == {monthly: None} and 'flows' not in data['snap']['committed'], data['snap']['current'].get('flows'))
+
+
+def calls(tmp):
+    """The listed functions a line of a sketch calls, in a project whose boxes have names of several words, a box that is
+    one file, two boxes one word names, and a listed name with a dot."""
+    root = os.path.join(tmp, 'calls')
+    box = lambda n, f, *lines: {'name': n, 'folder': f, 'line': 'does ' + n, 'interface': list(lines)}
+    cli, wal, archive, order, videos = 'src/entry/cli.py', 'src/core/wal/', 'src/core/archive/', 'src/core/join-order/', 'src/core/videos/'
+    sketch = [
+        'usage()',
+        'flush()',
+        'lsn = write_ahead_log.append(record)  # by the box\'s name',
+        'wal.flush()  # by the last part of its folder',
+        'tree = join_order.order(stmt)',
+        'n = youtube.minutes(id) + videos.youtube.minutes(other)',
+        'cli.usage()',
+        'main(rest)',
+        'log("wal.flush() # not a call", x)  # the words',
+        'wal.append(a); archive.trim()',
+        'wal.trim()',
+        'join_order.cost(stmt)',
+        {'code': 'join_order.price(stmt)', 'calls': []},
+        {'code': 'archive.keep(lsn)', 'says': 'kept', 'calls': [archive + ': trim', 'WAL: trim', 'youtube.minutes', cli + ': main']}]
+    figure = {'name': 'Calls', 'regions': {
+        'entry': {'folder': 'src/entry/', 'line': 'in', 'boxes': [box('Command line', cli, 'main(argv: [Text])  // runs', 'usage()  // prints the help')]},
+        'core': {'folder': 'src/core/', 'line': 'does', 'boxes': [
+            box('Write-ahead log', wal, 'append(record: Record) → Lsn  // appends', 'flush()  // flushes', 'trim()  // trims the log'),
+            box('WAL', archive, 'trim()  // trims the archive'),
+            box('Join order', order, 'order(stmt: Statement) → JoinTree  // orders the joins'),
+            box('Videos', videos, 'youtube.minutes(id: Text) → Int  // how long a video is')]}},
+        'flows': [{'of': cli + ': main', 'sketch': sketch}]}
+    write(root, SV + 'system.json', json.dumps(figure, ensure_ascii=False))
+    write(root, SV + 'changes.json', '[]\n')
+    for path, text in {cli: 'def main(argv):\n    return usage()\n\n\ndef usage():\n    return 0\n', wal + 'wal.py': 'def append(r):\n    return flush()\n\n\ndef flush():\n    return trim()\n\n\ndef trim():\n    return 0\n',
+                       archive + 'archive.py': 'def trim():\n    return 0\n', order + 'order.py': 'def order(stmt):\n    return stmt\n',
+                       videos + 'youtube.py': 'def minutes(id):\n    return 0\n'}.items():
+        write(root, path, text)
+    git(root, 'init', '-q')
+    code, out, err = run(root, '--flows')
+    got = (page_data(root)['flows'] if code == 0 else {}).get(cli + '#main') or [[0, '', '', None]] * len(sketch)
+    found = lambda at: got[at][3]
+    said = out.split('\nThe flow of main (src/entry/cli.py):')[0]        # the notes, without what --flows prints after them
+    check('calls: the project builds with no error', code == 0 and 'ERROR' not in out and len(got) == len(sketch), out + err)
+    check('a call written bare is a function of the flow\'s own box', found(0) == [cli + '#usage'], got[0])
+    check('a call written bare is not looked for in another box, and nothing is said', found(1) == [] and 'flush()' not in said, got[1])
+    check('a box is called by its name written as an identifier: write_ahead_log', found(2) == [wal + '#append'], got[2])
+    check('or by the last part of its folder: wal', found(3) == [wal + '#flush'], got[3])
+    check('a folder with a dash is called with an underscore: join_order', found(4) == [order + '#order'], got[4])
+    check('a listed name with a dot is found where it is written out in full, with its box before it or not, and once', found(5) == [videos + '#youtube.minutes'], got[5])
+    check('a box that is one file is called by the file\'s name without its ending: cli', found(6) == [cli + '#usage'], got[6])
+    check('a call to the flow\'s own function is left out', found(7) == [], got[7])
+    check('what is inside a string is not a call, and a # there does not start the words',
+          got[8] == [0, 'log("wal.flush() # not a call", x)', 'the words', []], got[8])
+    check('two calls on one line are both found, in their order; a word two boxes have names the one that lists the function',
+          found(9) == [wal + '#append', archive + '#trim'], got[9])
+    check('a call two boxes match is said, and the line is shown without it',
+          found(10) == [] and 'note   The flow of main (src/entry/cli.py) calls wal.trim(), which src/core/archive/ and src/core/wal/ list. The line is shown without that call.' in out, out)
+    check('a call into a box that does not list the function is said, and the line is shown without it',
+          found(11) == [] and 'note   The flow of main (src/entry/cli.py) calls join_order.cost(), which src/core/join-order/ does not list. The line is shown without that call.' in out, out)
+    check('"calls": [] on a line says it calls nothing listed: nothing is said of it', found(12) == [] and 'join_order.price' not in said and 'join_order.cost' in said, out)
+    check('calls stated by hand are taken as stated: by folder, by box name or alone, each once, and never the flow\'s own function',
+          got[13] == [0, 'archive.keep(lsn)', 'kept', [archive + '#trim', videos + '#youtube.minutes']] and 'archive.keep' not in said, got[13])
+    check('--flows prints each line at its depth with the calls found beside it',
+          '\nThe flow of main (src/entry/cli.py):\n  usage()    -> src/entry/cli.py: usage\n  flush()\n  lsn = write_ahead_log.append(record)    -> src/core/wal/: append\n' in out
+          and '\n  wal.append(a); archive.trim()    -> src/core/wal/: append, src/core/archive/: trim\n' in out, out)
+
+
+# ---------------------------------------------------------------- boxes inside boxes: two levels and no more
+
+NEST = 'src/core/entries/'
+
+
+def nested(tmp, name):
+    """Mini with two boxes inside Entries, in one row whose folder is the box's own: the inner boxes sit directly in it.
+    Entries lists add as a bare name: the function of the box inside."""
+    figure = json.loads(json.dumps(MINI))
+    box = figure['regions']['core']['boxes'][0]
+    box['interface'] = ['add', 'listing() → [Entry]  // every entry', 'NewEntry = { text: Text }  // an entry not yet recorded']
+    box['inside'] = [{'name': 'Parts', 'folder': NEST, 'line': 'what recording an entry takes', 'boxes': [
+        {'name': 'Records', 'folder': NEST + 'records/', 'line': 'the entries themselves', 'interface': ['add(entry: NewEntry) → EntryId  // records one entry']},
+        {'name': 'Keys', 'folder': NEST + 'keys/', 'line': 'one key per entry', 'interface': ['key(entry: NewEntry) → Key  // the same key on every run']}]}]
+    figure['flows'] = [{'of': 'src/entry/cli/: main', 'sketch': ['return entries.add(NewEntry(argv))  # records it']},
+                       {'of': NEST + ': add', 'sketch': ['return _store(entry, keys.key(entry))  # under its key']}]
+    files = dict(MINI_FILES)
+    files[ENTRIES_PY] = 'class NewEntry:\n    pass\n\n\ndef listing():\n    return []\n'
+    files[NEST + 'records/records.py'] = 'def add(entry):\n    return _store(entry, key(entry))\n\n\ndef _store(entry, key):\n    return key\n'
+    files[NEST + 'keys/keys.py'] = 'def key(entry):\n    return 1\n'
+    return mini(tmp, name, figure, files)
+
+
+def levels(tmp):
+    """Boxes go two levels deep: a box of the overview may have boxes inside it, and those have none."""
+    records, keys, index = NEST + 'records/', NEST + 'keys/', NEST + 'index/'
+    inner = lambda root: [b['folder'] for b in system(root)['regions']['core']['boxes'][0]['inside'][0]['boxes']]
+
+    # ---- a box whose inner boxes sit directly in its own folder
+    root = nested(tmp, 'levels-1')
+    code, out, err = run(root)
+    data = page_data(root)
+    view = next((v for v in data['views'] if v['id'] == NEST), {'rows': []})
+    check('a box whose one row has the box\'s own folder builds with no error and no note', code == 0 and 'ERROR' not in out and 'note' not in out, out + err)
+    check('its view lists the boxes inside it, in that one row',
+          [v['id'] for v in data['views']] == ['', NEST] and [(r['dir'], r['title'], [b['folder'] for b in r['boxes']]) for r in view['rows']] == [(NEST, 'Parts', [records, keys])],
+          view)
+    check('a file directly in the box\'s folder is the box\'s, and one in a box inside is that box\'s',
+          'belong' not in out and data['api'].get(records) == [['add(entry: NewEntry) → EntryId', 'records one entry']]
+          and data['api'].get(NEST) == [['add(entry: NewEntry) → EntryId', 'records one entry'], ['listing() → [Entry]', 'every entry']], data.get('api'))
+    check('a flow of a bare name in a box is the flow of the function of the box inside: the script writes that box\'s folder',
+          [f['of'] for f in flows_of(root)] == ['src/entry/cli/: main', records + ': add'] and list(data['flows']) == [MAIN, records + '#add'], flows_of(root))
+    check('a call through the outer box is a call of the inner box\'s function, and the inner flow calls its neighbour by name',
+          data['flows'][MAIN][0][3] == [records + '#add'] and data['flows'][records + '#add'][0][3] == [keys + '#key'], data['flows'])
+    write(root, index + 'index.py', 'def find(x):\n    return x\n')
+    found = {'name': 'Index', 'folder': index, 'line': 'finds entries', 'interface': ['find(x: Text) → Entry?  // finds one']}
+    entries(root, {'name': 'An index', 'line': 'entries are found by their text', 'files': {index + 'index.py': '+ finds an entry'}, 'boxes': [found]})
+    code, out, err = run(root)
+    data = page_data(root)
+    view = next((v for v in data['views'] if v['id'] == NEST), {'rows': [{'boxes': []}]})
+    check('an entry adds a new box inside such a box through "boxes": it goes last in the row',
+          code == 0 and 'ERROR' not in out and inner(root) == [records, keys, index] and system(root)['regions']['core']['boxes'][0]['inside'][0]['boxes'][2] == found, out + err)
+    check('the page lists the new box in the box\'s view, marked as added, with its line marked as the entry\'s',
+          [b['folder'] for b in view['rows'][0]['boxes']] == [records, keys, index] and data['snap']['cc']['boxes'].get(index) == 'add'
+          and data['snap']['cc']['hits']['0'] == [index + '#find'], data['snap']['cc']['hits'])
+
+    # ---- a third level is refused
+    back(root)
+    write(root, index + 'trees/tree.py', 'def find(x):\n    return x\n')
+    before = read(os.path.join(root, SV + 'system.json'))
+    deep = {'name': 'Index', 'folder': index, 'line': 'finds entries',
+            'inside': [{'name': 'Kinds', 'folder': index, 'line': 'the kinds of index', 'boxes': [{'name': 'Trees', 'folder': index + 'trees/', 'line': 'sorted'}]}]}
+    entries(root, {'name': 'An index', 'line': 'i', 'files': {index + 'trees/tree.py': '+ a sorted index'}, 'boxes': [deep]})
+    code, out, err = run(root)
+    check('an entry that would put boxes inside a box that is itself inside a box is an error, and is not folded',
+          code == 1 and 'ERROR  An index: The box src/core/entries/index/trees/ is inside src/core/entries/index/, which is itself inside src/core/entries/. '
+                        'Boxes go two levels deep and no more' in out and 'Nothing was folded from: An index.' in out
+          and read(os.path.join(root, SV + 'system.json')) == before, out + err)
+    back(root)
+    write(root, 'src/core/tags/names/names.py', 'def tag(x):\n    return x\n')
+    tags = {'name': 'Tags', 'folder': 'src/core/tags/', 'line': 'tags',
+            'inside': [{'name': 'Parts', 'folder': 'src/core/tags/', 'line': 'p', 'boxes': [{'name': 'Names', 'folder': 'src/core/tags/names/', 'line': 'the names'}]}]}
+    entries(root, {'name': 'Tags', 'line': 't', 'files': {'src/core/tags/names/names.py': '+ names of tags'}, 'boxes': [tags]})
+    code, out, err = run(root)
+    check('a new box of the overview may come with boxes inside it: that is two levels',
+          code == 0 and 'ERROR' not in out and system(root)['regions']['core']['boxes'][-1] == tags and 'src/core/tags/' in [v['id'] for v in page_data(root)['views']], out + err)
+    back(root)
+    before = read(os.path.join(root, SV + 'system.json'))
+    put(root, lambda s: s['regions']['core']['boxes'][0]['inside'][0]['boxes'][0].update(
+        inside=[{'name': 'Rows', 'folder': records, 'line': 'r', 'boxes': [{'name': 'Rows', 'folder': records + 'rows/', 'line': 'the rows'}]}]))
+    written = read(os.path.join(root, SV + 'system.json'))
+    code, out, err = run(root)
+    check('a system.json with boxes three levels deep stops the script, which says that boxes go two levels deep',
+          code == 2 and 'Traceback' not in err and len(err.strip().split('\n')) == 1 and 'two levels deep' in err
+          and 'the box src/core/entries/records/ is inside another box and has boxes inside it' in err
+          and read(os.path.join(root, SV + 'system.json')) == written != before, out + err)
+    back(root)
+    put(root, lambda s: s['regions']['core']['boxes'][0]['inside'][0]['boxes'][0].update(inside=[]))
+    code, out, err = run(root, '--check')
+    check('an empty "inside" on a box inside a box is no third level', code == 0 and 'ERROR' not in out, out + err)
 
 
 def main():
@@ -1233,6 +1800,9 @@ def main():
         review(tmp)
         trial(tmp)
         pocket(tmp)
+        flows(tmp)
+        calls(tmp)
+        levels(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print('\nResult: %d passed, %d failed' % (len(PASS), len(FAIL)))

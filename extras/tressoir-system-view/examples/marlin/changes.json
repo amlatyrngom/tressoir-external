@@ -30,7 +30,18 @@
       "src/core/storage/disk/wal/wal.rs": "one flush for the whole group"
     },
     "affects": ["commit"],
-    "interface": { "src/core/storage/disk/wal/": ["flush_group(upto: Lsn)  // flushes once for every commit waiting below this position"] } },
+    "interface": { "src/core/storage/disk/wal/": ["flush_group(upto: Lsn)  // flushes once for every commit waiting below this position"] },
+    "flows": [
+      { "of": "src/core/transactions/durability/commit/: commit",
+        "sketch": [
+          "conflicts.check(txn)  # fails when another transaction wrote the same row first",
+          "at: Timestamp = next_timestamp()  # the commit time fixes the order other transactions see",
+          "lsn: Lsn = wal.append(records_of(txn, at))  # the changes are appended to the log",
+          "wal.flush_group(lsn)  # one flush serves every commit waiting in the group",
+          "replicas.ship(lsn)  # the other nodes receive the log",
+          "return at"
+        ] }
+    ] },
   { "name": "Backups to object storage", "line": "BACKUP and RESTORE to any S3-compatible store",
     "files": {
       "src/connectors/object-store/s3.rs": "upload and download",
@@ -58,7 +69,21 @@
       "src/entry/wire/session.rs": "owns the cache"
     },
     "affects": ["handle"],
-    "interface": { "src/core/sql/": ["cached_plan(session: Session, sql: Text) → Plan?  // returns the plan kept from an earlier run of the same text, if any"] } },
+    "interface": { "src/core/sql/": ["cached_plan(session: Session, sql: Text) → Plan?  // returns the plan kept from an earlier run of the same text, if any"] },
+    "flows": [
+      { "of": "src/entry/wire/: handle",
+        "sketch": [
+          "plan: Plan | None = sql.cached_plan(session, message.sql)  # the same text run before keeps its plan, so most statements skip the next two steps",
+          "if plan is None:",
+          "    stmt: Statement = sql.compile(message.sql, catalog)  # text to a checked, bound statement",
+          "    plan = optimizer.optimize(stmt, catalog)  # chooses how to run it",
+          "snapshot: Snapshot = transactions.snapshot(session.txn)  # the query sees the database as of now, whatever commits meanwhile",
+          "rows: RowStream = execution.run(plan, snapshot)  # the plan is cut into pipelines that run on worker threads",
+          "while batch := results.next(rows):  # rows go back in batches as they are ready",
+          "    send(session, batch)",
+          "return Reply.done()"
+        ] }
+    ] },
   { "name": "Columnar tables", "line": "tables stored by column, for scans over few columns", "plan": "Storage for analytics",
     "files": {
       "src/core/storage/access/columnar/segment.rs": "+ compressed chunks of one column",

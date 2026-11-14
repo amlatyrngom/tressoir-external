@@ -45,14 +45,17 @@
     { "from": "core", "to": "external", "label": "pages", "says": "Saving a page downloads it through Fetching." }
   ],
   "flows": [
-    { "name": "Saving a page", "line": "from the command to the stored page",
-      "steps": [
-        { "at": "pocket/cli.py", "does": "receives the add command and the address", "calls": "cmd_add" },
-        { "at": "pocket/pages.py", "gets": "the address", "does": "saves the page", "calls": "save" },
-        { "at": "pocket/fetch.py", "gets": "the address", "does": "downloads the page", "calls": "fetch" },
-        { "at": "pocket/clean.py", "gets": "HTML", "does": "keeps the article", "calls": "clean" },
-        { "at": "pocket/store.py", "gets": "the page", "does": "stores it", "calls": "put" },
-        { "at": "pocket/notify/", "gets": "the title", "does": "shows a notice", "calls": "notify" },
-        { "at": "pocket/cli.py", "gets": "the page's number", "does": "prints it" }
+    { "of": "pocket/cli.py: cmd_add",
+      "sketch": [
+        "id: PageId = pages.save(url)  # fetches, cleans and stores the page",
+        "print(id)"
+      ] },
+    { "of": "pocket/pages.py: save",
+      "sketch": [
+        "html: Text = fetch.fetch(url)  # downloads the page, with a time limit",
+        "text: Text = clean.clean(html)  # keeps the article, drops the rest",
+        "id: PageId = store.put(Page(url, title_of(html), text))",
+        "notify.notify(title_of(html))  # says the page is saved",
+        "return id"
       ] }
   ] }

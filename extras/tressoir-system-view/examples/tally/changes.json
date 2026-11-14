@@ -7,15 +7,20 @@
       "tests/test_import.py": "imports the same file twice"
     },
     "affects": ["main"],
-    "interface": {
-      "src/core/entries/": ["add(entry: NewEntry) → EntryId?  // records one entry; nothing when it is already there"]
-    } },
+    "interface": { "src/core/entries/": ["add(entry: NewEntry) → EntryId?  // records one entry; nothing when it is already there"] },
+    "flows": [
+      { "of": "src/core/entries/: add",
+        "sketch": [
+          "if already_recorded(entry):  # the same date, amount and payee",
+          "    return None",
+          "id: EntryId = next_id()",
+          "store.write(Change.insert(id, entry))  # all of it or none",
+          "return id"
+        ] }
+    ] },
   { "name": "Rules can test the amount", "line": "a rule may say: over 500, category Rent",
-    "files": {
-      "src/core/categories/rules.py": "a rule may compare the amount"
-    },
+    "files": { "src/core/categories/rules.py": "a rule may compare the amount" },
     "affects": ["categorize"] },
-
   { "name": "Amounts in any currency", "line": "an entry keeps its own currency; totals are in yours", "plan": "Several currencies",
     "files": {
       "src/connectors/rates/client.py": "+ fetches one day's exchange rates",
@@ -23,9 +28,7 @@
       "src/core/reports/monthly.py": "converts before totalling"
     },
     "affects": ["monthly"],
-    "interface": {
-      "src/core/shared/": ["Money = { cents: Int, currency: Text }  // an amount in its own currency"]
-    },
+    "interface": { "src/core/shared/": ["Money = { cents: Int, currency: Text }  // an amount in its own currency"] },
     "boxes": [
       { "name": "Exchange rates", "folder": "src/connectors/rates/", "line": "daily rates from a public service",
         "interface": ["rate(from: Text, to: Text, on: Date) → Float  // looks up one day's rate"] }
