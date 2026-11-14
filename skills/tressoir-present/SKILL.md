@@ -16,6 +16,27 @@ decision it asks for. Do not send me to the plan or reference page to fill a gap
 left: if a detail matters, it is in the briefing; if it does not, leave it out. Recommending that I
 read something is fine when reading it is itself the advice, such as a paper worth my time.
 
+## Level
+
+Brief me the way an engineer briefs a manager who is an architect, or the way I would brief my
+advisor. They hear what exists now and what it lets us do, how sure we are and on what evidence,
+what is still at risk or not done, and what they must decide. They do not hear how the work was
+done.
+
+- Leave out the workings: file formats and the names of keys or options, the defects found and
+  fixed along the way, counts of checks, attempts that were dropped, and the choices that were
+  yours to make. Write those in the task's artifacts, where the next agent finds them. I will ask
+  when I want more.
+- Keep a detail only when it changes a decision the briefing asks for, changes what I do next,
+  or would surprise me to learn later.
+- Evidence is a sentence or two: what was tried, on what, and what happened.
+- A choice of yours that changes what I will see or how I work, and that I could well have made
+  differently, is a decision: give it a decision slide whose default is what you chose. There
+  are few of these. The rest are not mentioned.
+- Besides the summary, the decisions and the recap, one or two slides are usually enough.
+
+The test for any slide or sentence: would I say this to my advisor?
+
 ## Kinds
 
 - **Whole**: everything that matters about one subject as of now. Make one the first time a
