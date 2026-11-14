@@ -82,6 +82,8 @@ An entry restates whatever is no longer true, and nothing else:
   "app/triage.py: triage": "classify" }`. The line keeps its place, its words and its flow, and
   the sketches that call it follow. If its arguments changed too, also state the new line under
   `interface`, with the new name. A renamed type has no such key: write `- Old` and the new line.
+- A function the entry renames, or whose flow or line it states, is marked by that. It need not
+  also go under `affects`.
 - When two built entries state the same line, the later one in the file stands. The script takes
   the line out of the earlier entry, puts its name under that entry's `affects`, and says so.
 - A box under `boxes` is matched by `folder`. Write a new one whole, with its `interface`. For an
@@ -105,8 +107,9 @@ An entry restates whatever is no longer true, and nothing else:
   is architecture. When I did ask, a flow stated with an empty `sketch` is taken out.
 - A renamed file is written once under `files`, with its new path.
 - A planned entry also says what git cannot know yet: a note that starts with `+ ` is a file the
-  plan adds, `- ` one it removes. A later step of the same plan that touches a file an earlier
-  step adds names it without the `+ `.
+  plan adds, `- ` one it removes. Only the step that adds a file marks it `+ `; a later step of
+  the same plan names it plainly. Each step states a line or a flow as it will be once that step
+  is built, so two steps that change one flow each state it whole.
 
 How many entries: with a plan, one per plan step, with the same names (for a plan written with
 `tressoir-plan`, its milestones). Without a plan, one per
@@ -130,8 +133,8 @@ A change deep in private code must show on the nearest function I can see.
   `// internal:` line. Edits to data and prose files name nothing either, nor does a file that
   only moved.
 - Do not ask whether behaviour changed. Edited means named.
-- A name is looked up in the boxes the entry's files belong to and the boxes around them. If two
-  of them list it, write `"<box folder>: name"`.
+- A name is looked up in the boxes the entry's files belong to, and the boxes those are inside.
+  If two of them list it, write `"<box folder>: name"`.
 - The script proposes `affects` from the diff by following callers inside the box. Check the
   proposal; it reads text and can miss a call or find a false one.
 
@@ -153,7 +156,7 @@ uv run WORK/skills/tressoir-system-view/system_view.py            # fold, check,
 uv run WORK/skills/tressoir-system-view/system_view.py --check    # only print the checks
 uv run WORK/skills/tressoir-system-view/system_view.py --seen     # I have seen everything up to the last commit
 uv run WORK/skills/tressoir-system-view/system_view.py --from <commit>   # also show a delta from that commit
-uv run WORK/skills/tressoir-system-view/system_view.py --check --flows   # also print each flow and the calls found on its lines
+uv run WORK/skills/tressoir-system-view/system_view.py --check --flows   # also print each flow, and each flow a plan changes, with the calls found
 ```
 
 It needs only Python 3 and git; `python3` works in place of `uv run`. A run with `--check` that
@@ -162,8 +165,9 @@ built entry, the next run takes it out of `changes.json` by itself: a built and 
 reads as if it was always there. "Holds" means the commit has the entry unchanged and its
 `system.json` already says what the entry states, so an entry committed before the script ran
 stays for one more commit. Work that goes on in the same files after that commit needs an entry
-of its own. Move Seen only when a planned task starts, when the first figure is committed, or
-when I say so.
+of its own. Seen is the last commit that existed when I launched the current planned task, so
+that its tab shows what the task has done since. Move it only when a planned task starts, when
+the first figure is committed, or when I say so.
 
 A file in a shape the script cannot read (a list where an object belongs, text where a list
 belongs, a file not saved as UTF-8) stops it with one sentence that says what to write. Nothing
@@ -297,8 +301,8 @@ line that has words or calls a listed function opens in turn.
   flow's own box is written bare. A function listed with a module in front is called as it is
   listed (`recency.is_recent(item)`). A listed function handed on without being called counts
   too (`items.where(recency.is_recent)`). The script finds these calls, and the page shows each
-  called function under the line, with its box. Private helpers are written bare and are not
-  looked up.
+  called function under the line, with its box. Private helpers and library calls are written
+  bare, as the code has them, and are not looked up.
 - Run with `--check --flows` to see which calls the script found on each line. Where it cannot
   tell (two boxes answer to the same word, the call goes through a variable, a step reaches a
   function its code does not name), state them by hand: write the line as an object,

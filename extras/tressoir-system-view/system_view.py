@@ -1789,6 +1789,30 @@ class Code:
                 first = False
         return out
 
+    def new_fns(self, path, status):
+        """The functions a change brings to a file: every one of a new file, else those whose first line the diff adds
+        and does not also take away."""
+        if status == 'add':
+            return [n for n, _body in self.defs(path)]
+        if status != 'chg' or not self.commit:
+            return []
+        added, taken = [], set()
+        for line in self.git.diff(self.commit, path).split('\n'):
+            if line[:1] in ('+', '-') and not line.startswith(('+++', '---')):
+                m = DEF.match(line[1:])
+                if m and line[0] == '+' and m.group(1) not in added:
+                    added.append(m.group(1))
+                elif m and line[0] == '-':
+                    taken.add(m.group(1))
+        return [n for n in added if n not in taken]
+
+    def defined(self, home):
+        """The names of the functions that start somewhere in the files of a box."""
+        key = ('defined', home)
+        if key not in self._box:
+            self._box[key] = set(n for p in sorted(self.now) if self.world.holds(home, p) for n, _body in self.defs(p))
+        return self._box[key]
+
     def home(self, path):
         """The nearest box around a file that lists a function, and the names it lists."""
         chain = self.world.around(self.world.box_of(path))
@@ -1829,22 +1853,33 @@ class Code:
         return out
 
     def proposal(self, paths, changed, moved):
-        """(names proposed for `affects`, whether any changed function was found, one line of help per file)."""
-        names, found, said = [], False, []
+        """(names proposed for `affects`, whether any changed function was found, lines of help per file). A listed
+        function the change touched that no longer starts anywhere in its box was removed or renamed: it is not proposed,
+        and the help says how each is written. So does it for a function the change brings that the box does not list."""
+        names, found, said, lost = [], False, [], []
         for p in paths:
             st = changed.get(p)
             fns = self.changed_fns(p, st) if p not in moved else []
             found = found or bool(fns)
+            home, listed = self.home(p)
+            short = {n.split('.')[-1]: n for n in listed}
+            gone = [short[f] for f in fns if f in short and f not in self.defined(home)] if home and st == 'chg' else []
+            lost.extend(n for n in gone if n not in lost)
             for n in self.reach(p, fns):
                 if n not in names:
                     names.append(n)
             what = 'renamed from %s' % moved[p] if p in moved else {'add': 'new', 'del': 'removed'}.get(st, 'changed')
             if fns:
                 what += (', with ' if st == 'add' else ' in ') + some(fns, 8)
-            home, listed = self.home(p)
             where = 'It is in no box.' if not home else 'Its box %s lists %s.' % (home, some(listed, 12) if listed else 'nothing')
             said.append('  %s: %s. %s' % (p, what, where))
-        return names, found, said
+            for n in gone:
+                said.append('  %s is listed in %s and no function of that name is left in its files. If it was renamed, the entry says '
+                            '"renames": { "%s: %s": "<its new name>" }; if it is gone, "- %s" under "interface".' % (n, home, home, n, n))
+            fresh = [f for f in (self.new_fns(p, st) if p not in moved else []) if f not in short and not f.startswith('_')] if home and listed else []
+            if fresh and not gone:
+                said.append('  New in %s and not listed by %s: %s. One that another box calls goes under "interface".' % (p, home, some(fresh, 8)))
+        return [n for n in names if n not in lost], found, said
 
 
 # ---------------------------------------------------------------- the build
@@ -1880,9 +1915,13 @@ def build(args):
         if args.check:
             print('Seen would become %s. Nothing is written with --check.' % git.short(git.head))
             return 0
+        was = ''
+        if os.path.exists(os.path.join(here, 'seen')):
+            with open(os.path.join(here, 'seen'), encoding='utf-8', errors='replace') as f:
+                was = f.read().strip()
         with open(os.path.join(here, 'seen'), 'w', encoding='utf-8') as f:
             f.write(git.head + '\n')
-        print('Seen is now %s.' % git.short(git.head))
+        print('Seen is now %s%s.' % (git.short(git.head), ' (it was %s)' % git.short(was) if was and was != git.head else ''))
         return 0
 
     system = read_json(os.path.join(here, 'system.json'), {}, shown('system.json'))
@@ -2049,13 +2088,6 @@ def build(args):
             problems.error('%d changed %s under the figure %s in no entry: %s. An entry is prepared below.' % (
                 len(loose), 'file' if len(loose) == 1 else 'files', 'is' if len(loose) == 1 else 'are', some(loose)))
             names, _found, said = code.proposal(unexplained, changed, moved)
-            # a listed name the code no longer has is not something the change reaches: it was removed or renamed
-            for folder, missing in unseen.items():
-                lost = [n for n in missing if n in names and any(current.holds(folder, p) for p in unexplained)]
-                names = [n for n in names if n not in lost]
-                for n in lost:
-                    said.append('  %s is listed in %s and is no longer in its files. If it was renamed, the entry says "renames": '
-                                '{ "%s: %s": "<its new name>" }; if it is gone, "- %s" under "interface".' % (n, folder, folder, n, n))
             prepared = ({'name': '?', 'line': '?', 'files': {p: '?' for p in unexplained}}, said)
             if names:
                 prepared[0]['affects'] = names
@@ -2074,7 +2106,8 @@ def build(args):
                 problems.note('%s: "affects" has %s. Following its changed lines to the nearest listed functions gives %s. '
                               'Only said: correct the entry if the second is right.'
                               % (e['name'], ', '.join(mine) or 'nothing', ', '.join(names) or 'nothing'))
-    note_loose_files(current, now_files, problems, root)
+    if not kept:        # while a box waits to be said moved, its files are in no box: the error already says so
+        note_loose_files(current, now_files, problems, root)
     for folder, missing in unseen.items():
         problems.note('Listed in %s and found nowhere in its files: %s.' % (folder, some(missing)))
     note_new_folders(words, now_files, head_files, problems, shown)
@@ -2253,6 +2286,12 @@ def build(args):
             print('\nThe flow of %s (%s):' % tuple(reversed(lid.rsplit('#', 1))))
             for lv, code, note, calls in lines:
                 print('  %s%s%s' % ('    ' * lv, code, '    -> ' + ', '.join('%s: %s' % tuple(c.rsplit('#', 1)) for c in calls) if calls else ''))
+        for pl, _mine, w, _files, _after in plan_worlds:
+            for lid, lines in flows_of(w).items():
+                if lines != flows_now.get(lid):
+                    print('\nThe flow of %s (%s), as the plan %s leaves it:' % (tuple(reversed(lid.rsplit('#', 1))) + (pl,)))
+                    for lv, code, note, calls in lines:
+                        print('  %s%s%s' % ('    ' * lv, code, '    -> ' + ', '.join('%s: %s' % tuple(c.rsplit('#', 1)) for c in calls) if calls else ''))
         if not flows_now:
             print('\nNo flow is written.')
     if problems.errors:

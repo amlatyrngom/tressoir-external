@@ -1809,7 +1809,7 @@ def third(tmp):
     edit(root, ENTRIES_PY, 'def add(entry):', 'def record(entry):')
     code, out, err = run(root, '--check')
     check('with no entry, what is prepared does not put the old name under "affects", and says how a rename is written',
-          'add is listed in src/core/entries/ and is no longer in its files. If it was renamed, the entry says "renames": '
+          'add is listed in src/core/entries/ and no function of that name is left in its files. If it was renamed, the entry says "renames": '
           '{ "src/core/entries/: add": "<its new name>" }; if it is gone, "- add" under "interface".' in out and '"affects"' not in out, out + err)
     renamed = {'name': 'Add becomes record', 'line': 'r', 'files': {ENTRIES_PY: 'add is now record'}, 'renames': {ent + ': add': 'record'}}
     entries(root, renamed)
@@ -1856,6 +1856,26 @@ def third(tmp):
     check('with no entry, what is prepared gives the flow of the function it names, ready to edit',
           '  add has a flow. If its steps changed, state it again in the entry, under "flows", whole. As it stands:' in out
           and '"of": "src/core/entries/: add"' in out and '"key = _key(entry)  # the same entry gets the same key"' in out, out + err)
+
+    edit(root, ENTRIES_PY, 'def listing():', 'def count():\n    return 0\n\n\ndef _private():\n    return 0\n\n\ndef listing():')
+    code, out, err = run(root, '--check')
+    check('and names a function the change brings that the box does not list, leaving private ones out',
+          '  New in src/core/entries/entries.py and not listed by src/core/entries/: count. One that another box calls goes under "interface".' in out, out + err)
+    back(root)
+    edit(root, ENTRIES_PY, 'def add(entry):', 'def record(entry):\n    return add(entry)\n\n\ndef add(entry):')
+    entries(root, {'name': 'Flow in two steps', 'plan': 'Steps', 'line': 's', 'files': {ENTRIES_PY: 's'},
+                   'flows': [{'of': ent + ': add', 'sketch': ['key = _key(entry)', 'return listing()']}]})
+    code, out, err = run(root, '--check', '--flows')
+    check('--flows also prints a flow as a plan leaves it, with the calls found',
+          'The flow of add (src/core/entries/), as the plan Steps leaves it:' in out and '  return listing()    -> src/core/entries/: listing' in out, out + err)
+    back(root)
+    code, out, err = run(root, '--seen')
+    first = out.strip()
+    edit(root, 'docs/readme.md', 'How', 'Now how')
+    commit(root, 'a word')
+    code, out, err = run(root, '--seen')
+    check('--seen says what Seen was', code == 0 and first.startswith('Seen is now ') and '(it was' not in first
+          and re.match(r'^Seen is now \w+ \(it was \w+\)\.$', out.strip()), first + out + err)
 
     # ---- the closing lines
     root = new()
