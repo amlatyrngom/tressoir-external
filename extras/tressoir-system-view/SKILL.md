@@ -79,7 +79,7 @@ An entry restates whatever is no longer true, and nothing else:
   `affects`; so does a line whose words are no longer true while its signature stays. A new type
   goes under the box that owns it.
 - A function that only changed its name is said under `renames`: `"renames": {
-  "app/triage.py: triage": "classify" }`. The line keeps its place, its words and its flow, and
+  "app/notify.py: send": "deliver" }`. The line keeps its place, its words and its flow, and
   the sketches that call it follow. If its arguments changed too, also state the new line under
   `interface`, with the new name. A renamed type has no such key: write `- Old` and the new line.
 - A function the entry renames, or whose flow or line it states, is marked by that. It need not
