@@ -284,15 +284,21 @@ function uses(t){ const n = t.name, fs = uniq(Object.keys(S.api || {}).flatMap(f
   // a function's name goes to its module, with the function open
   const fn = f => `<span class="mref" data-fbox="${esc(idHome(f))}"${ownerOf(f) ? '' : ` data-fflow="${esc(f.id)}"`}>${esc(idName(f))}</span>`, ty = x => `<span class="ty" data-ty="${esc(x.name)}">${esc(x.name)}</span>`;
   return row('returned by', gave, idHome, fn) + row('taken by', took, idHome, fn) + row('part of', whole, x => x.home, ty); }
-// an interface or a class: one line, folded to its name and the names of its methods. Open, it gives its words, why it changed, its methods (each a line that opens like any function), and who implements or extends it. `have` are functions already listed above it
+// what an open type says about the others sits behind one line, opened by a click: who implements or extends it, then where it is used. The line says how many names are behind it
+function rel(t, key){ const h = kindOf(t) !== 'type' ? heirs(t) : '', u = uses(t), body = h + u; if (!body) return '';
+  const k = key + '~uses', on = openT.includes(k), box = document.createElement('div'); box.innerHTML = body;
+  const n = new Set([...box.querySelectorAll('.mref, .ty')].map(x => (x.dataset.fbox || '') + '#' + x.textContent)).size;
+  const what = [h ? (kindOf(t) === 'interface' ? 'who implements it' : 'who extends it') : '', u ? 'where it is used' : ''].filter(Boolean).join(', and ');
+  return `<div class="fn"><span class="g"></span><span class="ct" data-fold="${esc(k)}"><span class="wl tn" role="button" aria-expanded="${on}"># ${what} (${n}) ${on ? '▾' : '▸'}</span></span></div>${on ? `<div class="inl">${body}</div>` : ''}`; }
+// an interface or a class: one line, folded to its name and the names of its methods. Open, it gives its words, why it changed, its methods (each a line that opens like any function), and the line that opens onto who implements or extends it and where it is used. `have` are functions already listed above it
 function kindRow(t, key, o){ const kind = kindOf(t), open = openT.includes(key), ms = methodsOf(t).filter(f => !(o.have && o.have.has(f.id))), ps = parentsOf(t);
   const head = `<span class="t-k">${kind}</span> <span class="t-d">${esc(t.name)}</span>${ps.length ? '(' + tyRef(esc(ps.join(', ')), '', t.name) + ')' : ''}:` + (ms.some(flowOf) ? ICO : '')
     + (open || !ms.length ? '' : `<span class="pv">  # ${ms.map(f => esc(idName(f).slice(idName(f).lastIndexOf('.') + 1))).join(', ')}</span>`);
-  return codeLine(t, key, open, head, open ? `${docLine(wordsOf(t), 'wl')}${chgNote(t)}${ms.map(f => fnLine(f, key + '#' + idName(f), true)).join('')}${heirs(t)}${uses(t)}` : ''); }
+  return codeLine(t, key, open, head, open ? `${docLine(wordsOf(t), 'wl')}${chgNote(t)}${ms.map(f => fnLine(f, key + '#' + idName(f), true)).join('')}${rel(t, key)}` : ''); }
 // one type of data, written as a type: one line, folded to its name and the names of its fields. Open, it gives its words, why it changed, and one row per field or variant
 function typeRow(t, key, o){ if (kindOf(t) !== 'type') return kindRow(t, key, o); const sh = shapeRows(t), alias = sh.kind === 'alias', rec = sh.kind === 'record', open = openT.includes(key);
   const rows = alias ? '' : sh.rows.map(r => `<div class="tr ${r.s}"><span class="g2">${mark[r.s] || ''}</span><code>${rec ? '' : '| '}${r.name ? esc(r.name) + ': ' : ''}${tyRef(r.html, r.s)}</code></div>`).join('');
-  return codeLine(t, key, open, tyHead(t, sh, open, alias, rec), open ? `${docLine(wordsOf(t), 'wl')}${chgNote(t)}${rows}${uses(t)}` : ''); }
+  return codeLine(t, key, open, tyHead(t, sh, open, alias, rec), open ? `${docLine(wordsOf(t), 'wl')}${chgNote(t)}${rows}${rel(t, key)}` : ''); }
 // the types some signatures pass: the ones they name, then the ones those are made of, however deep. The same on every tab
 function reach(sigs){ const seen = new Set(names(sigs.join(' '))), walk = n => names(nowSig(S.types[n])).forEach(c => { if (!seen.has(c)) { seen.add(c); walk(c); } }); [...seen].forEach(walk); return [...seen]; }
 // a box's card: its functions, then the types they pass that it owns, wherever under its folder they live. A box that lists no function lists the types it owns. It is the same wherever the box is shown: in the listing of the view it sits in, when it is selected from the figure or the file list, and at the top of its own view
@@ -405,7 +411,11 @@ let blind = false, figW = -1, blindT;
 function renderFigure(){ $('fig').innerHTML = S.none ? `<p class="m" style="margin:14px 16px">${esc(S.none)}</p>` : stage(); fit(); const st = [...document.querySelectorAll('.stage')]; blind = st.some(s => !s.offsetWidth); if (!blind) st.forEach(declutter);
   clearTimeout(blindT); if (blind) blindT = setTimeout(function again(){ $('fig').offsetWidth ? renderFigure() : blindT = setTimeout(again, 250); }, 250); show(); }
 function refit(){ const w = $('fig').offsetWidth; if (w === figW && !(blind && w)) return; figW = w; blind && w ? renderFigure() : fit(); }
-const folderOf = pick => pick && /^(node|region):/.test(pick) ? pick.slice(pick.indexOf(':') + 1) : null;
+// the folder a pick of the figure stands for in the file view: a box's own; a region's, when that region alone has it
+const folderOf = pick => { if (!pick) return null; const i = pick.indexOf(':'), type = pick.slice(0, i), id = pick.slice(i + 1);
+  if (type === 'node') return id; const r = type === 'region' && regionAt(id); return r && r.dir && regionOfDir(r.dir) === r ? r.dir : null; };
+// a line of the file view is lit when it is under the folder picked; for a region that shares its folder with others, when it is under one of the region's boxes
+const lit_ = p => reveal ? p.startsWith(reveal) : !!pin && pin.startsWith('region:') && ((regionAt(pin.slice(7)) || {}).boxes || []).some(b => p.startsWith(b.folder));
 function select(f){ pin = 'node:' + f; reveal = f; closed.delete(f); show(); renderTree(); }
 $('fig').addEventListener('click', e => { const t = e.target.closest('[data-pick]'), was = folderOf(pin);
   pin = t && t.dataset.pick !== pin ? t.dataset.pick : null; hov = null;
@@ -441,7 +451,7 @@ function renderTree(){ counts();
       const what = d && s !== 'add' && s !== 'del' && e.box ? touching(e.path).map(c => c.name).join('; ') : '';
       const text = what || (s === 'chg' ? (notes(e.path).join('; ') || e.line) : e.line), sub = rows(e.path, dep + 1), shut = sub && closed.has(e.path) && !(reveal && reveal !== e.path && reveal.startsWith(e.path)), t = shut ? tally(e.path) : null;
       const roll = t && d ? `<span class="roll">${['add', 'chg', 'del'].filter(x => t[x]).map(x => `<span class="c ${x}">${mark[x]}${t[x]}</span>`).join('')}</span>` : '';
-      out += `<div class="r ${s || 'same'} ${ins ? 'inside' : ''} ${sub ? 'dir' : ''} ${reveal && e.path.startsWith(reveal) ? 'hot' : ''} ${pin === 'path:' + e.path ? 'sel' : ''}" data-pick="path:${esc(e.path)}" data-id="${esc(e.path)}"><span class="g">${mark[s] || ''}</span><span class="n" style="margin-left:${dep * 16}px">${e.slot ? `<i class="sw ${e.slot}"></i>` : ''}${oldName(e)}${esc(e.name)}${shut ? '<span class="dots"> …</span>' : ''}</span>${roll}<span class="p ${what ? 'what' : ''}">${esc(text)}</span></div>` + (shut ? '' : sub); }
+      out += `<div class="r ${s || 'same'} ${ins ? 'inside' : ''} ${sub ? 'dir' : ''} ${lit_(e.path) ? 'hot' : ''} ${pin === 'path:' + e.path ? 'sel' : ''}" data-pick="path:${esc(e.path)}" data-id="${esc(e.path)}"><span class="g">${mark[s] || ''}</span><span class="n" style="margin-left:${dep * 16}px">${e.slot ? `<i class="sw ${e.slot}"></i>` : ''}${oldName(e)}${esc(e.name)}${shut ? '<span class="dots"> …</span>' : ''}</span>${roll}<span class="p ${what ? 'what' : ''}">${esc(text)}</span></div>` + (shut ? '' : sub); }
     return out; };
   $('tree').className = 'tree' + (d ? ' diff' : '') + (calm ? ' calm' : '');
   $('tree').innerHTML = rows('', 0) + (hidden ? `<div class="foot">${hidden} unchanged hidden</div>` : calm ? '<div class="foot">Nothing changed in this comparison.</div>' : '');

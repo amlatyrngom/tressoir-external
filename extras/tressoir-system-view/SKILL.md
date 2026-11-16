@@ -249,7 +249,10 @@ the figure, as the regions group the overview's: a row is not a module and lists
 **One overview, unless the system is large.** Most projects are drawn whole in the overview, and
 no box has an inside. A box gets a view of its own only when it is a subsystem of a large system
 (a database's optimizer, an operating system's scheduler): it has several groups of parts, each a
-folder I would name, so its inside has several rows. Or when I ask for one. A box whose inside
+folder I would name, so its inside has several rows. Or when I ask for one. Or when the module is one capability with an
+implementation per platform or per provider, each in a folder of its own (a Devices module with
+macOS, Android and Windows): the module lists the interfaces, and each platform is a module
+inside it that lists its classes. Otherwise a box whose inside
 would be a single row is not a subsystem: leave it one box, and if its parts matter to me, draw
 them as boxes of the overview.
 
@@ -331,12 +334,11 @@ design, and that is mine to decide.
 - Write them as the code has them. A type is an interface only when the code has one (a
   protocol, a trait, an abstract class, a table of functions); do not invent an interface or a
   parent to make the figure tidier. A parenthesis names only types the figure lists.
-- The page shows the three apart, each with its methods under it, and writes under an interface
-  the classes that implement it and under a class those that extend it. It works that out from
-  the parentheses: do not write it in the words.
-- Under every type the page also says where it is used: the listed functions that return it, the
-  ones that take it, and the types it is a part of. It collects this from the signatures, so a
-  signature must name the types it passes; do not write "returned by" in the words.
+- The page shows the three apart, each with its methods under it.
+- Under every open type one line opens, on a click, onto who implements or extends it and where
+  it is used: the listed functions that return it, the ones that take it, and the types it is a
+  part of. The page collects this from the parentheses and the signatures, so a signature must
+  name the types it passes; do not write "returned by" or "implemented by" in the words.
 - `- Name` in an entry removes an interface or a class with its methods and their flows.
 
 ### Flows

@@ -88,6 +88,19 @@ SWEEP = """(narrow) => { const bad = [], strip = document.getElementById('strip'
         const fs = Object.keys(S.api).flatMap(fnsOf), named = fs.some(f => f.sig.slice(f.sig.indexOf('(')).match(new RegExp('(^|[^\\w.])' + t.name + '(?!\\w)')));
         if (named && !box.textContent) bad.push('a listed function names ' + t.name + ' and its card does not say so'); });
       if (!said) bad.push('types are listed and none says where it is used');
+      // under an open type the uses wait behind one line; a click on it shows them
+      { const t = Object.values(S.types).filter(there).find(x => uses(x) && boxAt(x.home) && homeOf(x.home) === S.views[0]); const strip = document.getElementById('strip');
+        if (t) { go(''); FONLY = false; render(); nsel(t.home); const key = t.home + '|' + t.name; openT = [key]; show();
+          const line = strip.querySelector('[data-fold="' + CSS.escape(key + '~uses') + '"]');
+          if (!line) bad.push('the open type ' + t.name + ' has no line that opens onto where it is used');
+          else { if (strip.querySelector('.wl.us')) bad.push('the uses of ' + t.name + ' show before their line is opened'); line.click();
+            if (!strip.querySelector('.wl.us')) bad.push('a click on the line under ' + t.name + ' does not show where it is used'); wide('the uses of ' + t.name + ', opened'); }
+          pin = null; openT = []; show(); } }
+      // a region picked in the figure lights its files
+      go(''); regionsOf(S.views[0]).filter(r => r.boxes.length && S.files.some(f => r.boxes.some(b => f.path.startsWith(b.folder)))).forEach(r => {
+        const el = document.querySelector('#fig [data-pick="region:' + r.id + '"]'); if (!el) return; pin = null; el.dispatchEvent(new MouseEvent('click', { bubbles:true }));
+        if (pin !== 'region:' + r.id) bad.push('a click on the region ' + r.id + ' does not pick it'); else if (!document.querySelector('#tree .r.hot')) bad.push('the region ' + r.id + ' is picked and no line of the file view is lit');
+        el.dispatchEvent(new MouseEvent('click', { bubbles:true })); });
       const m = [...box.querySelectorAll('.mref[data-fflow]')].pop() || (() => { for (const t of Object.values(S.types).filter(there)) { box.innerHTML = uses(t); const x = box.querySelector('.mref[data-fflow]'); if (x) return x; } })();
       if (m) { document.body.appendChild(box); const to = m.dataset.fbox; m.click(); box.remove(); if (pin !== 'node:' + to) bad.push('the function ' + m.textContent + ' named under a type does not select its module ' + to); } }
     if (S.types && Object.keys(S.types).length && !cards) bad.push('types are listed and no reference opened a card');
