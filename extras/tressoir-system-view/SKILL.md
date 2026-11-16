@@ -7,7 +7,7 @@ description: Keep the system view current, one page that draws the project's maj
 
 I no longer read most of the code, so I lose track of how a project is put together. The system
 view is how I keep the picture: one page, `WORK/SYSTEM_VIEW.html`. At the top is a figure of the
-major parts, with a view inside each of the larger ones. Under it the same parts are listed as
+major parts. Under it the same parts are listed as
 code: each box is a module, with the functions and types it offers; a function that has a flow
 opens into it, the body of that function as a short sketch. Beside them is a file view. The tabs
 show the last commit, the current state, what changed between them, what changed since I last
@@ -26,9 +26,9 @@ WORK/
 
 Commit `WORK/SYSTEM_VIEW/` together with the code, never separately. The page is not committed:
 anyone rebuilds it with the script. Three worked examples are in
-`WORK/skills/tressoir-system-view/examples/`: `tally/` (one view), `marlin/` (boxes inside boxes)
-and `pocket/` (all the code in one folder). Each has flows. Copy the shape of the one nearest to
-the project.
+`WORK/skills/tressoir-system-view/examples/`: `tally/` (one view, the usual shape), `marlin/` (a
+large system, with views inside its boxes) and `pocket/` (all the code in one folder). Each has
+flows. Copy the shape of the one nearest to the project.
 
 ## Two phases
 
@@ -159,6 +159,7 @@ uv run WORK/skills/tressoir-system-view/system_view.py --check    # only print t
 uv run WORK/skills/tressoir-system-view/system_view.py --seen     # I have seen everything up to the last commit
 uv run WORK/skills/tressoir-system-view/system_view.py --from <commit>   # also show a delta from that commit
 uv run WORK/skills/tressoir-system-view/system_view.py --check --flows   # also print each flow, and each flow a plan changes, with the calls found
+uv run WORK/skills/tressoir-system-view/system_view.py --draft <file>.json   # a page from a draft, beside it (see "Starting")
 ```
 
 It needs only Python 3 and git; `python3` works in place of `uv run`. A run with `--check` that
@@ -194,6 +195,7 @@ What the script prints:
 | `renames` of a function no box lists, or to a name its box already lists | two entries state the same flow: the later one stands |
 | a box three levels deep, written or planned; a plan's name over 24 characters (this one stops the script) | an earlier entry named a box at the path a later entry moved it from: the script corrects the entry |
 | | a new folder with no words in `lines.json`, beside folders that have some |
+| | a box, a listed function or a listed type with no words; a step of a flow with no words: write them, in the task's entry or, while the figure is being written, in `system.json` |
 | | no box written yet |
 
 Reading a diff:
@@ -228,9 +230,10 @@ Written with me. Four layers; each is optional and the page works without the la
    it empty when it does not apply. Where the code sits at the top of the repository, the folder
    is written `"./"`. `links` between regions have `from`, `to` (the regions' keys, such as
    `entry` and `core`), a short `label` and a sentence, `says`.
-2. **Inside a box.** `inside` lists its rows; a row is a folder and its boxes are folders in it.
-   A box with an inside may give `links` between its rows, and `from` and `uses`: the outside
-   boxes it works with, each with a sentence.
+2. **Inside a box**, only in a large system (see "One overview, unless the system is large").
+   `inside` lists its rows; a row is a folder and its boxes are folders in it. A box with an
+   inside may give `links` between its rows, and `from` and `uses`: the outside boxes it works
+   with, each with a sentence.
 3. **Interface.** One string per line. A function is `name(arg: Type) → Type  // words`; a type
    is `Name = shape  // words`.
 4. **Flows.** A flow is the body of one listed function, as a short sketch: `of` (the box's
@@ -238,9 +241,14 @@ Written with me. Four layers; each is optional and the page works without the la
 
 Boxes go two levels deep and no more. A box of the overview may have an inside; a box inside it
 has none, and the script stops on a third level. The rows of an inside only group its boxes in
-the figure, as the regions group the overview's: a row is not a module and lists nothing. Where
-the inner boxes sit directly in the box's folder, give the inside one row with the box's own
-folder.
+the figure, as the regions group the overview's: a row is not a module and lists nothing.
+
+**One overview, unless the system is large.** Most projects are drawn whole in the overview, and
+no box has an inside. A box gets a view of its own only when it is a subsystem of a large system
+(a database's optimizer, an operating system's scheduler): it has several groups of parts, each a
+folder I would name, so its inside has several rows. Or when I ask for one. A box whose inside
+would be a single row is not a subsystem: leave it one box, and if its parts matter to me, draw
+them as boxes of the overview.
 
 - A box has `name`, `folder` and `line`. `folder` is its main path and its identifier everywhere.
   In a project whose code is flat it may be a single file, and `also` lists further paths. A file
@@ -255,6 +263,9 @@ folder.
   one; the note that it appears nowhere is then expected. The name of a line is its first word, so
   two routes cannot both start with `GET`: write `get_users  // GET /users, lists the users`.
 - A type is written in the box that owns it.
+- Every line has words after `//`: a function says what it does for its caller, a type what it
+  stands for. A type with no words is as bad as a function with none. The script names each
+  listed line and each box that has no words, and the page shows no docstring for it.
 - A bare name (`"lookup"`) is the function of that name from a box inside, and must match exactly
   one. A parent never writes out a signature that an inner box lists.
 - A name appears once per box; a type once in the file.
@@ -296,7 +307,9 @@ line that has words or calls a listed function opens in turn.
 - One line per step I would name on a whiteboard. Leave out error handling, logging and private
   detail that explains nothing. A flow is a sketch, not the code.
 - The words after `#` say why the step is there or what it decides. I read them when I open the
-  line. Do not repeat the code in words.
+  line. Do not repeat the code in words. Every step has them. A line that says itself may go
+  without: one that only opens a block (`if`, `for`, `else`), one that returns a name, `break`,
+  `continue`, `pass`, `raise`. The script names the other steps that have none.
 - A call into another box is written `box.function(...)`: `box` is the last part of the box's
   folder or its name, as an identifier (`wal`, `join_order`, `write_ahead_log`), and `function`
   is a line that box lists. A box inside another may be reached through its parent when the
@@ -322,11 +335,19 @@ Propose the regions and boxes from the code as it is, and settle them with me be
 further. Draw what a system architect would put on a whiteboard: a box is a part with a job of its
 own, not a file, and its lines are what an architect needs to know to connect it to the others.
 That is around a dozen boxes; a simple project needs fewer, a complex one more. Once the
-figure is agreed, add the interface and one or two flows. Give a box an inside only when it has
-folders of its own that I would name; a box that is one file or one flat folder has none. Never
-go deeper than that. Where a
+figure is agreed, add the interface and one or two flows. Draw one overview and give no box an
+inside, unless the system is large (see "One overview, unless the system is large"). Where a
 component is spread out, give the box its main folder and list the rest under `also`. Leave
 `changes.json` as `[]`. Do not move code to make the first figure look tidy.
+
+**Show me a figure before it is agreed as a draft.** Write it as a `system.json` of its own in
+the task's artifacts, never in `WORK/SYSTEM_VIEW/`, and build its page with `--draft <file>`: the
+page is written beside the draft, with one tab, and the project's own system view stays as it
+is. The script prints the same notes as for the real one. For a layout the code does not have
+yet (a proposed reorganization), list the files it would have, one path per line, and add
+`--files <list>`: the file view then shows that layout. Once I agree to a first figure, copy it
+into `WORK/SYSTEM_VIEW/system.json`. A reorganization I agree to is not copied there: it is a
+plan, written as planned entries.
 
 Where all the code is in one folder (`app/`, say), every region that applies gets that folder, and
 a box's `folder` is a file or a folder directly in it, with its other files under `also`, as in

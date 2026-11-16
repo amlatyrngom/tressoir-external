@@ -96,6 +96,8 @@ code { font:12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; } code b {
 /* under an opened line, the change takes a little of the change colour and what the line was a little of the removed colour, so neither reads as the line's own words */
 .wl.cn { color:var(--chg); } .wl.ws { color:color-mix(in srgb, var(--del) 70%, var(--muted)); }
 .ct > .wl { display:block; }
+/* a docstring that does not fit on one line is written as in code: the quotes on lines of their own, the words between them, all flush */
+.ds.long { display:block; text-indent:0; } .ds.long > span { display:block; white-space:pre-wrap; } .wl > .ds.long { margin-left:-3ch; }
 .tr { display:flex; align-items:baseline; position:relative; } .tr > code { min-width:0; flex:1; }
 .inl > .fn > .g, .tr > .g2 { position:absolute; left:-16px; width:12px; text-align:center; font-weight:700; font-size:12px; }
 .tr.add, .tr.add .g2, .new { color:var(--add); } .tr.chg .g2 { color:var(--chg); } .tr.del, .old { color:var(--del); text-decoration:line-through; } .tr.del .g2 { text-decoration:none; }
@@ -243,10 +245,10 @@ const note = c => `<div class="wl cn" data-change="${S.changes.indexOf(c)}"># ch
 function chgNote(x){ const w = wasOf(x), was = st2(x) === 'chg' && w && (!x.name || shape(w).kind === 'alias');
   return causes(x).map(note).join('') + (was ? `<div class="wl ws"># was <s>${esc(w)}</s></div>` : ''); }
 // one line of code, and what it says when open. The line itself is what opens it; nothing inside it is a button of its own
-const codeLine = (x, key, on, code, body) => { const m = markOf(x); return `<div class="fn ${m}"><span class="g">${mark[m] || ''}</span><span class="ct" data-fold="${esc(key)}"><code>${code}</code></span></div>${on ? `<div class="inl">${body}</div>` : ''}`; };
+const codeLine = (x, key, on, code, body) => { const m = markOf(x); return `<div class="fn ${m}"><span class="g">${mark[m] || ''}</span><span class="ct" data-fold="${esc(key)}"><code>${code}</code></span></div>${on && body ? `<div class="inl">${body}</div>` : ''}`; };
 // one function: its signature, as a def. Open, it gives its words as a docstring, and why it changed. A function that has a flow opens into the flow instead
 function fnLine(f, at){ const host = flowHost(f, at); if (host) return host; const sig = nowSig(f), on = openT.includes(at);
-  return codeLine(f, at, on, fnCode(f, sig), on ? `<div class="wl">${docOf(wordsOf(f))}</div>${chgNote(f)}` : ''); }
+  return codeLine(f, at, on, fnCode(f, sig), on ? `${docLine(wordsOf(f), 'wl')}${chgNote(f)}` : ''); }
 // a shape read one level deep: a record of fields, a choice among variants, or another name for something
 function split(text, sep){ const out = []; let depth = 0, cur = ''; for (let i = 0; i < text.length; i++) { const c = text[i]; if ('{[('.includes(c)) depth++; else if ('}])'.includes(c)) depth--;
   if (!depth && text.startsWith(sep, i)) { out.push(cur.trim()); cur = ''; i += sep.length - 1; } else cur += c; } out.push(cur.trim()); return out; }
@@ -261,7 +263,7 @@ function shapeRows(t){ const cur = shape(nowSig(t)), plain = r => ({ name:r[0], 
 // one type, written as a class or as a name for something: one line, folded to its name and the names of its fields. Open, it gives its words, why it changed, and one row per field or variant
 function typeRow(t, key, o){ const sh = shapeRows(t), alias = sh.kind === 'alias', rec = sh.kind === 'record', open = openT.includes(key);
   const rows = alias ? '' : sh.rows.map(r => `<div class="tr ${r.s}"><span class="g2">${mark[r.s] || ''}</span><code>${rec ? '' : '| '}${r.name ? esc(r.name) + ': ' : ''}${tyRef(r.html, r.s)}</code></div>`).join('');
-  return codeLine(t, key, open, tyHead(t, sh, open, alias, rec), open ? `<div class="wl">${docOf(wordsOf(t))}</div>${chgNote(t)}${rows}` : ''); }
+  return codeLine(t, key, open, tyHead(t, sh, open, alias, rec), open ? `${docLine(wordsOf(t), 'wl')}${chgNote(t)}${rows}` : ''); }
 // the types some signatures pass: the ones they name, then the ones those are made of, however deep. The same on every tab
 function reach(sigs){ const seen = new Set(names(sigs.join(' '))), walk = n => names(nowSig(S.types[n])).forEach(c => { if (!seen.has(c)) { seen.add(c); walk(c); } }); [...seen].forEach(walk); return [...seen]; }
 // a box's card: its functions, then the types they pass that it owns, wherever under its folder they live. A box that lists no function lists the types it owns. It is the same wherever the box is shown: in the listing of the view it sits in, when it is selected from the figure or the file list, and at the top of its own view
@@ -436,7 +438,10 @@ function render(){ renderNav();
 $('only').onclick = () => { only = !only; render(); };
 $('fold').onclick = () => { closed = folded(V); reveal = null; pin = null; show(); renderTree(); };
 $('built').innerHTML = (S.built || []).map(t => `<p>${esc(t)}</p>`).join('');
-let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { figW = -1; refit(); }, 60); });
+// a docstring is long when it takes more than one line at the width it has now
+function docs(){ document.querySelectorAll('#strip .ds').forEach(d => { d.classList.remove('long'); d.classList.toggle('long', d.getClientRects().length > 1 || d.textContent.includes('\n')); }); }
+new MutationObserver(docs).observe($('strip'), { childList:true, subtree:true }); docs();
+let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { figW = -1; refit(); docs(); }, 60); });
 if (window.ResizeObserver) new ResizeObserver(refit).observe($('fig'));
 addEventListener('pageshow', () => { figW = -1; refit(); }); document.addEventListener('visibilitychange', () => { figW = -1; refit(); });
 // ============ the listing: modules, functions, types and flows, written as code ============
@@ -466,7 +471,9 @@ function hl(text, self){ let out = '', prev = '', m; TOK.lastIndex = 0;
   return out; }
 // the files write a signature in a neutral notation; the page shows it as Python: → is ->, T? is T | None, [T] is list[T], {T} is set[T]
 const pySig = s => s.replace(/→/g, '->').replace(/(\w) \{ ([^{}]*) \}/g, '$1($2)').replace(/\{(\w+)\}/g, 'set[$1]').replace(/([\w.\]]+)\?/g, '$1 | None').replace(/(^|[\s(:,>])\[([^\[\]]*)\]/g, '$1list[$2]');
-const docOf = w => '"""' + esc(w) + '"""';
+// the words of a line, as its docstring. On one line while they fit on one; once they wrap, the quotes stand on lines of their own (see docs()). A line with no words gets no docstring at all
+const docOf = w => (w || '').trim() ? `<span class="ds"><span>"""</span><span>${esc(w.trim())}</span><span>"""</span></span>` : '';
+const docLine = (w, cls) => docOf(w) && `<div class="${cls}">${docOf(w)}</div>`;
 const unesc = h => h.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
 // the name of a box at the right of a line, in its region's colour: it leads to that module
 const slotCls = folder => { const r = rootBox(folder); return r ? slotOf(r) : 'sep'; };
@@ -487,10 +494,10 @@ function flowHtml(f, at){ const lines = flowLines(f.id), mine = causes(f), calls
   const top = (c, own) => { const k = S.changes.indexOf(c), where = uniq(lines.flatMap(calls).filter(g => causes(g).includes(c)).map(fnName)).join(', ');
     return `<div class="fl cl ${lit === k ? 'on' : ''}" data-chg="${k}"><span class="fgut"></span><code class="tx chgs" style="padding-left:calc(var(--lv) + 2ch);text-indent:-2ch"># ${own ? 'changed: ' + esc(c.name) + ': ' + esc(c.line) : 'changed beneath: ' + esc(c.name) + ' (' + esc(where) + ')'}</code></div>`; };
   let html = `<div class="row"><div class="fl fhd" data-fold="${esc(at)}"><span class="fgut"></span><code class="tx" style="padding-left:2ch;text-indent:-2ch">${hl('def ' + pySig(nowSig(f)) + ':')}</code>${ICO}</div>`
-    + `<div class="fl"><span class="fgut"></span><code class="tx doc">${docOf(wordsOf(f))}</code></div>${mine.map(c => top(c, true)).join('')}${beneath.map(c => top(c, false)).join('')}</div>`;
+    + `${docOf(wordsOf(f)) && `<div class="fl"><span class="fgut"></span><code class="tx doc">${docOf(wordsOf(f))}</code></div>`}${mine.map(c => top(c, true)).join('')}${beneath.map(c => top(c, false)).join('')}</div>`;
   lines.forEach((l, i) => { const lv = l[0] + 1, st = l[4] || '', fns = st === 'del' ? [] : calls(l), ch = uniq(fns.flatMap(causes)), key = f.id + '/' + i, can = !!(l[2] || fns.length), on = can && openF.has(key);
     const body = !on ? '' : `<div class="x" style="padding-left:calc(var(--gut) + ${lv} * var(--lv))">${l[2] ? `<div class="why">${esc(l[2])}</div>` : ''}` + fns.map(g => { const fl = g.id !== f.id && flowOf(g);
-      return `<div class="sg"><code>${hl('def ' + pySig(nowSig(g)) + ':')}${fl ? ICO : ''}</code>${pill(homeOfFn(g), fl)}</div><div class="doc">${docOf(wordsOf(g))}</div>${causes(g).map(c => `<div class="chgs"># changed: ${esc(c.name)}: ${esc(c.line)}</div>`).join('')}`; }).join('') + '</div>';
+      return `<div class="sg"><code>${hl('def ' + pySig(nowSig(g)) + ':')}${fl ? ICO : ''}</code>${pill(homeOfFn(g), fl)}</div>${docLine(wordsOf(g), 'doc')}${causes(g).map(c => `<div class="chgs"># changed: ${esc(c.name)}: ${esc(c.line)}</div>`).join('')}`; }).join('') + '</div>';
     html += `<div class="row ${on ? 'open' : ''}"><div class="fl ${can ? 'can' : ''} ${st} ${lit !== null && ch.some(c => S.changes.indexOf(c) === lit) ? 'lit' : ''}" ${can ? `data-key="${esc(key)}"` : ''}><span class="fgut ${st}">${st ? mark[st] : ch.length ? '~' : ''}</span>`
       + `<code class="tx" style="padding-left:calc(${lv} * var(--lv) + 2ch);text-indent:-2ch">${hl(l[1])}</code></div>${body}</div>`; });
   return `<div class="fc">${html}</div>`; }

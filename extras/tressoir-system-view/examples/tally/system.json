@@ -46,20 +46,20 @@
   "flows": [
     { "of": "src/entry/cli/: main",
       "sketch": [
-        "command = read(args)",
+        "command = read(args)  # which command, and what it was given",
         "if command.name == \"import\":",
         "    found: list[NewEntry] = bank_files.parse(command.path)  # reads the bank's export into entries",
         "    for entry in found:",
         "        categories.categorize(entry)  # the first rule that matches gives its category",
         "        entries.add(entry)  # records it; nothing when it is already there",
-        "    print(count(found))",
+        "    print(count(found))  # says how many entries the file held",
         "return ExitCode.ok"
       ] },
     { "of": "src/core/entries/: add",
       "sketch": [
         "if already_recorded(entry):  # the same date, amount and payee",
         "    return None",
-        "id: EntryId = next_id()",
+        "id: EntryId = next_id()  # entries are numbered in the order they arrive",
         "store.write(Change.insert(id, entry))  # all of it or none",
         "return id"
       ] }

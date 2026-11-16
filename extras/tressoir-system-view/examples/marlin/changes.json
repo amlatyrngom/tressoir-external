@@ -80,8 +80,8 @@
           "snapshot: Snapshot = transactions.snapshot(session.txn)  # the query sees the database as of now, whatever commits meanwhile",
           "rows: RowStream = execution.run(plan, snapshot)  # the plan is cut into pipelines that run on worker threads",
           "while batch := results.next(rows):  # rows go back in batches as they are ready",
-          "    send(session, batch)",
-          "return Reply.done()"
+          "    send(session, batch)  # each batch goes to the client as soon as it is ready",
+          "return Reply.done()  # the client is told the statement is finished"
         ] }
     ] },
   { "name": "Columnar tables", "line": "tables stored by column, for scans over few columns", "plan": "Storage for analytics",

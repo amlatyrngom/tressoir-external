@@ -11,6 +11,9 @@
     system_view.py --from C   also show a delta that starts at commit C
     system_view.py --flows    also print every flow, with the listed functions found on each line
     system_view.py --work F   use this work folder instead of the nearest WORK/
+    system_view.py --draft F  build a page from the system.json F alone, beside it; the project's own system view is left
+                              as it is. With --files L, the file view shows the paths listed in L (a layout that does not
+                              exist yet) instead of the files here; with --out P, the page is written to P
 
 An error leaves its entry out of the fold and makes the script end with 1; a note is only printed.
 A built entry is taken out of changes.json once the last commit holds it.
@@ -95,15 +98,18 @@ class Git:
     def __init__(self, root, hidden):
         self.root = root
         self.hidden = hidden            # path prefixes left out of the file view
+        self.asked = {}                 # every git command is a question about the commits or about files the script never writes: asked once
         self.ok = self._run('rev-parse', '--is-inside-work-tree')[1].strip() == 'true'
         self.head = self.commit('HEAD') if self.ok else None
 
     def _run(self, *args):
-        try:
-            p = subprocess.run(['git'] + list(args), cwd=self.root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        except (OSError, ValueError):
-            return 1, ''
-        return p.returncode, p.stdout.decode('utf-8', 'replace')
+        if args not in self.asked:
+            try:
+                p = subprocess.run(['git'] + list(args), cwd=self.root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.asked[args] = (p.returncode, p.stdout.decode('utf-8', 'replace'))
+            except (OSError, ValueError):
+                self.asked[args] = (1, '')
+        return self.asked[args]
 
     def commit(self, name):
         code, out = self._run('rev-parse', '--verify', '-q', name + '^{commit}')
@@ -1689,6 +1695,29 @@ def note_flows(flows, built, world, problems):
                               'state it again in the entry, under "flows".' % (e.get('name', '?'), fn, folder))
 
 
+def note_wordless(world, problems):
+    """A box, a listed function or a listed type with no words: the page has nothing to say where its words would be."""
+    for folder, b in world.boxes.items():
+        if not (b.get('line') or '').strip():
+            problems.note('The box %s has no line: say in a few words what it is for.' % folder)
+        missing = [('the type ' if q['type'] else '') + q['name'] for q in (world.lines[i] for i in world.order[folder]) if not q['words']]
+        if missing:
+            problems.note('Listed in %s with no words: %s. After // on each line, say what it is for.' % (folder, ', '.join(missing)))
+
+
+SAYS_ITSELF = re.compile(r'^(?:#|(?:break|continue|pass|raise)\b|return(?:\s[^(]*)?$)')
+
+
+def note_flow_words(flows, problems):
+    """A step of a flow with no words. A line that only opens a block, returns a name, or leaves a loop says itself."""
+    for lid, lines in flows.items():
+        folder, fn = lid.rsplit('#', 1)
+        bare = [code for _lv, code, words, _calls in lines if not words and not code.endswith(':') and not SAYS_ITSELF.match(code)]
+        if bare:
+            problems.note('The flow of %s (%s) has %d %s with no words: %s. After # on each, say why the step is there or what it decides.' % (
+                fn, folder, len(bare), 'step' if len(bare) == 1 else 'steps', '; '.join(bare)))
+
+
 def note_dangling(system, world, problems):
     """A link or a neighbour that points at nothing."""
     regions = system.get('regions') or {}
@@ -2121,6 +2150,8 @@ def build(args):
     note_empty_boxes(current, now_files, problems, kept)
     flows_now = flows_of(current, problems)
     note_flows(flows_now, [e for e in built if not any(e is f for f in failed)], current, problems)
+    note_wordless(current, problems)
+    note_flow_words(flows_now, problems)
     note_dangling(folded, current, problems)
 
     plan_worlds = []
@@ -2247,16 +2278,7 @@ def build(args):
     file_rows = [[p, words.get(p) or (said.get(p, '') if p not in (head_files or ()) else '')] for p in sorted(all_files)]
 
     listed = World(lists.sys)
-    data = {'name': system.get('name') or os.path.basename(root), 'views': emit_views(lists.sys), 'flows': flows}
-    if lists.lines:
-        data['api'], data['types'] = {}, {}
-        for folder in listed.boxes:
-            fns = [[lists.lines[i]['sig'], lists.lines[i]['words']] for i in lists.order.get(folder, []) if not lists.lines[i]['type']]
-            if fns:
-                data['api'][folder] = fns
-            for i in lists.order.get(folder, []):
-                if lists.lines[i]['type']:
-                    data['types'][i] = [lists.lines[i]['sig'], lists.lines[i]['words'], folder]
+    data = page_data(system.get('name') or os.path.basename(root), lists, listed, flows)
     data.update({'dirs': {p: w for p, w in words.items() if p.endswith('/')}, 'files': file_rows, 'changes': changes,
                  'tabs': tabs, 'snap': snap})
 
@@ -2313,16 +2335,119 @@ def build(args):
         if not problems.errors:
             print('Checked: %s. No error.' % count)
         return 1 if problems.errors else 0
+    write_page(data, 'System view: ' + data['name'], os.path.join(work, 'SYSTEM_VIEW.html'))
+    print('Wrote %s/SYSTEM_VIEW.html: %s.' % (name, count))
+    return 1 if problems.errors else 0
+
+
+def page_data(name, lists, listed, flows):
+    """What every page carries: the name, the views, the flows, and the listed functions and types of each box."""
+    data = {'name': name, 'views': emit_views(lists.sys), 'flows': flows}
+    if lists.lines:
+        data['api'], data['types'] = {}, {}
+        for folder in listed.boxes:
+            fns = [[lists.lines[i]['sig'], lists.lines[i]['words']] for i in lists.order.get(folder, []) if not lists.lines[i]['type']]
+            if fns:
+                data['api'][folder] = fns
+            for i in lists.order.get(folder, []):
+                if lists.lines[i]['type']:
+                    data['types'][i] = [lists.lines[i]['sig'], lists.lines[i]['words'], folder]
+    return data
+
+
+def write_page(data, title, out):
     template = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'view', 'page.html')
     with open(template, encoding='utf-8') as f:
         page = f.read()
-    page = page.replace('__TITLE__', html.escape('System view: ' + data['name']))
+    page = page.replace('__TITLE__', html.escape(title))
     page = page.replace('__DATA__', json.dumps(data, ensure_ascii=False, separators=(',', ':')).replace('</', '<\\/'))
-    out = os.path.join(work, 'SYSTEM_VIEW.html')
     with open(out, 'w', encoding='utf-8') as f:
         f.write(page)
-    print('Wrote %s/SYSTEM_VIEW.html: %s.' % (name, count))
-    return 1 if problems.errors else 0
+
+
+def build_draft(args):
+    """A page from one system.json that is not the project's own: a first figure not agreed yet, or a layout the code does
+    not have yet. One tab, nothing compared, and nothing written but the page."""
+    root, work = find_work(os.getcwd(), args.work)
+    name = os.path.basename(work)
+    path = os.path.abspath(args.draft)
+    # a path is said from the top of the project, or whole when it is outside it
+    loc = lambda q: os.path.abspath(q) if os.path.relpath(os.path.abspath(q), root).startswith('..') else os.path.relpath(os.path.abspath(q), root).replace(os.sep, '/')
+    said = loc(path)
+    if not os.path.isfile(path):
+        raise Stop('There is no file %s.' % args.draft)
+    if os.path.dirname(path) == os.path.join(work, 'SYSTEM_VIEW'):
+        raise Stop('%s is in the project\'s own system view. A draft is written elsewhere, such as the task\'s artifacts; '
+                   'the files in %s/SYSTEM_VIEW/ are built with no option.' % (said, name))
+    system = read_json(path, {}, said)
+    check_shape(system, [], {}, lambda f: said)
+    git = Git(root, [name + '/'] + LINK_FOLDERS + ['.git/'])
+    there = git.files_now() if git.ok else set(scan(root, git.hidden))
+    files = there
+    if args.files:
+        if not os.path.isfile(args.files):
+            raise Stop('There is no file %s.' % args.files)
+        with open(args.files, encoding='utf-8-sig', errors='replace') as f:
+            text = f.read()
+        listed = parse_json_text(text) if text.lstrip().startswith('[') else [t.strip() for t in text.split('\n')]
+        if not texts(listed):
+            raise Stop('%s must hold the paths of the files, one per line, or a JSON list of them.' % args.files)
+        files = set(p[2:] if p.startswith('./') else p for p in (t.strip() for t in listed) if p and not p.startswith('#'))
+    problems = Problems()
+    world = World(system, problems)
+    flows = flows_of(world, problems)
+    if not world.boxes:
+        problems.note('No box is written in %s.' % said)
+    if not args.files:
+        note_loose_files(world, files, problems, root)
+    have = set(files)
+    for q in files:
+        parts = q.split('/')
+        have.update('/'.join(parts[:k]) + '/' for k in range(1, len(parts)))
+    empty = [f for f in world.boxes if not any(q in have or q.rstrip('/') in have or q.rstrip('/') + '/' in have for q in world.paths(f))]
+    if empty:
+        problems.note('%d %s no file %s: %s.%s' % (
+            len(empty), 'box has' if len(empty) == 1 else 'boxes have', 'in ' + args.files if args.files else 'here', some(empty),
+            '' if args.files else ' For a layout the code does not have yet, list the files it would have and name the list with --files.'))
+    note_wordless(world, problems)
+    note_flow_words(flows, problems)
+    note_dangling(system, world, problems)
+    for t in problems.errors:
+        print('ERROR  ' + t)
+    for t in problems.notes:
+        print('note   ' + t)
+    if args.flows:
+        for lid, lines in flows.items():
+            print('\nThe flow of %s (%s):' % tuple(reversed(lid.rsplit('#', 1))))
+            for lv, code, _note, calls in lines:
+                print('  %s%s%s' % ('    ' * lv, code, '    -> ' + ', '.join('%s: %s' % tuple(c.rsplit('#', 1)) for c in calls) if calls else ''))
+    count = '%d boxes, %d flows' % (len(world.boxes), len(flows))
+    if problems.errors:
+        print('%d %s. Fix %s and run again.' % (len(problems.errors), 'error' if len(problems.errors) == 1 else 'errors',
+                                               'it' if len(problems.errors) == 1 else 'them'))
+        return 1
+    if args.check:
+        print('Checked the draft %s: %s. No error.' % (said, count))
+        return 0
+    lists = Lists(world)
+    words = read_json(os.path.join(work, 'SYSTEM_VIEW', 'lines.json'), {}, '%s/SYSTEM_VIEW/lines.json' % name)
+    words = words if isinstance(words, dict) and all(isinstance(v, str) for v in words.values()) else {}
+    data = page_data(system.get('name') or os.path.basename(root), lists, World(lists.sys), flows)
+    snap = state_snap(lists, world, files, files)
+    if flows:
+        snap['flows'] = flow_state(flows, flows)
+    data.update({'dirs': {p: w for p, w in words.items() if p.endswith('/')}, 'files': [[p, words.get(p, '')] for p in sorted(files)],
+                 'changes': [], 'tabs': [{'id': 'current', 'label': 'Draft', 'idle': 'a draft, not the project\'s system view.'}],
+                 'snap': {'current': snap}})
+    if not world.boxes:
+        data['none'] = 'No boxes in this draft.'
+    data['built'] = ['Built %s from the draft %s%s. The project\'s own system view is not changed by it.' % (
+        datetime.datetime.now().strftime('%Y-%m-%d %H:%M'), said,
+        ', with the files listed in %s' % loc(args.files) if args.files else '')]
+    out = os.path.abspath(args.out) if args.out else os.path.splitext(path)[0] + '.html'
+    write_page(data, 'System view, draft: ' + data['name'], out)
+    print('Wrote %s: %s. A draft: %s/SYSTEM_VIEW/ is as it was.' % (loc(out), count, name))
+    return 0
 
 
 def changed_by_plan(mine, now_files, problems):
@@ -2394,14 +2519,21 @@ def main():
     ap.add_argument('--from', dest='start', metavar='COMMIT', help='also show a delta that starts at this commit')
     ap.add_argument('--flows', action='store_true', help='also print every flow, with the listed functions found on each line')
     ap.add_argument('--work', metavar='FOLDER', help='the work folder, when it is not the nearest WORK/')
+    ap.add_argument('--draft', metavar='FILE', help='build a page from this system.json alone and leave the project\'s own system view as it is')
+    ap.add_argument('--files', metavar='LIST', help='with --draft: the files the draft is about, one path per line, when they are not the files here')
+    ap.add_argument('--out', metavar='PAGE', help='with --draft: where the page is written, when not beside the draft')
     args = ap.parse_args()
+    if (args.files or args.out) and not args.draft:
+        ap.error('--files and --out go with --draft')
+    if args.draft and (args.seen or args.start):
+        ap.error('--draft compares nothing: it goes with --check, --flows, --files and --out only')
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(errors='replace')     # an arrow on a terminal that is not UTF-8 is shown as "?"
         except (AttributeError, ValueError):
             pass
     try:
-        return build(args)
+        return build_draft(args) if args.draft else build(args)
     except Stop as e:
         print('system_view.py: %s' % e, file=sys.stderr)
         return 2

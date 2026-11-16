@@ -13,7 +13,7 @@
         "sketch": [
           "if already_recorded(entry):  # the same date, amount and payee",
           "    return None",
-          "id: EntryId = next_id()",
+          "id: EntryId = next_id()  # entries are numbered in the order they arrive",
           "store.write(Change.insert(id, entry))  # all of it or none",
           "return id"
         ] }

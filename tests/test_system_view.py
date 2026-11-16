@@ -2,7 +2,9 @@
 """Tests for extras/tressoir-system-view/system_view.py. Each case builds its own git repository
 in a temporary folder.
 
-    python3 tests/test_system_view.py
+    python3 tests/test_system_view.py                 # every group of cases, all at once
+    python3 tests/test_system_view.py flows fourth    # only these groups
+    python3 tests/test_system_view.py --serial        # one after the other, in one process
 
 Tally, the simple example, and Marlin, the one with views inside boxes, are rebuilt as real
 repositories: the state of the last commit comes from tests/fixtures/system_view/<example>/
@@ -23,7 +25,7 @@ KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(KIT, 'extras', 'tressoir-system-view', 'system_view.py')
 EXAMPLES = os.path.join(KIT, 'extras', 'tressoir-system-view', 'examples')
 FIXTURES = os.path.join(KIT, 'tests', 'fixtures', 'system_view')
-PASS, FAIL = [], []
+PASS, FAIL, TOOK = [], [], []
 
 
 def check(name, ok, detail=''):
@@ -41,6 +43,12 @@ def write(root, path, text):
     os.makedirs(os.path.dirname(full), exist_ok=True)
     with open(full, 'w', encoding='utf-8') as f:
         f.write(text)
+
+
+def worded(out):
+    """What the script printed, without its notes about steps of a flow that have no words: the small flows these
+    cases write are not about that."""
+    return '\n'.join(l for l in out.split('\n') if ' with no words: ' not in l)
 
 
 def git(root, *args):
@@ -384,7 +392,7 @@ def shown_flows(data, tab='current'):
 def checks(tmp):
     root = mini(tmp)
     code, out, err = run(root)
-    check('mini: a clean project has no error and no note', code == 0 and 'ERROR' not in out and 'note' not in out, out + err)
+    check('mini: a clean project has no error and no note', code == 0 and 'ERROR' not in out and 'note' not in worded(out), out + err)
     ent, rep = 'src/core/entries/', 'src/core/reports/'
     keys = {'name': 'Keys are stable', 'line': 'a key no longer depends on the clock',
             'files': {ENTRIES_PY: 'the key is the same on every run'}, 'affects': ['add']}
@@ -1414,7 +1422,7 @@ def flows(tmp):
                        {'code': '    total += row', 'says': 'adds it up', 'calls': [rep + ': monthly']}, 'return total'], wrote[2:])
     check('a first line that repeats the def, async or not, is taken out of the sketch, and it is said',
           'note   The flow of main (src/entry/cli/): the first line of its sketch repeated the def.' in out
-          and 'note   The flow of add (src/core/entries/): the first line of its sketch repeated the def.' in out and 'The flow of monthly' not in out, out)
+          and 'note   The flow of add (src/core/entries/): the first line of its sketch repeated the def.' in out and 'The flow of monthly' not in worded(out), out)
     text = read(os.path.join(root, SV + 'system.json'))
     check('system.json keeps a sketch one line per line, however short it is',
           '    { "of": "src/core/entries/: add",\n      "sketch": [\n        "# only words",\n        "if new(entry):",\n'
@@ -1428,7 +1436,7 @@ def flows(tmp):
           and got.get(monthly) == [[0, 'rows = load(month)', '', []], [0, 'for row in rows:', '', []], [1, 'total += row', 'adds it up', []], [0, 'return total', '', []]], got)
     code, out, err = run(root)
     check('a second run finds the sketches as it wrote them: nothing is said and nothing changes',
-          code == 0 and 'note' not in out and read(os.path.join(root, SV + 'system.json')) == text, out + err)
+          code == 0 and 'note' not in worded(out) and read(os.path.join(root, SV + 'system.json')) == text, out + err)
 
     # ---- what is wrong with a flow: an error, the page is built, and the flow is not shown
     root = new()
@@ -1490,7 +1498,7 @@ def flows(tmp):
           code == 0 and '\nThe flow of main (src/entry/cli/):\n  entry = NewEntry(argv)\n  return entries.add(entry)    -> src/core/entries/: add\n' in out
           and '\nThe flow of add (src/core/entries/):\n  key = _key(entry)\n  return _store(entry, key)\n' in out, out + err)
     code, out, err = run(root, '--check')
-    check('without --flows no flow is printed', code == 0 and 'The flow of' not in out, out + err)
+    check('without --flows no flow is printed', code == 0 and 'The flow of' not in worded(out), out + err)
     put(root, lambda s: s.update(flows=[]))
     code, out, err = run(root, '--check', '--flows')
     check('--flows says so when no flow is written', code == 0 and 'No flow is written.' in out, out + err)
@@ -1673,7 +1681,7 @@ def calls(tmp):
     code, out, err = run(root, '--flows')
     got = (page_data(root)['flows'] if code == 0 else {}).get(cli + '#main') or [[0, '', '', None]] * len(sketch)
     found = lambda at: got[at][3]
-    said = out.split('\nThe flow of main (src/entry/cli.py):')[0]        # the notes, without what --flows prints after them
+    said = worded(out.split('\nThe flow of main (src/entry/cli.py):')[0])        # the notes, without what --flows prints after them
     check('calls: the project builds with no error', code == 0 and 'ERROR' not in out and len(got) == len(sketch), out + err)
     check('a call written bare is a function of the flow\'s own box', found(0) == [cli + '#usage'], got[0])
     check('a call written bare is not looked for in another box, and nothing is said', found(1) == [] and 'flush()' not in said, got[1])
@@ -1880,7 +1888,7 @@ def third(tmp):
     # ---- the closing lines
     root = new()
     code, out, err = run(root, '--check')
-    check('a check that finds nothing wrong says so', code == 0 and out.strip() == 'Checked: 3 boxes, 2 flows. No error.', out + err)
+    check('a check that finds nothing wrong says so', code == 0 and worded(out).strip() == 'Checked: 3 boxes, 2 flows. No error.', out + err)
     entries(root, {'name': 'Yearly', 'plan': 'Totals', 'line': 'y', 'files': {MONTHLY_PY: 'a yearly total'}})
     code, out, err = run(root)
     check('the closing line counts the planned changes', code == 0 and 'Wrote WORK/SYSTEM_VIEW.html: 3 boxes, 2 flows, 1 planned change.' in out, out + err)
@@ -1893,7 +1901,7 @@ def third(tmp):
     code, out, err = run(root)
     got = page_data(root)['flows']
     check('box.function handed on without brackets counts as a call; an attribute of a variable does not, and nothing is said',
-          code == 0 and 'note' not in out and [l[3] for l in got[MAIN]] == [[ADD], [], [monthly]], out + err + str(got[MAIN]))
+          code == 0 and 'note' not in worded(out) and [l[3] for l in got[MAIN]] == [[ADD], [], [monthly]], out + err + str(got[MAIN]))
     check('the one bare name inside where() is a listed function of the flow\'s own box, or nothing',
           [l[3] for l in got[ADD]] == [[ent + '#listing'], [], []], got[ADD])
 
@@ -2038,25 +2046,132 @@ def third(tmp):
     check('a plan\'s name on two lines stops the script', code != 0 and 'Traceback' not in err and 'on one line' in out + err, out + err)
 
 
-def main():
-    tmp = tempfile.mkdtemp(prefix='tressoir-system-view-tests.')
+def fourth(tmp):
+    """What the first use on a real project found (2026-11-16): lines and steps with no words, and a page for a figure
+    that is not agreed yet. One case each."""
+    count = [0]
+
+    def new():
+        count[0] += 1
+        return mini(tmp, 'fourth-%d' % count[0])
+
+    ent = 'src/core/entries/'
+
+    # ---- a listed line, a box or a step with no words is named
+    root = new()
+
+    def bare(s):
+        box = s['regions']['core']['boxes'][0]
+        box['interface'] = ['add(entry: NewEntry) → EntryId', 'listing() → [Entry]  // every entry', 'NewEntry = { text: Text }']
+        s['regions']['core']['boxes'][1]['line'] = ''
+        s['flows'] = [{'of': ent + ': add', 'sketch': [
+            '# the key first', 'key = _key(entry)', 'if key in seen:', '    return None', 'for old in seen:', '    drop(old)  # one at a time',
+            'else:', '    pass', 'while waiting():', '    continue', 'store.write(entry, key)', 'raise Full()', 'return key', 'return _store(entry, key)']}]
+    put(root, bare)
+    code, out, err = run(root, '--check')
+    check('a listed function and a listed type with no words are named, with their box, and a described line is not',
+          code == 0 and 'note   Listed in src/core/entries/ with no words: add, the type NewEntry. After // on each line, say what it is for.' in out, out + err)
+    check('a box with no line is named', 'note   The box src/core/reports/ has no line: say in a few words what it is for.' in out, out)
+    check('the steps of a flow with no words are named; a line that opens a block, a comment, a return of a name, and break, continue, pass and raise are not',
+          'note   The flow of add (src/core/entries/) has 3 steps with no words: key = _key(entry); store.write(entry, key); return _store(entry, key). '
+          'After # on each, say why the step is there or what it decides.' in out, out)
+    code, out, err = run(root)
+    data = page_data(root)
+    check('the page still builds, and has the line with no words as it is', code == 0 and data['api'][ent][0] == ['add(entry: NewEntry) → EntryId', ''], out + err)
+    root = new()
+    put(root, lambda s: s['flows'][1]['sketch'].__setitem__(1, 'return _store(entry, key)  # stored under its key'))
+    code, out, err = run(root, '--check')
+    check('when every line and every step has words, nothing is said', code == 0 and out.strip() == 'Checked: 3 boxes, 2 flows. No error.', out + err)
+
+    # ---- a draft: a page from a system.json that is not the project's own
+    root = new()
+    own = {f: read(os.path.join(root, f)) for f in (SV + 'system.json', SV + 'changes.json', SV + 'lines.json', 'WORK/SYSTEM_VIEW.html')}
+    draft = json.loads(json.dumps(MINI))
+    draft['name'] = 'Mini, proposed'
+    draft['regions']['core']['boxes'].append({'name': 'Budgets', 'folder': 'src/core/budgets/', 'line': 'limits per month',
+                                              'interface': ['limit(month: Month) → Amount  // what may be spent']})
+    write(root, 'WORK/ARTIFACTS/PROPOSAL/proposed.system.json', json.dumps(draft, ensure_ascii=False))
+    status = lambda: subprocess.run(['git', 'status', '--porcelain', '--', 'WORK/SYSTEM_VIEW', 'src'], cwd=root, stdout=subprocess.PIPE).stdout.decode()
+    before = status()
+    code, out, err = run(root, '--draft', 'WORK/ARTIFACTS/PROPOSAL/proposed.system.json')
+    page = os.path.join(root, 'WORK/ARTIFACTS/PROPOSAL/proposed.system.html')
+    data = json.loads(re.search(r'^const S = (.*);$', read(page), re.M).group(1)) if os.path.exists(page) else {}
+    check('--draft writes a page beside the draft, with one tab called Draft and the draft\'s boxes',
+          code == 0 and 'Wrote WORK/ARTIFACTS/PROPOSAL/proposed.system.html: 4 boxes, 2 flows.' in out and [t['label'] for t in data.get('tabs', [])] == ['Draft']
+          and data.get('name') == 'Mini, proposed' and 'src/core/budgets/' in data.get('api', {}), out + err)
+    check('and leaves the project\'s own system view, its page included, as it was',
+          all(read(os.path.join(root, f)) == t for f, t in own.items()) and status() == before, status())
+    check('a box of the draft with no file here is said once, with what to do for a layout that does not exist yet',
+          'note   1 box has no file here: src/core/budgets/. For a layout the code does not have yet, list the files it would have and name the list with --files.' in out, out)
+    check('the file view of a draft is the files here', sorted(f[0] for f in data.get('files', [])) == sorted(MINI_FILES), data.get('files'))
+    write(root, 'WORK/ARTIFACTS/PROPOSAL/files.txt', '# the layout proposed\nsrc/entry/cli/main.py\n./src/core/entries/entries.py\n\nsrc/core/reports/monthly.py\nsrc/core/budgets/limit.py\n')
+    out_page = os.path.join(root, 'WORK/TMP/draft.html')
+    os.makedirs(os.path.dirname(out_page))
+    code, out, err = run(root, '--draft', 'WORK/ARTIFACTS/PROPOSAL/proposed.system.json', '--files', 'WORK/ARTIFACTS/PROPOSAL/files.txt', '--out', 'WORK/TMP/draft.html')
+    data = json.loads(re.search(r'^const S = (.*);$', read(out_page), re.M).group(1)) if os.path.exists(out_page) else {}
+    check('--files gives the draft the files of a layout that does not exist yet, and --out says where the page goes',
+          code == 0 and 'no file' not in out and sorted(f[0] for f in data.get('files', [])) == sorted(list(MINI_FILES)[:3] + ['src/core/budgets/limit.py']), out + err)
+    os.remove(page)
+    code, out, err = run(root, '--draft', 'WORK/ARTIFACTS/PROPOSAL/proposed.system.json', '--check')
+    check('--draft with --check prints the checks and writes no page',
+          code == 0 and 'Checked the draft WORK/ARTIFACTS/PROPOSAL/proposed.system.json: 4 boxes, 2 flows. No error.' in out and not os.path.exists(page), out + err)
+    draft['flows'].append({'of': 'src/core/budgets/: spend', 'sketch': ['return 1']})
+    write(root, 'WORK/ARTIFACTS/PROPOSAL/proposed.system.json', json.dumps(draft, ensure_ascii=False))
+    code, out, err = run(root, '--draft', 'WORK/ARTIFACTS/PROPOSAL/proposed.system.json')
+    check('a draft with an error writes no page', code == 1 and 'ERROR  The flow of spend' in out and not os.path.exists(page), out + err)
+    code, out, err = run(root, '--draft', SV + 'system.json')
+    check('the project\'s own system.json is not a draft: the script stops and says where a draft goes',
+          code == 2 and 'Traceback' not in err and 'A draft is written elsewhere' in err, out + err)
+    code, out, err = run(root, '--draft', 'WORK/ARTIFACTS/PROPOSAL/none.json')
+    check('a draft that is not there stops the script', code == 2 and 'There is no file WORK/ARTIFACTS/PROPOSAL/none.json.' in err, out + err)
+    code, out, err = run(root, '--files', 'WORK/ARTIFACTS/PROPOSAL/files.txt')
+    check('--files without --draft is refused', code == 2 and '--files and --out go with --draft' in err and status() == before, out + err)
+
+
+GROUPS = ('tally', 'marlin', 'no_repository', 'checks', 'empty', 'review', 'trial', 'pocket', 'flows', 'calls', 'levels', 'third', 'fourth')
+
+
+def one(group):
+    """One group of cases, in this process."""
+    tmp, start = tempfile.mkdtemp(prefix='tressoir-system-view-tests.'), time.time()
     try:
-        tally(tmp)
-        marlin(tmp)
-        no_repository(tmp)
-        checks(tmp)
-        empty(tmp)
-        review(tmp)
-        trial(tmp)
-        pocket(tmp)
-        flows(tmp)
-        calls(tmp)
-        levels(tmp)
-        third(tmp)
+        globals()[group](tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    print('\nResult: %d passed, %d failed' % (len(PASS), len(FAIL)))
-    return 1 if FAIL else 0
+    TOOK.append('%s %.0f s' % (group, time.time() - start))
+
+
+def main():
+    """Every group, each in a process of its own and all at once: a group builds its repositories in its own temporary
+    folder, so they share nothing. Name groups to run only those; --serial runs them one after the other, in this process."""
+    args = [a for a in sys.argv[1:] if a != '--serial']
+    unknown = [a for a in args if a not in GROUPS]
+    if unknown:
+        sys.exit('No group of cases is called %s. The groups: %s.' % (', '.join(unknown), ', '.join(GROUPS)))
+    groups = args or list(GROUPS)
+    if '--serial' in sys.argv[1:] or len(groups) == 1:
+        for g in groups:
+            one(g)
+        print('\nTook: %s' % ', '.join(TOOK))
+        print('Result: %d passed, %d failed' % (len(PASS), len(FAIL)))
+        return 1 if FAIL else 0
+    started = [(g, subprocess.Popen([sys.executable, os.path.abspath(__file__), g], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)) for g in groups]
+    passed = failed = 0
+    took = []
+    for g, p in started:
+        out = p.communicate()[0].decode('utf-8', errors='replace')
+        m = re.search(r'\nResult: (\d+) passed, (\d+) failed\s*$', out)
+        if not m:        # the group stopped before its result: show what it printed, and count it as a failure
+            print(out + '\nFAIL: the group %s did not finish' % g)
+            failed += 1
+            continue
+        body, _, t = out[:m.start()].rpartition('\nTook: ')
+        print(body.rstrip('\n'))
+        took.append(t.strip())
+        passed, failed = passed + int(m.group(1)), failed + int(m.group(2))
+    print('\nTook: %s' % ', '.join(took))
+    print('Result: %d passed, %d failed' % (passed, failed))
+    return 1 if failed else 0
 
 
 if __name__ == '__main__':

@@ -48,13 +48,13 @@
     { "of": "pocket/cli.py: cmd_add",
       "sketch": [
         "id: PageId = pages.save(url)  # fetches, cleans and stores the page",
-        "print(id)"
+        "print(id)  # the id is how later commands name the page"
       ] },
     { "of": "pocket/pages.py: save",
       "sketch": [
         "html: str = fetch.fetch(url)  # downloads the page, with a time limit",
         "text: str = clean.clean(html)  # keeps the article, drops the rest",
-        "id: PageId = store.put(Page(url, title_of(html), text))",
+        "id: PageId = store.put(Page(url, title_of(html), text))  # the page is kept whole, under a new id",
         "notify.notify(title_of(html))  # says the page is saved",
         "return id"
       ] }
