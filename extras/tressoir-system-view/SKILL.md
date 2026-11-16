@@ -193,9 +193,10 @@ What the script prints:
 | a call stated by hand in a sketch that names no listed function | a call in a sketch into a box that does not list it, or that two boxes answer to |
 | `moves` to another region or row, onto or into another box, or of a box with boxes inside | a sketch that began with its `def` line (the script takes it out); a sketch over 40 lines |
 | `renames` of a function no box lists, or to a name its box already lists | two entries state the same flow: the later one stands |
+| a flow of an interface's method | a parenthesis that names a type no box lists as an interface or a class; a method listed in another box than its type |
 | a box three levels deep, written or planned; a plan's name over 24 characters (this one stops the script) | an earlier entry named a box at the path a later entry moved it from: the script corrects the entry |
 | | a new folder with no words in `lines.json`, beside folders that have some |
-| | a box, a listed function or a listed type with no words; a step of a flow with no words: write them, in the task's entry or, while the figure is being written, in `system.json` |
+| | a box, a listed function, a method or a listed type of any kind with no words; a step of a flow with no words: write them, in the task's entry or, while the figure is being written, in `system.json` |
 | | no box written yet |
 
 Reading a diff:
@@ -235,7 +236,8 @@ Written with me. Four layers; each is optional and the page works without the la
    inside may give `links` between its rows, and `from` and `uses`: the outside boxes it works
    with, each with a sentence.
 3. **Interface.** One string per line. A function is `name(arg: Type) → Type  // words`; a type
-   is `Name = shape  // words`.
+   is `Name = shape  // words`, `interface Name  // words` or `class Name(Parent)  // words`. See
+   "Three kinds of type" below.
 4. **Flows.** A flow is the body of one listed function, as a short sketch: `of` (the box's
    folder, a colon, the function) and `sketch` (its lines). See "Flows" below.
 
@@ -262,7 +264,7 @@ them as boxes of the overview.
 - Names are spelt as in the code. Where the code has no single name (a command, a route), choose
   one; the note that it appears nowhere is then expected. The name of a line is its first word, so
   two routes cannot both start with `GET`: write `get_users  // GET /users, lists the users`.
-- A type is written in the box that owns it.
+- A type is written in the box that owns it. It is one of three kinds: see below.
 - Every line has words after `//`: a function says what it does for its caller, a type what it
   stands for. A type with no words is as bad as a function with none. The script names each
   listed line and each box that has no words, and the page shows no docstring for it.
@@ -277,6 +279,41 @@ them as boxes of the overview.
   (`str` and `int` in a Python project, `u64` in a Rust one). Leave out default values and
   keyword markers. An argument the code gives no type may stand bare (`run(client, db)`), or
   carry the type it holds.
+
+### Three kinds of type
+
+```json
+"interface": [
+  "Batch = { columns: [Column], rows: Int }  // a few thousand rows, held by column",
+  "interface Operator  // anything that hands out batches: a scan, a join, a sort",
+  "Operator.next() → Batch?  // the next batch, or nothing when the input is finished",
+  "class Sort(Operator)  // orders its input, on disk when it does not fit in memory",
+  "Sort.spill()  // writes the sorted runs held in memory to disk"
+]
+```
+
+- **Data** is `Name = shape`: a record, an alias, a choice between values. It says what a value
+  holds.
+- **An interface** is `interface Name`: what something can do, with no code of its own. A
+  protocol, a trait, an abstract base class and a set of callbacks a module is handed are all
+  written this way. A capability is an interface, never a record whose fields are functions.
+- **A class** is `class Name`: something with code and state of its own that another module holds
+  or calls. What it implements or extends goes in a parenthesis, as in Python:
+  `class Sort(Operator)`, `class TopN(Sort)`. A class no other module names is private detail and
+  is not listed.
+- A method is a line of its own, in the same box, named with its type in front:
+  `Operator.next() → Batch?  // words`. It is a function line like any other: it has words, it
+  goes under `affects`, `renames` and `interface` in an entry by that name, and a class's method
+  may have a flow (`"of": "<box folder>: Sort.spill"`). List the methods a caller uses, not all of
+  them. A class does not list again a method it only inherits or implements unchanged. Fields are
+  not listed.
+- Write them as the code has them. A type is an interface only when the code has one (a
+  protocol, a trait, an abstract class, a table of functions); do not invent an interface or a
+  parent to make the figure tidier. A parenthesis names only types the figure lists.
+- The page shows the three apart, each with its methods under it, and writes under an interface
+  the classes that implement it and under a class those that extend it. It works that out from
+  the parentheses: do not write it in the words.
+- `- Name` in an entry removes an interface or a class with its methods and their flows.
 
 ### Flows
 
@@ -319,9 +356,16 @@ line that has words or calls a listed function opens in turn.
   too (`items.where(recency.is_recent)`). The script finds these calls, and the page shows each
   called function under the line, with its box. Private helpers and library calls are written
   bare, as the code has them, and are not looked up.
+- A call on a variable is found when the sketch says what the variable is, and that is a listed
+  interface or class: an argument of the function (`source: Operator`), `self` in a method, a
+  typed line (`p: Pipeline = …`), the variable of a loop over a typed list (`ps: list[Pipeline]`,
+  then `for p in ps:`). `source.next()` is then `Operator.next`, and the page says under the line
+  that the class behind the interface answers. A method the class does not list is looked for in
+  what its parenthesis names. Type the variable where the call matters; do not type every line.
+- An interface's method has no flow: it has no body. Give the flow to the method of a class.
 - Run with `--check --flows` to see which calls the script found on each line. Where it cannot
-  tell (two boxes answer to the same word, the call goes through a variable, a step reaches a
-  function its code does not name), state them by hand: write the line as an object,
+  tell (two boxes answer to the same word, the call goes through a variable the sketch gives no
+  type, a step reaches a function its code does not name), state them by hand: write the line as an object,
   `{ "code": "...", "says": "the words", "calls": ["<box folder>: <function>"] }`.
   `"calls": []` says the line calls nothing listed.
 - A called function that has a flow of its own is not written out again: the page links to it.

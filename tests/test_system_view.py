@@ -243,12 +243,13 @@ def marlin(tmp):
     # ---- flows: the page carries each one under the id of the function it is the body of
     flows, snap = data['flows'], data['snap']
     wire, sched, commit_id = 'src/entry/wire/#handle', 'src/core/execution/pipelines/scheduler/#run', 'src/core/transactions/durability/commit/#commit'
+    push = 'src/core/execution/pipelines/scheduler/#Pipeline.push'
     codes = lambda lines: [l[1] for l in lines or []]
     called = lambda lines, code: next((l[3] for l in lines or [] if l[1] == code), None)
     check('marlin: the folded flows are the example\'s, and the flow an entry states is written into system.json',
-          got.get('flows') == want['flows'] and 'wal.flush_group(lsn)  # one flush serves every commit waiting in the group' in got['flows'][3]['sketch'], got.get('flows'))
+          got.get('flows') == want['flows'] and 'wal.flush_group(lsn)  # one flush serves every commit waiting in the group' in got['flows'][4]['sketch'], got.get('flows'))
     check('marlin: the page carries every flow under the id of its function, a list of [level, code, words, calls]',
-          list(flows) == [wire, 'src/core/optimizer/#optimize', sched, commit_id]
+          list(flows) == [wire, 'src/core/optimizer/#optimize', sched, push, commit_id]
           and all(len(l) == 4 and isinstance(l[0], int) and isinstance(l[3], list) for lines in flows.values() for l in lines), list(flows))
     check('marlin: a flow\'s lines keep their depth, their code and the words after the #',
           flows[wire][:3] == [[0, 'plan: Plan | None = sql.cached_plan(session, message.sql)',
@@ -2128,7 +2129,95 @@ def fourth(tmp):
     check('--files without --draft is refused', code == 2 and '--files and --out go with --draft' in err and status() == before, out + err)
 
 
-GROUPS = ('tally', 'marlin', 'no_repository', 'checks', 'empty', 'review', 'trial', 'pocket', 'flows', 'calls', 'levels', 'third', 'fourth')
+def fifth(tmp):
+    """The three kinds of type (2026-11-16): data, an interface, a class. An interface or a class is a head line, and its
+    methods are lines of their own, named Name.method. One case each."""
+    ex, so = 'src/core/exec/', 'src/core/sorts/'
+    figure = {'name': 'Kinds', 'regions': {'core': {'folder': 'src/core/', 'line': 'does', 'boxes': [
+        {'name': 'Execution', 'folder': ex, 'line': 'runs a plan', 'interface': [
+            'run(plan: Plan, first: Operator) → Batch  // runs a plan',
+            'interface Operator:  // anything that produces batches',
+            'Operator.next() → Batch?  // the next batch',
+            'class Pipeline  // operators in a chain',
+            'Pipeline.push(batch: Batch)  // sends one batch through',
+            'Pipeline.done() → Bool  // whether it is finished',
+            'type Plan = { root: Int }  // what to run',
+            'Batch = [Int]  // some rows']},
+        {'name': 'Sorts', 'folder': so, 'line': 'orders rows', 'interface': [
+            'open(input: Operator) → Operator  // opens a sort',
+            'class Sort(Operator)  // orders its input',
+            'Sort.spill()  // writes to disk',
+            'class TopN( Sort , Operator )  // the first rows']}]}},
+        'flows': [
+            {'of': ex + ': run', 'sketch': [
+                'pipelines: list[Pipeline] = cut(plan)  # the pieces', 'for p in pipelines:  # each', '    batch = first.next()  # an argument typed as the interface',
+                '    p.push(batch)  # a loop variable of a typed list', 'top: TopN = sorts.open(first)  # a class two steps from the interface',
+                'top.spill()  # its parent\'s method', 'top.next()  # the interface\'s, through the parent', 'other.next()  # no type: nobody\'s', 'return batch']},
+            {'of': ex + ': Pipeline.push', 'sketch': ['if self.done():  # self is the class', '    return', 'forward(batch)  # onwards']}]}
+    files = {ex + 'exec.py': 'class Operator:\n    def next(self):\n        pass\n\n\nclass Pipeline:\n    def push(self, batch):\n        return self.done()\n\n    def done(self):\n        return True\n\n\ndef run(plan, first):\n    return 1\n\n\nPlan = Batch = None\n',
+             so + 'sorts.py': 'class Sort:\n    def spill(self):\n        pass\n\n\nclass TopN(Sort):\n    pass\n\n\ndef open(input):\n    return Sort()\n'}
+    root = mini(tmp, 'fifth', figure, files)
+    code, out, err = run(root, '--check')
+    check('kinds: a figure with interfaces, classes and their methods has no error and no note', code == 0 and out.strip() == 'Checked: 2 boxes, 2 flows. No error.', out + err)
+    run(root)
+    data = page_data(root)
+    check('the page has an interface as `interface`, a class as `class(its parents)`, and a method as a function named Name.method',
+          data['types']['Operator'][0] == 'interface' and data['types']['TopN'][0] == 'class(Sort, Operator)' and data['types']['Pipeline'][0] == 'class'
+          and data['types']['Plan'][0] == '{ root: Int }' and ['Operator.next() → Batch?', 'the next batch'] in data['api'][ex], data['types'])
+    got = {l[1]: l[3] for l in data['flows'][ex + '#run']}
+    check('a call on a variable the sketch gives a type is that type\'s method: an argument, a typed line, a loop over a typed list',
+          got['batch = first.next()'] == [ex + '#Operator.next'] and got['p.push(batch)'] == [ex + '#Pipeline.push'] and got['other.next()'] == [], got)
+    check('a method a class does not list is the nearest one of what it names in its parenthesis',
+          got['top.spill()'] == [so + '#Sort.spill'] and got['top.next()'] == [ex + '#Operator.next'], got)
+    check('in the flow of a method, self is its class', data['flows'][ex + '#Pipeline.push'][0][3] == [ex + '#Pipeline.done'], data['flows'][ex + '#Pipeline.push'])
+
+    # ---- what is said
+    def odd(s):
+        a, b = s['regions']['core']['boxes']
+        a['interface'][3] = 'class Pipeline'
+        b['interface'] += ['class Heap(Shared)  // a heap', 'Operator.close()  // closes it']
+        s['flows'].append({'of': ex + ': Operator.next', 'sketch': ['return 1']})
+    put(root, odd)
+    code, out, err = run(root, '--check')
+    check('a class with no words is named as a class', 'note   Listed in src/core/exec/ with no words: the class Pipeline.' in out, out)
+    check('a name in a parenthesis that no box lists as an interface or a class is said',
+          'note   class Heap, in src/core/sorts/, names Shared in its parenthesis, and no box lists an interface or a class Shared.' in out, out)
+    check('a method written in another box than its interface is said',
+          'note   Operator.close is listed in src/core/sorts/, and the interface Operator is in src/core/exec/. A method is written in the box of its interface.' in out, out)
+    check('a flow of an interface\'s method is an error: it has no body of its own',
+          code == 1 and 'ERROR  The flow of Operator.next (src/core/exec/): Operator is an interface' in out, out)
+
+    # ---- what an entry does
+    back(root)
+    edit(root, so + 'sorts.py', 'class Sort:\n    def spill(self):\n        pass\n', 'class Sort:\n    def flush(self):\n        return 1\n')
+    entries(root, {'name': 'Spill is flush', 'line': 'the sort writes out under another name', 'files': {so + 'sorts.py': 'renamed'},
+                   'renames': {so + ': Sort.spill': 'Sort.flush'},
+                   'interface': {so: ['class TopN( Sort , Operator ):  // the first few rows', 'interface Keyed:  // anything with a sort key',
+                                      'type Key = [Int]  // what a sort orders by']}})
+    code, out, err = run(root)
+    data = page_data(root)
+    check('a method is renamed like any function, and a sketch that called it through a variable follows',
+          code == 0 and 'ERROR' not in out and 'Sort.flush()  // writes to disk' in system(root)['regions']['core']['boxes'][1]['interface']
+          and any(l[1] == 'top.flush()' and l[3] == [so + '#Sort.flush'] for l in data['flows'][ex + '#run']), out + err + str(data['flows'][ex + '#run']))
+    iface = system(root)['regions']['core']['boxes'][1]['interface']
+    check('the script writes the head of an interface and of a class in one way, with no colon, and `type X = …` as `X = …`',
+          'class TopN(Sort, Operator)  // the first few rows' in iface and 'interface Keyed  // anything with a sort key' in iface
+          and 'Key = [Int]  // what a sort orders by' in iface, iface)
+    back(root)
+    edit(root, ex + 'exec.py', 'class Pipeline:\n    def push(self, batch):\n        return self.done()\n\n    def done(self):\n        return True\n\n\n', '')
+    entries(root, {'name': 'No pipelines', 'line': 'the plan runs in one piece', 'files': {ex + 'exec.py': 'the class is gone'}, 'interface': {ex: ['- Pipeline']},
+                   'flows': [{'of': ex + ': run', 'sketch': ['return first.next()  # straight from the first operator']}]})
+    code, out, err = run(root)
+    left = system(root)
+    check('removing a class removes its methods and the flow of one, and says so once',
+          code == 0 and 'ERROR' not in out and not any('Pipeline' in t for t in left['regions']['core']['boxes'][0]['interface'])
+          and [f['of'] for f in left['flows']] == [ex + ': run'] and out.count('removed Pipeline') <= 1, out + err + str(left['flows']))
+    cc = page_data(root)['snap']['cc']['lines']
+    check('and the comparison marks the class and each of its methods as removed',
+          all((cc.get(i) or {}).get('s') == 'del' for i in ('Pipeline', ex + '#Pipeline.push', ex + '#Pipeline.done')), cc)
+
+
+GROUPS = ('tally', 'marlin', 'no_repository', 'checks', 'empty', 'review', 'trial', 'pocket', 'flows', 'calls', 'levels', 'third', 'fourth', 'fifth')
 
 
 def one(group):

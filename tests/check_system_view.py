@@ -49,12 +49,14 @@ SWEEP = """(narrow) => { const bad = [], strip = document.getElementById('strip'
     texts.forEach(([t, r]) => boxes.forEach(([n, b]) => { if (hit(r, b)) bad.push(where + ': "' + t + '" is on the box ' + n); }));
     texts.forEach(([t, r], i) => texts.slice(i + 1).forEach(([u, q]) => { if (hit(r, q)) bad.push(where + ': "' + t + '" is on "' + u + '"'); })); });
   const wide = where => { states++; if (narrow && document.documentElement.scrollWidth > innerWidth + 1) bad.push(where + ': the page is ' + document.documentElement.scrollWidth + ' pixels wide'); };
-  let where = '', flows = 0, cards = 0, longs = 0;
+  let where = '', flows = 0, cards = 0, longs = 0, shorts = 0;
   // a docstring has words; one that takes more than a line has its quotes on lines of their own
   const docstrings = at => { docs(); strip.querySelectorAll('.ds').forEach(d => { const q = d.children[0], b = d.children[1], line = parseFloat(getComputedStyle(b).lineHeight) || 20;
     if (!b.textContent.trim()) bad.push(at + ': a docstring with no words is shown');
-    if (R(b).height > 1.5 * line && R(q).bottom > R(b).top + 1) bad.push(at + ': a docstring that wraps keeps its quotes on its first line: ' + b.textContent.slice(0, 40));
-    if (d.classList.contains('long')) { longs++; if (R(d.children[2]).top < R(b).bottom - 1) bad.push(at + ': the closing quotes of a long docstring are not under it'); } }); };
+    const was = d.classList.contains('long'); d.classList.remove('long'); const rs = [...d.getClientRects()], wraps = rs.some(x => Math.abs(x.top - rs[0].top) > 2); d.classList.toggle('long', was);
+    if (wraps && !was) bad.push(at + ': a docstring that takes more than one line keeps its quotes beside it: ' + b.textContent.slice(0, 40));
+    if (!wraps && was) bad.push(at + ': a docstring that fits on one line is spread over three: ' + b.textContent.slice(0, 40));
+    if (was) { longs++; if (R(d.children[2]).top < R(b).bottom - 1 || R(q).bottom > R(b).top + 1) bad.push(at + ': the quotes of a long docstring are not above and under it'); } else shorts++; }); };
   const pop = document.getElementById('fcpop');
   // every tab is one line and inside the screen, whatever a plan is called
   document.querySelectorAll('#mode button').forEach(b => { const r = R(b), line = parseFloat(getComputedStyle(b).lineHeight) || 1.5 * parseFloat(getComputedStyle(b).fontSize);
@@ -67,6 +69,7 @@ SWEEP = """(narrow) => { const bad = [], strip = document.getElementById('strip'
           const picks = [null, ...own(v).map(b => 'node:' + b.folder), ...regionsOf(v).map(r => 'region:' + r.id), ...(LAY ? LAY.edges : []).map(e => e.pick || 'edge:' + e.id)];
           for (const p of picks) { pin = p; openT = []; openF.clear(); show(); wide(where + ', ' + p);
             openT = [...strip.querySelectorAll('[data-fold]')].map(e => e.dataset.fold); show();
+            openT = [...strip.querySelectorAll('[data-fold]')].map(e => e.dataset.fold); show();      // again: an opened interface or class brings its methods, lines that open in turn
             strip.querySelectorAll('.fl.can').forEach(e => openF.add(e.dataset.key)); show(); wide(where + ', ' + p + ', opened'); docstrings(where + ', ' + p);
             flows += strip.querySelectorAll('.fc').length;
             const ref = strip.querySelector('.ty[data-ty]'); if (ref) { ref.click(); if (pop.hidden) bad.push(where + ', ' + p + ': the reference to ' + ref.dataset.ty + ' opens no card'); else { cards++; wide(where + ', ' + p + ', a card'); const inner = pop.querySelector('.ty[data-ty]'); if (inner) { inner.click(); wide(where + ', ' + p + ', a card from a card'); } } hide(); } } } }
@@ -80,6 +83,7 @@ SWEEP = """(narrow) => { const bad = [], strip = document.getElementById('strip'
     if (S.api && Object.keys(S.flows).length && !flows) bad.push('flows are written and none was opened');
     if (S.types && Object.keys(S.types).length && !cards) bad.push('types are listed and no reference opened a card');
     if (narrow && S.api && !longs) bad.push('on a narrow screen no docstring took more than one line: the check of long docstrings saw none');
+    if (!narrow && S.api && innerWidth > 1200 && !shorts) bad.push('on a wide screen no docstring fitted on one line: the check of short docstrings saw none');
   } catch (e) { bad.push(where + ': ' + e); }
   return { bad, states }; }"""
 

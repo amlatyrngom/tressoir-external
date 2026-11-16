@@ -234,6 +234,15 @@ const st2 = x => delta() ? fst(x) || '' : '';
 // the text of a function or type as of the tab being shown
 const nowSig = x => (entry(x) || {}).sig || x.sig, wasOf = x => (entry(x) || {}).was || '', wordsOf = x => (entry(x) || {}).line || x.line;
 const names = text => [...new Set((text.match(/[A-Z][A-Za-z]+/g) || []).filter(n => S.types[n] && there(S.types[n])))];
+// what a listed name is, from its text in the tab shown: an interface, a class, or a type of data. The files write the head of an interface as `interface` and of a class as `class(Parent, …)`
+const kindOf = t => { const s = nowSig(t); return /^interface(\(.*\))?$/.test(s) ? 'interface' : /^class(\(.*\))?$/.test(s) ? 'class' : 'type'; };
+const parentsOf = t => { const m = kindOf(t) !== 'type' && /\((.*)\)$/.exec(nowSig(t)); return m ? m[1].split(',').map(x => x.trim()).filter(Boolean) : []; };
+// a method is a function listed as Name.method in the module that lists the interface or class Name
+const idName = f => f.id.slice(f.id.lastIndexOf('#') + 1), idHome = f => f.id.slice(0, f.id.lastIndexOf('#'));
+const ownerOf = f => { const n = idName(f), i = n.lastIndexOf('.'), t = i > 0 && S.types && S.types[n.slice(0, i)]; return t && there(t) && kindOf(t) !== 'type' && t.home === idHome(f) ? t : null; };
+const methodsOf = t => fnsOf(t.home).filter(f => ownerOf(f) === t);
+// a method's signature under its interface or class is written without the name before the dot
+const sigOf = (f, short) => { const s = nowSig(f), o = short && ownerOf(f); return o && s.startsWith(o.name + '.') ? s.slice(o.name.length + 1) : s; };
 // the named changes of the delta shown that affect a function or type, whether they altered its signature or only what happens behind it. The script places a change on the closest listed line it affects
 const hitsOf = c => SN().hits[S.changes.indexOf(c)] || [];
 const causes = x => S.api ? inDelta().filter(c => hitsOf(c).includes(x.id)) : [];
@@ -247,7 +256,7 @@ function chgNote(x){ const w = wasOf(x), was = st2(x) === 'chg' && w && (!x.name
 // one line of code, and what it says when open. The line itself is what opens it; nothing inside it is a button of its own
 const codeLine = (x, key, on, code, body) => { const m = markOf(x); return `<div class="fn ${m}"><span class="g">${mark[m] || ''}</span><span class="ct" data-fold="${esc(key)}"><code>${code}</code></span></div>${on && body ? `<div class="inl">${body}</div>` : ''}`; };
 // one function: its signature, as a def. Open, it gives its words as a docstring, and why it changed. A function that has a flow opens into the flow instead
-function fnLine(f, at){ const host = flowHost(f, at); if (host) return host; const sig = nowSig(f), on = openT.includes(at);
+function fnLine(f, at, short){ const host = flowHost(f, at, short); if (host) return host; const sig = sigOf(f, short), on = openT.includes(at);
   return codeLine(f, at, on, fnCode(f, sig), on ? `${docLine(wordsOf(f), 'wl')}${chgNote(f)}` : ''); }
 // a shape read one level deep: a record of fields, a choice among variants, or another name for something
 function split(text, sep){ const out = []; let depth = 0, cur = ''; for (let i = 0; i < text.length; i++) { const c = text[i]; if ('{[('.includes(c)) depth++; else if ('}])'.includes(c)) depth--;
@@ -260,14 +269,25 @@ function shapeRows(t){ const cur = shape(nowSig(t)), plain = r => ({ name:r[0], 
   const k = r => r[0] || r[1], was = new Map(old.rows.map(r => [k(r), r[1]])), rows = cur.rows.map(r => { const o = was.get(k(r)); if (o === undefined) return Object.assign(plain(r), { s:'add' }); if (o === r[1]) return plain(r);
     const ov = split(o, ' | '), nv = split(r[1], ' | '); return { name:r[0], s:'chg', html:nv.map(v => ov.includes(v) ? esc(v) : `<span class="new">${esc(v)}</span>`).concat(ov.filter(v => !nv.includes(v)).map(v => `<span class="old">${esc(v)}</span>`)).join(' | ') }; });
   const now = new Set(cur.rows.map(k)); old.rows.filter(r => !now.has(k(r))).forEach(r => rows.push({ name:r[0], html:esc(r[1]), s:'del' })); return { kind:cur.kind, rows }; }
-// one type, written as a class or as a name for something: one line, folded to its name and the names of its fields. Open, it gives its words, why it changed, and one row per field or variant
-function typeRow(t, key, o){ const sh = shapeRows(t), alias = sh.kind === 'alias', rec = sh.kind === 'record', open = openT.includes(key);
+// who names an interface or a class in its parenthesis, module by module: nobody writes this, it is collected
+function heirs(t){ const kids = Object.values(S.types).filter(x => there(x) && kindOf(x) !== 'type' && parentsOf(x).includes(t.name)); if (!kids.length) return '';
+  const homes = uniq(kids.map(x => x.home)), nm = h => boxAt(h) ? ' (' + esc(camel(boxAt(h).name)) + ')' : '';
+  return `<div class="wl"># ${kindOf(t) === 'interface' ? 'implemented by' : 'extended by'}: ${homes.map(h => kids.filter(x => x.home === h).map(x => `<span class="ty" data-ty="${esc(x.name)}">${esc(x.name)}</span>`).join(', ') + nm(h)).join(' · ')}</div>`; }
+// an interface or a class: one line, folded to its name and the names of its methods. Open, it gives its words, why it changed, its methods (each a line that opens like any function), and who implements or extends it. `have` are functions already listed above it
+function kindRow(t, key, o){ const kind = kindOf(t), open = openT.includes(key), ms = methodsOf(t).filter(f => !(o.have && o.have.has(f.id))), ps = parentsOf(t);
+  const head = `<span class="t-k">${kind}</span> <span class="t-d">${esc(t.name)}</span>${ps.length ? '(' + tyRef(esc(ps.join(', ')), '', t.name) + ')' : ''}:` + (ms.some(flowOf) ? ICO : '')
+    + (open || !ms.length ? '' : `<span class="pv">  # ${ms.map(f => esc(idName(f).slice(idName(f).lastIndexOf('.') + 1))).join(', ')}</span>`);
+  return codeLine(t, key, open, head, open ? `${docLine(wordsOf(t), 'wl')}${chgNote(t)}${ms.map(f => fnLine(f, key + '#' + idName(f), true)).join('')}${heirs(t)}` : ''); }
+// one type of data, written as a type: one line, folded to its name and the names of its fields. Open, it gives its words, why it changed, and one row per field or variant
+function typeRow(t, key, o){ if (kindOf(t) !== 'type') return kindRow(t, key, o); const sh = shapeRows(t), alias = sh.kind === 'alias', rec = sh.kind === 'record', open = openT.includes(key);
   const rows = alias ? '' : sh.rows.map(r => `<div class="tr ${r.s}"><span class="g2">${mark[r.s] || ''}</span><code>${rec ? '' : '| '}${r.name ? esc(r.name) + ': ' : ''}${tyRef(r.html, r.s)}</code></div>`).join('');
   return codeLine(t, key, open, tyHead(t, sh, open, alias, rec), open ? `${docLine(wordsOf(t), 'wl')}${chgNote(t)}${rows}` : ''); }
 // the types some signatures pass: the ones they name, then the ones those are made of, however deep. The same on every tab
 function reach(sigs){ const seen = new Set(names(sigs.join(' '))), walk = n => names(nowSig(S.types[n])).forEach(c => { if (!seen.has(c)) { seen.add(c); walk(c); } }); [...seen].forEach(walk); return [...seen]; }
 // a box's card: its functions, then the types they pass that it owns, wherever under its folder they live. A box that lists no function lists the types it owns. It is the same wherever the box is shown: in the listing of the view it sits in, when it is selected from the figure or the file list, and at the top of its own view
-function card(folder){ const fs = fnsOf(folder), mine = n => S.types[n].home.startsWith(folder); return { key:folder, folder, fs, ts:fs.length || !folder ? reach(fs.map(nowSig)).filter(mine) : Object.keys(S.types || {}).filter(n => mine(n) && there(S.types[n])) }; }
+function card(folder){ const fs = fnsOf(folder), mine = n => S.types[n].home.startsWith(folder), all = Object.keys(S.types || {}).filter(n => there(S.types[n]));
+  // what the module itself lists is always shown, named by a function or not: a class that implements an interface, a type only other modules pass
+  return { key:folder, folder, fs, ts:fs.length || !folder ? uniq([...reach(fs.map(nowSig)).filter(mine), ...all.filter(n => folder && S.types[n].home === folder)]) : all.filter(mine) }; }
 // the named changes a card's lines tell, and the ones any line under a folder tells
 const toldBy = cards => new Set(cards.flatMap(c => [...c.fs, ...c.ts.map(n => S.types[n])]).flatMap(causes));
 const toldUnder = folder => new Set([...Object.keys(S.api).filter(k => k.startsWith(folder)).flatMap(fnsOf), ...Object.values(S.types).filter(t => t.home.startsWith(folder) && there(t))].flatMap(causes));
@@ -278,7 +298,7 @@ function inside(c){ const b = delta() && boxAt(c.folder); if (!b) return null; c
 function insideLine(c, top){ const n = inside(c), cs = n && (top ? n.priv : n.rest); if (!n || (!cs.length && !n.bare)) return '';
   const where = (top ? [] : n.kids.map(k => k.name)).concat(n.priv.length || n.bare ? ['unlisted code'] : []).join(', ') || 'unlisted code', key = c.key + '~', on = openT.includes(key);
   return `<div class="fn chg"><span class="g">~</span><span class="ct" data-fold="${esc(key)}"><span class="wl tn" role="button" aria-expanded="${on}"># internal: ${esc(where)}</span></span></div>${on ? `<div class="inl">${cs.map(note).join('') || '<div class="wl"># no named change explains it</div>'}</div>` : ''}`; }
-const cardLines = (c, skip, top) => fnList(c, c.ts.filter(n => !skip || !skip.has(n)).map(n => typeRow(S.types[n], c.key + '|' + n, {})).join('')) + insideLine(c, top);
+const cardLines = (c, skip, top) => fnList(c, c.ts.filter(n => !skip || !skip.has(n))) + insideLine(c, top);
 const flip = k => { hide(); openT.includes(k) ? openT = openT.filter(x => x !== k) : openT.push(k); show(); };
 // a line of code opens and closes from itself, where it is. A type named in it and the name of a box beside it are links of their own
 document.addEventListener('click', e => { if (e.target.closest('.ty[data-ty], .fbx')) return; const f = e.target.closest('[data-fold]'); if (f) { e.stopPropagation(); flip(f.dataset.fold); } }, true);
@@ -439,7 +459,9 @@ $('only').onclick = () => { only = !only; render(); };
 $('fold').onclick = () => { closed = folded(V); reveal = null; pin = null; show(); renderTree(); };
 $('built').innerHTML = (S.built || []).map(t => `<p>${esc(t)}</p>`).join('');
 // a docstring is long when it takes more than one line at the width it has now
-function docs(){ document.querySelectorAll('#strip .ds').forEach(d => { d.classList.remove('long'); d.classList.toggle('long', d.getClientRects().length > 1 || d.textContent.includes('\n')); }); }
+// (an inline element has one box per piece on a line, so the pieces are compared by where they start, not counted)
+const wraps = d => { const r = [...d.getClientRects()]; return r.some(x => Math.abs(x.top - r[0].top) > 2); };
+function docs(){ document.querySelectorAll('#strip .ds').forEach(d => { d.classList.remove('long'); d.classList.toggle('long', wraps(d) || d.textContent.includes('\n')); }); }
 new MutationObserver(docs).observe($('strip'), { childList:true, subtree:true }); docs();
 let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { figW = -1; refit(); docs(); }, 60); });
 if (window.ResizeObserver) new ResizeObserver(refit).observe($('fig'));
@@ -464,9 +486,10 @@ const isType = n => !!(S.types && S.types[n] && there(S.types[n])) || (/^[A-Z_]/
 function hl(text, self){ let out = '', prev = '', m; TOK.lastIndex = 0;
   while ((m = TOK.exec(text))) { const t = m[0], at = m.index; let cls = '';
     if (m[1]) cls = 't-c'; else if (m[2]) cls = 't-s'; else if (m[3]) cls = 't-n';
-    else if (m[4]) { const def = ['def', 'class', 'module'].includes(prev);
+    else if (m[4]) { const def = ['def', 'class', 'module', 'interface ', 'type '].includes(prev), lead = (t === 'type' || t === 'interface') && !text.slice(0, at).trim() && /^\s+[\p{L}_]/u.test(text.slice(at + t.length));
       if (t !== self && !def && text[at - 1] !== '.' && isType(t)) { out += `<span class="ty" data-ty="${t}">${t}</span>`; prev = t; continue; }
-      cls = KW.has(t) && text[at - 1] !== '.' ? 't-k' : CONST.has(t) ? 't-n' : def ? 't-d' : text[at + t.length] === '(' ? 't-f' : ''; }
+      cls = lead || (KW.has(t) && text[at - 1] !== '.') ? 't-k' : CONST.has(t) ? 't-n' : def ? 't-d' : text[at + t.length] === '(' ? 't-f' : '';
+      out += `${cls ? `<span class="${cls}">${esc(t)}</span>` : esc(t)}`; prev = lead ? t + ' ' : t; continue; }
     out += cls ? `<span class="${cls}">${esc(t)}</span>` : esc(t); if (!m[5]) prev = t; }
   return out; }
 // the files write a signature in a neutral notation; the page shows it as Python: → is ->, T? is T | None, [T] is list[T], {T} is set[T]
@@ -489,42 +512,46 @@ const ICO = '<svg class="fico" viewBox="0 0 16 16" aria-hidden="true"><path d="M
 const fnCode = (f, sig) => hl('def ' + pySig(sig) + ':') + (flowOf(f) ? ICO : '');
 // A flow, open: the function's own line, its words, the changes that reach it, then its lines. A line that has words or calls a listed function opens: the words, then each function called, as a def with its docstring and the name of its box.
 // In the margin: ~ on a line that calls a function a change reaches; + and − on a line the delta added to the sketch or took out of it.
-function flowHtml(f, at){ const lines = flowLines(f.id), mine = causes(f), calls = l => (l[3] || []).map(fnById).filter(g => g && there(g));
+function flowHtml(f, at, short){ const lines = flowLines(f.id), mine = causes(f), calls = l => (l[3] || []).map(fnById).filter(g => g && there(g));
   const beneath = uniq(lines.flatMap(l => calls(l).flatMap(causes))).filter(c => !mine.includes(c));
   const top = (c, own) => { const k = S.changes.indexOf(c), where = uniq(lines.flatMap(calls).filter(g => causes(g).includes(c)).map(fnName)).join(', ');
     return `<div class="fl cl ${lit === k ? 'on' : ''}" data-chg="${k}"><span class="fgut"></span><code class="tx chgs" style="padding-left:calc(var(--lv) + 2ch);text-indent:-2ch"># ${own ? 'changed: ' + esc(c.name) + ': ' + esc(c.line) : 'changed beneath: ' + esc(c.name) + ' (' + esc(where) + ')'}</code></div>`; };
-  let html = `<div class="row"><div class="fl fhd" data-fold="${esc(at)}"><span class="fgut"></span><code class="tx" style="padding-left:2ch;text-indent:-2ch">${hl('def ' + pySig(nowSig(f)) + ':')}</code>${ICO}</div>`
+  let html = `<div class="row"><div class="fl fhd" data-fold="${esc(at)}"><span class="fgut"></span><code class="tx" style="padding-left:2ch;text-indent:-2ch">${hl('def ' + pySig(sigOf(f, short)) + ':')}</code>${ICO}</div>`
     + `${docOf(wordsOf(f)) && `<div class="fl"><span class="fgut"></span><code class="tx doc">${docOf(wordsOf(f))}</code></div>`}${mine.map(c => top(c, true)).join('')}${beneath.map(c => top(c, false)).join('')}</div>`;
   lines.forEach((l, i) => { const lv = l[0] + 1, st = l[4] || '', fns = st === 'del' ? [] : calls(l), ch = uniq(fns.flatMap(causes)), key = f.id + '/' + i, can = !!(l[2] || fns.length), on = can && openF.has(key);
     const body = !on ? '' : `<div class="x" style="padding-left:calc(var(--gut) + ${lv} * var(--lv))">${l[2] ? `<div class="why">${esc(l[2])}</div>` : ''}` + fns.map(g => { const fl = g.id !== f.id && flowOf(g);
-      return `<div class="sg"><code>${hl('def ' + pySig(nowSig(g)) + ':')}${fl ? ICO : ''}</code>${pill(homeOfFn(g), fl)}</div>${docLine(wordsOf(g), 'doc')}${causes(g).map(c => `<div class="chgs"># changed: ${esc(c.name)}: ${esc(c.line)}</div>`).join('')}`; }).join('') + '</div>';
+      return `<div class="sg"><code>${hl('def ' + pySig(nowSig(g)) + ':')}${fl ? ICO : ''}</code>${pill(homeOfFn(g), fl)}</div>${docLine(wordsOf(g), 'doc')}${ownerOf(g) && kindOf(ownerOf(g)) === 'interface' ? `<div class="doc"># ${esc(ownerOf(g).name)} is an interface: the class behind it answers</div>` : ''}${causes(g).map(c => `<div class="chgs"># changed: ${esc(c.name)}: ${esc(c.line)}</div>`).join('')}`; }).join('') + '</div>';
     html += `<div class="row ${on ? 'open' : ''}"><div class="fl ${can ? 'can' : ''} ${st} ${lit !== null && ch.some(c => S.changes.indexOf(c) === lit) ? 'lit' : ''}" ${can ? `data-key="${esc(key)}"` : ''}><span class="fgut ${st}">${st ? mark[st] : ch.length ? '~' : ''}</span>`
       + `<code class="tx" style="padding-left:calc(${lv} * var(--lv) + 2ch);text-indent:-2ch">${hl(l[1])}</code></div>${body}</div>`; });
   return `<div class="fc">${html}</div>`; }
 // a function that has a flow, opened: the flow itself, in place. Its first line closes it again
-function flowHost(f, at){ if (!flowOf(f) || !openT.includes(at)) return ''; SHOWN.push(f.id); const m = markOf(f);
-  return `<div class="fn ${m}"><span class="g">${mark[m] || ''}</span><span class="ct">${flowHtml(f, at)}</span></div>`; }
+function flowHost(f, at, short){ if (!flowOf(f) || !openT.includes(at)) return ''; SHOWN.push(f.id); const m = markOf(f);
+  return `<div class="fn ${m}"><span class="g">${mark[m] || ''}</span><span class="ct">${flowHtml(f, at, short)}</span></div>`; }
 
 // ---- types: a type under its module is its definition, and its line opens in place. A type named anywhere else is a reference, and opens that type's card
 const tyRef = (html, changed, self) => changed || /<span/.test(html) ? pySig(html) : hl(pySig(unesc(html)), self);
 function tyHead(t, sh, open, alias, rec){ const nm = `<span class="t-d">${esc(t.name)}</span>`;
-  if (rec) return `<span class="t-k">class</span> ${nm}:` + (open ? '' : `<span class="pv">  # ${sh.rows.map(r => esc(r.name || '')).filter(Boolean).join(', ')}</span>`);
-  if (alias) return nm + ' = ' + tyRef(sh.rows[0].html, sh.rows[0].s, t.name);
-  return nm + ' =' + (open ? '' : ` <span class="pv">${tyRef(sh.rows.map(r => r.html).join(' | '), sh.rows.some(r => r.s), t.name)}</span>`); }
-// the card of a name: a type as a class, or a module with its functions
+  if (rec) return `<span class="t-k">type</span> ${nm}:` + (open ? '' : `<span class="pv">  # ${sh.rows.map(r => esc(r.name || '')).filter(Boolean).join(', ')}</span>`);
+  if (alias) return `<span class="t-k">type</span> ${nm} = ` + tyRef(sh.rows[0].html, sh.rows[0].s, t.name);
+  return `<span class="t-k">type</span> ${nm} =` + (open ? '' : ` <span class="pv">${tyRef(sh.rows.map(r => r.html).join(' | '), sh.rows.some(r => r.s), t.name)}</span>`); }
+// the card of a name: a type with its fields, an interface or a class with its methods, or a module with its functions
 function typeCard(n){ const t = S.types && S.types[n];
+  if (t && there(t) && kindOf(t) !== 'type') { const ps = parentsOf(t);
+    return { doc:wordsOf(t), folder:t.home, extra:chgNote(t), lines:[kindOf(t) + ' ' + n + (ps.length ? '(' + ps.join(', ') + ')' : '') + ':', ...methodsOf(t).map(f => '    def ' + pySig(sigOf(f, true)) + ':')] }; }
   if (t && there(t)) { const sh = shape(nowSig(t)), f = r => (r[0] ? r[0] + ': ' : '') + pySig(r[1]);
-    return { doc:wordsOf(t), folder:t.home, extra:chgNote(t), lines:sh.kind === 'record' ? ['class ' + n + ':', ...sh.rows.map(r => '    ' + f(r))] : [n + ' = ' + sh.rows.map(f).join(' | ')] }; }
+    return { doc:wordsOf(t), folder:t.home, extra:chgNote(t), lines:sh.kind === 'record' ? ['type ' + n + ':', ...sh.rows.map(r => '    ' + f(r))] : ['type ' + n + ' = ' + sh.rows.map(f).join(' | ')] }; }
   const m = moduleNamed(n); return m ? { doc:m.line, folder:m.folder, extra:'', lines:['module ' + n + ':', ...fnsOf(m.folder).map(x => '    def ' + pySig(nowSig(x)) + ':')] } : null; }
 const pop = document.createElement('div'); pop.id = 'fcpop'; pop.hidden = true; document.body.appendChild(pop);
 function say(el, html){ pop.innerHTML = html; pop.hidden = false; popEl = el; const r = el.getBoundingClientRect();
   pop.style.top = (scrollY + r.bottom + 6) + 'px'; pop.style.left = Math.max(8, Math.min(scrollX + r.left, scrollX + innerWidth - pop.offsetWidth - 8)) + 'px'; }
 const hide = () => { pop.hidden = true; popEl = null; };
 
-// ---- a module's lines, in parts, each under a comment: the functions that have a flow, the other functions, the types. A part alone needs no comment, except flows
-function fnList(c, types){ const all = c.fs.map(f => [f, c.key + '#' + fnName(f)]), line = x => fnLine(x[0], x[1]), flows = all.filter(x => flowOf(x[0])), rest = all.filter(x => !flowOf(x[0]));
-  const many = (flows.length ? 1 : 0) + (rest.length ? 1 : 0) + (types ? 1 : 0) > 1, note = t => `<div class="fn"><span class="g"></span><span class="mdoc"># ${t}</span></div>`;
-  return (flows.length ? note('flows') + flows.map(line).join('') : '') + (rest.length ? (many ? note('functions') : '') + rest.map(line).join('') : '') + (types ? (many ? note('types') : '') + types : ''); }
+// ---- a module's lines, in parts, each under a comment: the functions that have a flow, the other functions, the interfaces, the classes, the types of data. A part alone needs no comment, except flows.
+// A method is listed under its interface or class, not among the functions
+function fnList(c, ts){ const all = c.fs.filter(f => !(ownerOf(f) && ts.includes(ownerOf(f).name))).map(f => [f, c.key + '#' + fnName(f)]), line = x => fnLine(x[0], x[1]), flows = all.filter(x => flowOf(x[0])), rest = all.filter(x => !flowOf(x[0]));
+  const of = k => ts.filter(n => kindOf(S.types[n]) === k).map(n => typeRow(S.types[n], c.key + '|' + n, {})).join(''), note = t => `<div class="fn"><span class="g"></span><span class="mdoc"># ${t}</span></div>`;
+  const parts = [['flows', flows.map(line).join('')], ['functions', rest.map(line).join('')], ['interfaces', of('interface')], ['classes', of('class')], ['types', of('type')]].filter(x => x[1]);
+  return parts.map(x => (parts.length > 1 || x[0] === 'flows' ? note(x[0]) : '') + x[1]).join(''); }
 
 // ---- modules, two levels
 const NODE = {};
@@ -540,8 +567,9 @@ const marksIn = n => !delta() ? 0 : [...fnsOf(n.folder), ...card(n.folder).ts.ma
 const passedOn = (n, f) => n.kids.some(k => fnsOf(k.folder).some(g => fnName(g) === fnName(f) && nowSig(g) === nowSig(f)));
 function ownLines(n, all){ const c = card(n.folder), skip = new Set(n.kids.flatMap(k => card(k.folder).ts));
   if (all) return cardLines(c, skip, true);
-  return c.fs.map(f => [f, c.key + '#' + fnName(f)]).filter(x => (flowOf(x[0]) || markOf(x[0])) && !passedOn(n, x[0])).map(x => fnLine(x[0], x[1])).join('')
-    + c.ts.filter(t => !skip.has(t) && markOf(S.types[t])).map(t => typeRow(S.types[t], c.key + '|' + t, {})).join('') + insideLine(c, true); }
+  const shown = c.fs.filter(f => (flowOf(f) || markOf(f)) && !passedOn(n, f)), have = new Set(shown.map(f => f.id));
+  return shown.map(f => fnLine(f, c.key + '#' + fnName(f))).join('')
+    + c.ts.filter(t => !skip.has(t) && markOf(S.types[t])).map(t => typeRow(S.types[t], c.key + '|' + t, { have })).join('') + insideLine(c, true); }
 const nHead = (n, cur) => `<div class="bn"><span class="mdoc blk"># ${esc(n.line || '')}</span>${cur ? '' : `<button class="bx" data-nsel="${esc(n.folder)}">`}<code class="mh"><span class="t-k">module</span> <span class="t-d">${esc(camel(n.name))}</span>:</code>${cur ? '' : '</button>'}</div>`;
 // one module and, indented inside it, its modules. all: every function and type; otherwise flows, and what changed. cur: the module the listing is about, which lists all its modules; elsewhere a module inside is listed only when it has something to show
 function block(n, all, cur){ const kids = n.kids.filter(nThere).filter(k => all || cur || flowsIn(k) || marksIn(k));

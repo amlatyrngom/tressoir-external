@@ -197,21 +197,33 @@ def tidy(code):
     return re.sub(r'\s+', ' ', code.replace('->', '→')).strip()
 
 
+KIND = re.compile(r'^(interface|class)\s+([^\W\d]\w*)\s*(?:\(([^()]*)\))?\s*:?$')
+
+
 def parse_line(text):
     code, _, words = text.partition('  // ')
     if not _ and ' // ' in text:
         code, _, words = text.partition(' // ')
     code, words = tidy(code), words.strip()
-    t = re.match(r'^([^\W\d]\w*) = (.*)$', code)
+    k = KIND.match(code)
+    if k:       # the head of an interface or a class; its methods are lines of their own, named Name.method
+        parents = [x.strip() for x in (k.group(3) or '').split(',') if x.strip()]
+        return {'type': True, 'kind': k.group(1), 'parents': parents, 'name': k.group(2),
+                'sig': k.group(1) + ('(%s)' % ', '.join(parents) if parents else ''), 'words': words, 'bare': False}
+    t = re.match(r'^(?:type\s+)?([^\W\d]\w*) = (.*)$', code)
     if t:
-        return {'type': True, 'name': t.group(1), 'sig': t.group(2), 'words': words, 'bare': False}
+        return {'type': True, 'kind': 'type', 'parents': [], 'name': t.group(1), 'sig': t.group(2), 'words': words, 'bare': False}
     m = re.match(r'^[\w.]+', code)
     name = m.group(0) if m else code
-    return {'type': False, 'name': name, 'sig': code, 'words': words, 'bare': code == name}
+    return {'type': False, 'kind': 'def', 'parents': [], 'name': name, 'sig': code, 'words': words, 'bare': code == name}
 
 
 def write_line(p):
-    return (p['name'] + ' = ' if p['type'] else '') + p['sig'] + ('  // ' + p['words'] if p['words'] else '')
+    if p.get('kind') in ('interface', 'class'):
+        head = '%s %s%s' % (p['kind'], p['name'], '(%s)' % ', '.join(p['parents']) if p['parents'] else '')
+    else:
+        head = (p['name'] + ' = ' if p['type'] else '') + p['sig']
+    return head + ('  // ' + p['words'] if p['words'] else '')
 
 
 TOP = './'      # how a region's folder is written when the code sits at the top of the repository
@@ -308,6 +320,25 @@ class World:
 
     def paths(self, folder):
         return [folder] + list(self.boxes[folder].get('also') or [])
+
+    def kind(self, name):
+        """interface or class when a box lists one of that name, else None."""
+        q = self.lines.get(name)
+        return q['kind'] if q and q['type'] and q['kind'] in ('interface', 'class') else None
+
+    def method(self, name, member, seen=()):
+        """The listed method an interface or a class answers to: its own, in its box, or the nearest one of what it names
+        in its parenthesis. None when it lists none."""
+        if not self.kind(name) or name in seen:
+            return None
+        lid = self.lines[name]['home'] + '#' + name + '.' + member
+        if lid in self.lines and not self.lines[lid]['type']:
+            return lid
+        for parent in self.lines[name]['parents']:
+            found = self.method(parent, member, tuple(seen) + (name,))
+            if found:
+                return found
+        return None
 
     def holds(self, folder, path):
         return any(under(p, path) for p in self.paths(folder))
@@ -532,12 +563,49 @@ def resolve(world, words, home, parts):
     return None, None, 0
 
 
-def calls_in(world, words, home, code):
+ANNOTATED = re.compile(r'([^\W\d]\w*)\s*:\s*([^=:,()]+?(?:\[[^=]*?\])?(?:\s*\|\s*None)?)\s*(?==[^=]|,|\)|$)')
+LOOP = re.compile(r'^(?:parallel\s+)?for\s+([^\W\d]\w*)\s+in\s+([^\W\d]\w*)')
+MANY = re.compile(r'^(?:list|set|tuple|Sequence|Iterable)?\s*[\[{]\s*([^\W\d]\w*)\s*[\]}]$')
+
+
+def typed(world, text, one, many):
+    """Notes which names a text gives a type that is a listed interface or class: `p: Pipeline` in `one`, `ps: list[Pipeline]`
+    in `many`."""
+    for m in ANNOTATED.finditer(text):
+        name, t = m.group(1), re.sub(r'\s*\|\s*None$', '', m.group(2).strip()).rstrip('?')
+        several = MANY.match(t)
+        if several and world.kind(several.group(1)):
+            many[name] = several.group(1)
+        elif world.kind(t):
+            one[name] = t
+
+
+def said_types(world, mine, rows):
+    """For each line of a sketch in turn, {a variable: the listed interface or class the sketch says it is}: the arguments
+    of the function `mine`, self in a method, then what each line says as it comes (`p: Pipeline = …`, a loop over a list
+    of them)."""
+    one, many = {}, {}
+    typed(world, mine['sig'], one, many)
+    if '.' in mine['name'] and world.kind(mine['name'].rsplit('.', 1)[0]):
+        one['self'] = mine['name'].rsplit('.', 1)[0]
+    for row in rows:
+        loop = LOOP.match(row[1])
+        if loop and loop.group(2) in many:
+            one[loop.group(1)] = many[loop.group(2)]
+        typed(world, STRING.sub('""', row[1]), one, many)
+        yield one
+
+
+def calls_in(world, words, home, code, one=None):
     """The listed functions one line of a sketch calls: (their ids, what looked like a call into a box and was not found).
-    A listed function handed on without being called counts as called; one that is not found is then left unsaid."""
+    A listed function handed on without being called counts as called; one that is not found is then left unsaid.
+    `one` is {a variable: the interface or class the sketch says it is}: a call on such a variable is that type's method."""
     ids, loose = [], []
     for _a, _b, parts, called in chains(code):
-        lid, why, _i = resolve(world, words, home, parts)
+        lid = world.method(one[parts[0]], parts[1]) if one and len(parts) == 2 and parts[0] in one else None
+        why = None
+        if not lid:
+            lid, why, _i = resolve(world, words, home, parts)
         if lid:
             if lid not in ids:
                 ids.append(lid)
@@ -587,10 +655,15 @@ def flows_of(world, problems=None):
         if words is None:
             words = box_words(world)
         home, lines = lid.rsplit('#', 1)[0], []
-        for lv, code, note, calls in rows:
+        mine = world.lines[lid]
+        if '.' in mine['name'] and world.kind(mine['name'].rsplit('.', 1)[0]) == 'interface' and world.lines[mine['name'].rsplit('.', 1)[0]]['home'] == home:
+            said.error('%s: %s is an interface, and a method of an interface has no body of its own. It is not shown. Give the '
+                       'flow to the method of a class that implements it.' % (who, mine['name'].rsplit('.', 1)[0]))
+            continue
+        for (lv, code, note, calls), one in zip(rows, said_types(world, mine, rows)):
             ids = []
             if calls is None:
-                ids, loose = calls_in(world, words, home, code)
+                ids, loose = calls_in(world, words, home, code, one)
                 for t in loose:
                     said.note('%s calls %s. The line is shown without that call. If it is a listed function, write it as its '
                               'box lists it; if the line calls nothing listed, say so: write the line as { "code": "...", '
@@ -676,7 +749,8 @@ def merge_lines(box, lines):
     for text in lines:
         if text.startswith('- '):
             name = text[2:].strip()
-            kept = [x for x in iface if parse_line(x)['name'] != name]
+            whole = any(q['name'] == name and q['kind'] in ('interface', 'class') for q in map(parse_line, iface))
+            kept = [x for x in iface if parse_line(x)['name'] != name and not (whole and parse_line(x)['name'].startswith(name + '.'))]
             if len(kept) != len(iface):
                 said.append('removed %s from %s' % (name, box['folder']))
             iface = kept
@@ -760,7 +834,8 @@ def fold_flows(out, e, problems, quiet):
         for flow in out['flows']:
             where, fn = flow_said(flow.get('of')) if isinstance(flow, dict) else ('', '')
             folder = box_said(world, where) or where
-            if (folder, fn) in gone and folder + '#' + fn not in world.lines:
+            # a method goes with its interface or class
+            if ((folder, fn) in gone or (folder, fn.rsplit('.', 1)[0]) in gone) and folder + '#' + fn not in world.lines:
                 if not quiet and folder not in again:
                     problems.note('%s removed %s from %s, and its flow with it. If the function was renamed, say so under '
                                   '"renames" instead of removing it, and its flow stays.' % (name, fn, folder))
@@ -872,13 +947,17 @@ def rename_line(out, said, new, name, problems):
             flow['of'] = '%s: %s' % (folder, new)
         rows, _had = sketch_lines(flow.get('sketch'), flow_said(flow['of'])[1])
         touched = False
-        for row in rows:
+        for row, one in zip(rows, said_types(world, world.lines[mine], rows) if mine else iter(dict, 0)):
             if row[3] is not None:
                 calls = ['%s: %s' % (folder, new) if isinstance(c, str) and flow_line(world, c)[0] == lid else c for c in row[3]]
                 touched, row[3] = touched or calls != row[3], calls
             if mine is None:
                 continue
             for a, b, parts, _called in reversed(chains(row[1])):
+                if len(parts) == 2 and parts[0] in one:      # a call on a variable of a listed type: only the method's own name is there
+                    if world.method(one[parts[0]], parts[1]) == lid:
+                        row[1], touched = row[1][:b - len(parts[1])] + new.rsplit('.', 1)[-1] + row[1][b:], True
+                    continue
                 m = tail.search(row[1][a:b])
                 if m and resolve(world, words, mine.rsplit('#', 1)[0], parts)[0] == lid:
                     row[1], touched = row[1][:a + m.start()] + new + row[1][b:], True
@@ -1700,9 +1779,28 @@ def note_wordless(world, problems):
     for folder, b in world.boxes.items():
         if not (b.get('line') or '').strip():
             problems.note('The box %s has no line: say in a few words what it is for.' % folder)
-        missing = [('the type ' if q['type'] else '') + q['name'] for q in (world.lines[i] for i in world.order[folder]) if not q['words']]
+        missing = [('the %s ' % q['kind'] if q['type'] else '') + q['name'] for q in (world.lines[i] for i in world.order[folder]) if not q['words']]
         if missing:
             problems.note('Listed in %s with no words: %s. After // on each line, say what it is for.' % (folder, ', '.join(missing)))
+
+
+def note_kinds(world, problems):
+    """An interface or a class that names in its parenthesis something no box lists; a method written in another box than
+    its interface or class."""
+    for folder in world.boxes:
+        for i in world.order[folder]:
+            q = world.lines[i]
+            if q['type'] and q['kind'] in ('interface', 'class'):
+                for parent in q['parents']:
+                    if not world.kind(parent):
+                        problems.note('%s %s, in %s, names %s in its parenthesis, and no box lists an interface or a class %s. '
+                                      'Name there only what the listing has; a parent that only shares code is left out.'
+                                      % (q['kind'], q['name'], folder, parent, parent))
+            elif not q['type'] and '.' in q['name']:
+                owner = q['name'].rsplit('.', 1)[0]
+                if world.kind(owner) and world.lines[owner]['home'] != folder:
+                    problems.note('%s is listed in %s, and the %s %s is in %s. A method is written in the box of its %s.' % (
+                        q['name'], folder, world.kind(owner), owner, world.lines[owner]['home'], world.kind(owner)))
 
 
 SAYS_ITSELF = re.compile(r'^(?:#|(?:break|continue|pass|raise)\b|return(?:\s[^(]*)?$)')
@@ -2151,6 +2249,7 @@ def build(args):
     flows_now = flows_of(current, problems)
     note_flows(flows_now, [e for e in built if not any(e is f for f in failed)], current, problems)
     note_wordless(current, problems)
+    note_kinds(current, problems)
     note_flow_words(flows_now, problems)
     note_dangling(folded, current, problems)
 
@@ -2410,6 +2509,7 @@ def build_draft(args):
             len(empty), 'box has' if len(empty) == 1 else 'boxes have', 'in ' + args.files if args.files else 'here', some(empty),
             '' if args.files else ' For a layout the code does not have yet, list the files it would have and name the list with --files.'))
     note_wordless(world, problems)
+    note_kinds(world, problems)
     note_flow_words(flows, problems)
     note_dangling(system, world, problems)
     for t in problems.errors:

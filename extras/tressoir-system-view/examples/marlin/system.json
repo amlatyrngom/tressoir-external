@@ -89,26 +89,49 @@
           "interface": [
             "run  // runs a plan to the end",
             "RowStream = a sequence of Batch, pulled one at a time  // the result of running anything",
-            "Operator = { next() → Batch? }  // anything that produces batches"
+            "interface Operator  // anything that produces batches: a scan, a join, a grouping, a sort",
+            "Operator.next() → Batch?  // the next batch, or nothing when there are no more",
+            "Operator.close()  // gives back what the operator holds: memory, open files"
           ],
           "inside": [
             { "name": "Pipelines", "folder": "src/core/execution/pipelines/", "line": "a plan cut into pieces that run in parallel",
               "boxes": [
                 { "name": "Scheduler", "folder": "src/core/execution/pipelines/scheduler/", "line": "splits a plan into pipelines and runs them on worker threads",
-                  "interface": ["run(plan: Plan, snapshot: Snapshot) → RowStream  // cuts the plan into pipelines and starts them"] },
+                  "interface": [
+                    "run(plan: Plan, snapshot: Snapshot) → RowStream  // cuts the plan into pipelines and starts them",
+                    "class Pipeline  // the operators of a plan from one scan up to the point where every row must be seen before going on",
+                    "Pipeline.push(batch: Batch)  // sends one batch through the pipeline’s operators, in order",
+                    "Pipeline.done() → Bool  // whether its source has given every row"
+                  ] },
                 { "name": "Results", "folder": "src/core/execution/pipelines/results/", "line": "rows back to the client, in batches",
                   "interface": ["next(stream: RowStream) → Batch?  // returns the next batch, or nothing when done"] }
               ] },
             { "name": "Operators", "folder": "src/core/execution/operators/", "line": "the steps of a plan",
               "boxes": [
                 { "name": "Scans", "folder": "src/core/execution/operators/scans/", "line": "read a table or an index",
-                  "interface": ["open(node: PlanNode, snapshot: Snapshot) → Operator  // opens a scan ready to produce batches"] },
+                  "interface": [
+                    "open(node: PlanNode, snapshot: Snapshot) → Operator  // opens a scan ready to produce batches",
+                    "class TableScan(Operator)  // reads a table’s row versions, page by page",
+                    "class IndexScan(Operator)  // follows an index, then fetches the rows it points at"
+                  ] },
                 { "name": "Joins", "folder": "src/core/execution/operators/joins/", "line": "hash, merge and nested loop",
-                  "interface": ["open(node: PlanNode, left: Operator, right: Operator) → Operator  // opens a join over two inputs"] },
+                  "interface": [
+                    "open(node: PlanNode, left: Operator, right: Operator) → Operator  // opens a join over two inputs",
+                    "class HashJoin(Operator)  // builds a table from one input and probes it with the other",
+                    "class MergeJoin(Operator)  // walks two sorted inputs side by side"
+                  ] },
                 { "name": "Aggregates", "folder": "src/core/execution/operators/aggregates/", "line": "grouping and window functions",
-                  "interface": ["open(node: PlanNode, input: Operator) → Operator  // opens a grouping over one input"] },
+                  "interface": [
+                    "open(node: PlanNode, input: Operator) → Operator  // opens a grouping over one input",
+                    "class HashAggregate(Operator)  // groups rows by key and keeps one running result per group"
+                  ] },
                 { "name": "Sorts", "folder": "src/core/execution/operators/sorts/", "line": "ordering, and the first few rows of an ordering",
-                  "interface": ["open(node: PlanNode, input: Operator) → Operator  // opens a sort over one input"] }
+                  "interface": [
+                    "open(node: PlanNode, input: Operator) → Operator  // opens a sort over one input",
+                    "class Sort(Operator)  // orders every row of its input; it holds them all before it gives the first",
+                    "Sort.spill()  // writes sorted runs to disk when memory runs out",
+                    "class TopN(Sort)  // the first few rows of an ordering; it keeps only that many at a time, so it never spills"
+                  ] }
               ] },
             { "name": "Expressions", "folder": "src/core/execution/expressions/", "line": "what is computed on each batch of rows",
               "boxes": [
@@ -355,8 +378,17 @@
         "pipelines: list[Pipeline] = cut(plan)  # a pipeline ends wherever every row must be seen before the next step can start: the build side of a join, a sort",
         "parallel for p in pipelines.where(ready):  # every pipeline that waits on nothing runs at once, on worker threads",
         "    source: Operator = scans.open(p.scan, snapshot)  # each pipeline starts from a scan, and the other operators are opened over it",
-        "    drive(p, source)  # a worker pulls batches from the source through the pipeline until it is empty",
+        "    while batch := source.next():  # a worker pulls from the scan until it has no more rows",
+        "        p.push(batch)  # the batch goes through every operator of the pipeline",
         "return RowStream(pipelines.last)  # the last pipeline feeds the stream the caller pulls from"
+      ] },
+    { "of": "src/core/execution/pipelines/scheduler/: Pipeline.push",
+      "sketch": [
+        "for step in self.steps:  # the filters, the projections, the probe side of a join",
+        "    batch = step.apply(batch)  # each step works on the whole batch, column by column",
+        "    if batch.len == 0:",
+        "        return  # nothing is left to pass on",
+        "self.sink.add(batch)  # what ends the pipeline takes it: the build side of a join, a sort, or the result"
       ] },
     { "of": "src/core/transactions/durability/commit/: commit",
       "sketch": [
