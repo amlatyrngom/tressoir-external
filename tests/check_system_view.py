@@ -81,6 +81,15 @@ SWEEP = """(narrow) => { const bad = [], strip = document.getElementById('strip'
       document.getElementById('fig').click(); if (openT.length || openF.size) bad.push(t.label + ': a tap on the empty figure leaves lines open');
       go(''); only = !only; render(); wide(t.label + ', the other setting of Changes only'); only = !only; render(); }
     if (S.api && Object.keys(S.flows).length && !flows) bad.push('flows are written and none was opened');
+    // where a type is used: every listed type says who returns it, takes it or holds it when anyone does, and each name there leads to a module of the page
+    if (S.api && S.types) { mode = 'current'; render(); let said = 0; const box = document.createElement('div');
+      Object.values(S.types).filter(there).forEach(t => { box.innerHTML = uses(t); if (box.textContent) said++;
+        box.querySelectorAll('.mref').forEach(m => { if (!boxAt(m.dataset.fbox)) bad.push('the uses of ' + t.name + ' name ' + m.textContent + ', in no module of the page'); });
+        const fs = Object.keys(S.api).flatMap(fnsOf), named = fs.some(f => f.sig.slice(f.sig.indexOf('(')).match(new RegExp('(^|[^\\w.])' + t.name + '(?!\\w)')));
+        if (named && !box.textContent) bad.push('a listed function names ' + t.name + ' and its card does not say so'); });
+      if (!said) bad.push('types are listed and none says where it is used');
+      const m = [...box.querySelectorAll('.mref[data-fflow]')].pop() || (() => { for (const t of Object.values(S.types).filter(there)) { box.innerHTML = uses(t); const x = box.querySelector('.mref[data-fflow]'); if (x) return x; } })();
+      if (m) { document.body.appendChild(box); const to = m.dataset.fbox; m.click(); box.remove(); if (pin !== 'node:' + to) bad.push('the function ' + m.textContent + ' named under a type does not select its module ' + to); } }
     if (S.types && Object.keys(S.types).length && !cards) bad.push('types are listed and no reference opened a card');
     if (narrow && S.api && !longs) bad.push('on a narrow screen no docstring took more than one line: the check of long docstrings saw none');
     if (!narrow && S.api && innerWidth > 1200 && !shorts) bad.push('on a wide screen no docstring fitted on one line: the check of short docstrings saw none');

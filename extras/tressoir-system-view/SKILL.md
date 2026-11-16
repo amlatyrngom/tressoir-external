@@ -196,6 +196,7 @@ What the script prints:
 | a flow of an interface's method | a parenthesis that names a type no box lists as an interface or a class; a method listed in another box than its type |
 | a box three levels deep, written or planned; a plan's name over 24 characters (this one stops the script) | an earlier entry named a box at the path a later entry moved it from: the script corrects the entry |
 | | a new folder with no words in `lines.json`, beside folders that have some |
+| | a type that a listed line names and no box lists: list it, unless it is a library's |
 | | a box, a listed function, a method or a listed type of any kind with no words; a step of a flow with no words: write them, in the task's entry or, while the figure is being written, in `system.json` |
 | | no box written yet |
 
@@ -251,6 +252,26 @@ no box has an inside. A box gets a view of its own only when it is a subsystem o
 folder I would name, so its inside has several rows. Or when I ask for one. A box whose inside
 would be a single row is not a subsystem: leave it one box, and if its parts matter to me, draw
 them as boxes of the overview.
+
+**Complete, or not shown.** A figure that names things it does not explain confuses me more than
+it helps. Prefer a complete view to a quick one:
+
+- Every type a listed line names is itself listed, in the box that owns it, with its words and its
+  fields or methods. The exceptions are the language's own types, a library's, and the names of
+  the cases of a choice (`Mode = Fast | Slow`). The script names the others.
+- An interface is listed with its methods, and with every class that implements it. A project
+  that runs on macOS, Windows and Android shows all three, not the one that was written first.
+- A module that exists in the design is in the figure, with its listing. A box with an empty
+  listing beside boxes that have one reads as forgotten.
+- When part of a design is not decided yet, do not list half of it. Say in the box's line that it
+  is open, and ask me.
+
+**An interface that is hard to describe is a finding.** When I cannot say in one line what a
+module, an interface or a type is for, or its methods will not come out as a short list with
+clear types, the abstraction is probably wrong: it does two jobs, or the boundary is in the wrong
+place. Do not paper over it with vague words or leave it unlisted. Write what is true, and tell
+me what was hard to describe and what would make it simple: it is a chance to improve the
+design, and that is mine to decide.
 
 - A box has `name`, `folder` and `line`. `folder` is its main path and its identifier everywhere.
   In a project whose code is flat it may be a single file, and `also` lists further paths. A file
@@ -313,6 +334,9 @@ them as boxes of the overview.
 - The page shows the three apart, each with its methods under it, and writes under an interface
   the classes that implement it and under a class those that extend it. It works that out from
   the parentheses: do not write it in the words.
+- Under every type the page also says where it is used: the listed functions that return it, the
+  ones that take it, and the types it is a part of. It collects this from the signatures, so a
+  signature must name the types it passes; do not write "returned by" in the words.
 - `- Name` in an entry removes an interface or a class with its methods and their flows.
 
 ### Flows
@@ -418,7 +442,8 @@ one folder inside it, and I can point at a box and get its code.
 - Files at the top of the source folder only wire things together.
 
 Do not reorganize existing code to fit the view. Record the mismatch with `also`, and tell me.
-Restructuring is mine to decide.
+Restructuring is mine to decide. The same holds for a part that is hard to describe (see "An
+interface that is hard to describe is a finding"): say so, propose the simpler shape, and wait.
 
 ## This is experimental
 

@@ -1803,6 +1803,44 @@ def note_kinds(world, problems):
                         q['name'], folder, world.kind(owner), owner, world.lines[owner]['home'], world.kind(owner)))
 
 
+# names a signature may use that no project lists: the language's own and the commonest of its library
+GIVEN = set('Int Integer Long Short Float Double Number Decimal Bool Boolean Str String Text Char Byte Bytes Any None Null Nil Void Unit '
+            'Never Self List Dict Set Map Tuple Array Vec Seq Sequence Iterable Iterator Stream Optional Option Result Union Callable '
+            'Fn Func Function Box Arc Rc Ref Mut Path Date Time DateTime Instant Duration Error Exception Json JSON Object Promise '
+            'Future Task Type Reader Writer File'.split())
+TYPE_NAME = re.compile(r'(?<![\w.])[A-Z]\w*[a-z]\w*(?![\w(])')
+CASE = re.compile(r'(?<=\|)\s*[^\W\d]\w*(?![\w\[])|(?<![\w.\]])[^\W\d]\w*\s*(?=\|)')       # a bare name beside a | in a type: one case of a choice
+FIELD = re.compile(r'[^\W\d]\w*\s*:(?!:)')
+
+
+def note_unlisted(world, problems):
+    """A type a listed line names and no box lists: the reader is sent to a name with nothing behind it. Said once, for the
+    names that look like the project's own: a capital first, not one of the language's. The variants of a choice
+    (`Statement = Select | Insert`) are names of cases, and are not asked for."""
+    missing = {}
+    # a module named as a type (`catalog: Catalog`) is the module: the page opens its card
+    modules = {''.join(w[:1].upper() + w[1:] for w in re.split(r'[^A-Za-z0-9]+', b.get('name') or '') if w) for b in world.boxes.values()}
+    for folder in world.boxes:
+        for i in world.order[folder]:
+            q = world.lines[i]
+            if q['type'] and q['kind'] in ('interface', 'class'):
+                continue                                         # its parenthesis is note_kinds' to say
+            text = q['sig'] if q['type'] else q['sig'][q['sig'].index('('):] if '(' in q['sig'] else ''
+            if q['type']:
+                text = CASE.sub(' ', text)
+            for name in TYPE_NAME.findall(FIELD.sub(' ', STRING.sub('""', text))):
+                known = world.lines.get(name)
+                if name not in GIVEN and name not in modules and not (known and known['type']):
+                    missing.setdefault(name, folder)
+    if missing:
+        by = {}
+        for name, folder in missing.items():
+            by.setdefault(folder, []).append(name)
+        problems.note('Named in a listed line and listed by no box: %s. A reader cannot tell what these are. List each in the '
+                      'box that owns it, with its words and its fields or methods. A type from a library needs nothing.'
+                      % '; '.join('%s (%s)' % (', '.join(names), folder) for folder, names in by.items()))
+
+
 SAYS_ITSELF = re.compile(r'^(?:#|(?:break|continue|pass|raise)\b|return(?:\s[^(]*)?$)')
 
 
@@ -2250,6 +2288,7 @@ def build(args):
     note_flows(flows_now, [e for e in built if not any(e is f for f in failed)], current, problems)
     note_wordless(current, problems)
     note_kinds(current, problems)
+    note_unlisted(current, problems)
     note_flow_words(flows_now, problems)
     note_dangling(folded, current, problems)
 
@@ -2510,6 +2549,7 @@ def build_draft(args):
             '' if args.files else ' For a layout the code does not have yet, list the files it would have and name the list with --files.'))
     note_wordless(world, problems)
     note_kinds(world, problems)
+    note_unlisted(world, problems)
     note_flow_words(flows, problems)
     note_dangling(system, world, problems)
     for t in problems.errors:

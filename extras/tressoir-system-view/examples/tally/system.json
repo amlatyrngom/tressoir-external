@@ -3,7 +3,7 @@
     "entry": { "folder": "src/entry/", "line": "how you reach it",
       "boxes": [
         { "name": "Command line", "folder": "src/entry/cli/", "line": "add, import, report",
-          "interface": ["main(args: [Text]) → ExitCode  // runs one command"] },
+          "interface": ["main(args: [Text]) → ExitCode  // runs one command", "ExitCode = ok | failed  // what the shell gets back"] },
         { "name": "Local page", "folder": "src/entry/web/", "line": "browse and edit in the browser",
           "interface": ["serve(port: Int)  // serves the page on this machine"] }
       ] },
@@ -15,19 +15,29 @@
             "search(filter: Filter) → [Entry]  // finds entries by date, category or text",
             "Entry = { id: EntryId, date: Date, amount: Money, payee: Text, category: CategoryId? }  // one expense or income",
             "NewEntry = { date: Date, amount: Money, payee: Text }  // an entry not yet recorded",
-            "Filter = { from: Date?, to: Date?, category: CategoryId?, text: Text? }  // which entries to find"
+            "Filter = { from: Date?, to: Date?, category: CategoryId?, text: Text? }  // which entries to find",
+            "EntryId = Int  // numbers an entry, in the order entries arrive"
           ] },
         { "name": "Categories", "folder": "src/core/categories/", "line": "rules that sort an entry into a category",
-          "interface": ["categorize(entry: NewEntry) → CategoryId?  // applies the first rule that matches"] },
+          "interface": ["categorize(entry: NewEntry) → CategoryId?  // applies the first rule that matches", "CategoryId = Text  // names a category: food, rent"] },
         { "name": "Budgets", "folder": "src/core/budgets/", "line": "monthly limits and what is left",
           "interface": [
             "left(month: Month) → [BudgetLine]  // says what is left of each limit",
             "BudgetLine = { category: CategoryId, limit: Money, spent: Money }  // one limit and how much of it is used"
           ] },
         { "name": "Reports", "folder": "src/core/reports/", "line": "totals by month and category",
-          "interface": ["monthly(month: Month) → Report  // totals one month by category"] },
+          "interface": [
+            "monthly(month: Month) → Report  // totals one month by category",
+            "Report = { month: Month, lines: [BudgetLine], total: Money }  // one month: each category against its limit, and the sum"
+          ] },
         { "name": "Store", "folder": "src/core/store/", "line": "one SQLite file",
-          "interface": ["read(query: Query) → [Row]  // runs one query", "write(change: Change)  // applies one change, all of it or none"] },
+          "interface": [
+            "read(query: Query) → [Row]  // runs one query",
+            "write(change: Change)  // applies one change, all of it or none",
+            "Query = { table: Text, where: Text }  // what to read: a table and a condition",
+            "Row = [Text]  // one stored row, as SQLite gives it",
+            "Change = { kind: insert | update | delete, table: Text, row: Row }  // one write to the file"
+          ] },
         { "name": "Shared", "folder": "src/core/shared/", "line": "money and dates", "shared": true,
           "interface": ["Money = { cents: Int }  // an amount, in the home currency", "Month = { year: Int, month: Int }  // one calendar month"] }
       ] },

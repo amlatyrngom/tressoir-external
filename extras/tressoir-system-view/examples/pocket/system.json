@@ -17,7 +17,8 @@
           "interface": [
             "save(url: str) → PageId  // fetches, cleans and stores one page",
             "read(id: PageId) → Page?  // one saved page",
-            "Page = { id: PageId, url: str, title: str, text: str }  // one saved page"
+            "Page = { id: PageId, url: str, title: str, text: str }  // one saved page",
+            "PageId = int  // numbers a saved page, in the order pages are saved"
           ] },
         { "name": "Cleaning", "folder": "pocket/clean.py", "line": "keeps the article, drops the rest",
           "interface": ["clean(html: str) → str  // the readable text of a page"] },

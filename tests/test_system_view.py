@@ -46,9 +46,9 @@ def write(root, path, text):
 
 
 def worded(out):
-    """What the script printed, without its notes about steps of a flow that have no words: the small flows these
-    cases write are not about that."""
-    return '\n'.join(l for l in out.split('\n') if ' with no words: ' not in l)
+    """What the script printed, without its notes about steps of a flow that have no words and about types that are named
+    and not listed: the small figures these cases write are not about that."""
+    return '\n'.join(l for l in out.split('\n') if ' with no words: ' not in l and 'Named in a listed line' not in l)
 
 
 def git(root, *args):
@@ -1741,7 +1741,7 @@ def levels(tmp):
     code, out, err = run(root)
     data = page_data(root)
     view = next((v for v in data['views'] if v['id'] == NEST), {'rows': []})
-    check('a box whose one row has the box\'s own folder builds with no error and no note', code == 0 and 'ERROR' not in out and 'note' not in out, out + err)
+    check('a box whose one row has the box\'s own folder builds with no error and no note', code == 0 and 'ERROR' not in out and 'note' not in worded(out), out + err)
     check('its view lists the boxes inside it, in that one row',
           [v['id'] for v in data['views']] == ['', NEST] and [(r['dir'], r['title'], [b['folder'] for b in r['boxes']]) for r in view['rows']] == [(NEST, 'Parts', [records, keys])],
           view)
@@ -2082,7 +2082,7 @@ def fourth(tmp):
     root = new()
     put(root, lambda s: s['flows'][1]['sketch'].__setitem__(1, 'return _store(entry, key)  # stored under its key'))
     code, out, err = run(root, '--check')
-    check('when every line and every step has words, nothing is said', code == 0 and out.strip() == 'Checked: 3 boxes, 2 flows. No error.', out + err)
+    check('when every line and every step has words, nothing is said', code == 0 and worded(out).strip() == 'Checked: 3 boxes, 2 flows. No error.', out + err)
 
     # ---- a draft: a page from a system.json that is not the project's own
     root = new()
@@ -2175,7 +2175,8 @@ def fifth(tmp):
     def odd(s):
         a, b = s['regions']['core']['boxes']
         a['interface'][3] = 'class Pipeline'
-        b['interface'] += ['class Heap(Shared)  // a heap', 'Operator.close()  // closes it']
+        b['interface'] += ['class Heap(Shared)  // a heap', 'Operator.close()  // closes it', 'scan(table: TableRef, how: Mode) → Cursor?  // reads a table',
+                           'Mode = Fast | Slow  // how a table is read', 'Held = { by: Sorts, n: Int, at: Path, where: Spot }  // what a scan holds']
         s['flows'].append({'of': ex + ': Operator.next', 'sketch': ['return 1']})
     put(root, odd)
     code, out, err = run(root, '--check')
@@ -2184,6 +2185,10 @@ def fifth(tmp):
           'note   class Heap, in src/core/sorts/, names Shared in its parenthesis, and no box lists an interface or a class Shared.' in out, out)
     check('a method written in another box than its interface is said',
           'note   Operator.close is listed in src/core/sorts/, and the interface Operator is in src/core/exec/. A method is written in the box of its interface.' in out, out)
+    check('a type that a listed line names and no box lists is said, once for the figure, with the box that names it',
+          out.count('Named in a listed line') == 1 and 'note   Named in a listed line and listed by no box: TableRef, Cursor, Spot (src/core/sorts/). ' in out, out)
+    check('the cases of a choice, a module named as a type and the language\'s own types are not asked for',
+          not any(n in out.split('Named in a listed line')[1].split('.')[0] for n in ('Fast', 'Slow', 'Sorts', 'Int', 'Path', 'Shared')), out)
     check('a flow of an interface\'s method is an error: it has no body of its own',
           code == 1 and 'ERROR  The flow of Operator.next (src/core/exec/): Operator is an interface' in out, out)
 

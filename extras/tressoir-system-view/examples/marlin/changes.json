@@ -21,7 +21,7 @@
         "range(index: IndexId, from: Key, to: Key) → [IndexEntry]",
         "IndexEntry = { key: Key, row: RowId, all_visible: Bool }  // what an index holds for one key"
       ],
-      "src/core/optimizer/": ["PlanNode = { op: Scan | IndexScan | IndexOnlyScan | Join | Aggregate | Sort, inputs: [PlanNode], rows: RowEstimate }"]
+      "src/core/optimizer/": ["PlanNode = { op: scan | index_scan | index_only_scan | join | aggregate | sort, inputs: [PlanNode], rows: RowEstimate }"]
     } },
   { "name": "Group commit", "line": "many commits share one flush",
     "files": {

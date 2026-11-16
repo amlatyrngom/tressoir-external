@@ -6,12 +6,14 @@
           "interface": [
             "handle(session: Session, message: Message) → Reply  // handles one message from a client",
             "send(session: Session, batch: Batch)  // sends rows back to the client",
-            "Session = { id: Int, user: Text, txn: TxnId? }  // one connected client"
+            "Session = { id: Int, user: Text, txn: TxnId? }  // one connected client",
+            "Message = { kind: Query | Prepare | Execute | Close, sql: Text? }  // one message of the wire protocol, from a client",
+            "Reply = { kind: Rows | Done | Failed, text: Text? }  // what the client is told after a message"
           ] },
         { "name": "Shell", "folder": "src/entry/shell/", "line": "the interactive prompt and its commands",
           "interface": ["run(input: Reader)  // reads statements until the input ends"] },
         { "name": "Embedded API", "folder": "src/entry/embedded/", "line": "the engine as a library, for C and Python",
-          "interface": ["open(path: Path) → Database  // opens or creates a database", "query(db: Database, sql: Text) → RowStream  // runs one statement"] }
+          "interface": ["open(path: Path) → Database  // opens or creates a database", "query(db: Database, sql: Text) → RowStream  // runs one statement", "Database = { path: Path, session: Session }  // an open database, as the program that embeds Marlin holds it"] }
       ] },
     "core": { "folder": "src/core/", "line": "what the engine does, the same everywhere",
       "boxes": [
@@ -25,7 +27,7 @@
           "interface": [
             "optimize(stmt: Statement, catalog: Catalog) → Plan  // chooses a plan for a statement",
             "Plan = { root: PlanNode, cost: Cost, workers: Int }  // what Execution runs",
-            "PlanNode = { op: Scan | IndexScan | Join | Aggregate | Sort, inputs: [PlanNode], rows: RowEstimate }  // one step of a plan"
+            "PlanNode = { op: scan | index_scan | join | aggregate | sort, inputs: [PlanNode], rows: RowEstimate }  // one step of a plan"
           ],
           "inside": [
             { "name": "Rewrites", "folder": "src/core/optimizer/rewrites/", "line": "the statement made simpler before any search",
@@ -139,7 +141,9 @@
                     "slice(batch: Batch, selection: Selection) → Batch  // keeps the live rows of a batch",
                     "Batch = { columns: [Vector], selection: Selection, len: Int }  // up to 2,048 rows, stored by column",
                     "Vector = { values: [Value], nulls: Bitmap }  // one column of a batch",
-                    "Selection = [Int]  // which rows of a batch are live"
+                    "Selection = [Int]  // which rows of a batch are live",
+                    "Value = Int | Float | Text | Bool | Date | Null  // one value of a column",
+                    "Bitmap = [Bool]  // one bit per row"
                   ] },
                 { "name": "Functions", "folder": "src/core/execution/expressions/functions/", "line": "arithmetic, text, dates",
                   "interface": ["eval(expr: Expr, batch: Batch) → Vector  // evaluates one expression over one batch"] }
@@ -182,7 +186,7 @@
                     "Snapshot = { txn: TxnId, as_of: Timestamp }  // what one transaction may see"
                   ] },
                 { "name": "Locks", "folder": "src/core/transactions/isolation/locks/", "line": "row and table locks; deadlock detection",
-                  "interface": ["lock(txn: TxnId, row: RowId, mode: LockMode)  // takes a lock; waits, or fails on a deadlock"] },
+                  "interface": ["lock(txn: TxnId, row: RowId, mode: LockMode)  // takes a lock; waits, or fails on a deadlock", "LockMode = Shared | Exclusive  // readers share a row; a writer has it alone"] },
                 { "name": "Conflicts", "folder": "src/core/transactions/isolation/conflicts/", "line": "write-write checks at commit",
                   "interface": ["check(txn: TxnId)  // fails when another transaction wrote the same row first"] }
               ] },
@@ -262,6 +266,7 @@
                     "read(page: PageId) → Page  // reads a page from the file",
                     "write(page: Page)  // writes a page to the file",
                     "PageId = { file: FileId, number: Int }  // names a page",
+                    "FileId = Int  // names one open file of the database",
                     "Page = { id: PageId, lsn: Lsn, bytes: Bytes }  // eight kilobytes of a file"
                   ] },
                 { "name": "Write-ahead log", "folder": "src/core/storage/disk/wal/", "line": "every change, appended before it counts",
@@ -298,7 +303,8 @@
             "table(id: TableId) → TableInfo  // returns everything known about a table",
             "resolve(name: Text) → TableId?  // resolves a name to a table",
             "TableId = Int  // names a table",
-            "TableInfo = { id: TableId, columns: [Text], indexes: [IndexId] }  // everything known about a table"
+            "TableInfo = { id: TableId, columns: [Text], indexes: [IndexId] }  // everything known about a table",
+            "IndexId = Int  // names an index"
           ] },
         { "name": "Shared", "folder": "src/core/shared/", "line": "helpers with no better home; 2 files today", "shared": true }
       ] },
@@ -307,7 +313,8 @@
         { "name": "File formats", "folder": "src/connectors/formats/", "line": "Parquet and CSV, read and written",
           "interface": [
             "read(path: Path, format: Format) → RowStream  // reads an external file as rows",
-            "write(path: Path, rows: RowStream, format: Format)  // writes rows to an external file"
+            "write(path: Path, rows: RowStream, format: Format)  // writes rows to an external file",
+            "Format = Csv | Parquet | Json  // the kinds of external file Marlin reads and writes"
           ] },
         { "name": "Replicas", "folder": "src/connectors/replicas/", "line": "the other nodes; they receive the log",
           "interface": ["ship(from: Lsn)  // sends the log from this position on"] }
