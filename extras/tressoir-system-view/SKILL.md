@@ -88,13 +88,14 @@ An entry restates whatever is no longer true, and nothing else:
   the line out of the earlier entry, puts its name under that entry's `affects`, and says so.
 - A box under `boxes` is matched by `folder`. Write a new one whole, with its `interface`. For an
   existing one give only what changed; `also` adds paths.
-- A new box is a folder directly in a row's or a region's folder. The script does not place any
-  other: a folder inside a box is not a box, and where two regions share the folder (a flat
-  project) the region is mine to choose. Leave such a box out of `boxes` and tell me.
+- A new box is a folder directly in a region's folder, in a row's, or in the folder of a box that
+  already holds modules. The script does not place any other: a folder inside a box that holds
+  none is not a box, and where two regions share the folder (a flat project) the region is mine
+  to choose. Leave such a box out of `boxes` and tell me.
 - A box whose folder or file was renamed is said under `moves`: `"moves": { "app/notify.py":
   "app/notify/" }`. The box keeps its region, name, line and interface, and its flows follow. The
   new path stays in the same row or region and outside every other box (a box inside another
-  stays inside it). Until it is said, the script keeps the box and gives an error that proposes the
+  stays inside it, in its folder). Until it is said, the script keeps the box and gives an error that proposes the
   line. A box that changes region, splits, or joins another is not a move.
 - A flow under `flows` is matched by its function (`of`) and replaces that function's flow. State
   it whole, as in `system.json` (see "Flows" below): copy it from there, or from what the script
@@ -187,14 +188,14 @@ What the script prints:
 | a built entry with a `+ ` file that does not exist | an entry changes a function that has a flow and does not state the flow: check it still reads true |
 | a planned path that does not exist and has no `+ ` | an open plan restates a line that has changed since the last commit |
 | a name twice in a box; a path in two boxes; a bare name with no single match | an entry replaced a line: what it was, what it is |
-| a new box the script will not place: inside a box, deeper than a row, or where regions share the folder | a link or a neighbour that points at nothing |
+| a new box the script will not place: inside a box that holds no modules, deeper than a row, or where regions share the folder | a link or a neighbour that points at nothing |
 | a box with no file left whose files were renamed (it proposes the `moves` line) | a box with no file; a figure whose regions give no folder |
 | a flow of a function no box lists; two flows of one function; in `system.json`, a flow with no line or still written as steps | a box removed because its files were deleted; a function removed with its flow |
 | a call stated by hand in a sketch that names no listed function | a call in a sketch into a box that does not list it, or that two boxes answer to |
 | `moves` to another region or row, onto or into another box, or of a box with boxes inside | a sketch that began with its `def` line (the script takes it out); a sketch over 40 lines |
 | `renames` of a function no box lists, or to a name its box already lists | two entries state the same flow: the later one stands |
 | a flow of an interface's method | a parenthesis that names a type no box lists as an interface or a class; a method listed in another box than its type |
-| a box three levels deep, written or planned; a plan's name over 24 characters (this one stops the script) | an earlier entry named a box at the path a later entry moved it from: the script corrects the entry |
+| a box three levels deep, written or planned; an `inside` that lists both modules and rows; a plan's name over 24 characters (these stop the script) | an earlier entry named a box at the path a later entry moved it from: the script corrects the entry |
 | | a new folder with no words in `lines.json`, beside folders that have some |
 | | a type that a listed line names and no box lists: list it, unless it is a library's |
 | | a box, a listed function, a method or a listed type of any kind with no words; a step of a flow with no words: write them, in the task's entry or, while the figure is being written, in `system.json` |
@@ -211,12 +212,12 @@ Reading a diff:
 | the steps of a function that has a flow changed | the flow, whole, under `flows` |
 | a box's folder or file renamed, the box otherwise the same | `moves`, old path then new path |
 | a listed function renamed, otherwise the same | `renames`, the function then its new name |
-| a new folder inside a box | nothing |
-| a new folder directly in a row or a region | a box under `boxes`, with a name and a line |
+| a new folder inside a box that holds no modules | nothing |
+| a new folder directly in a row, a region or a box that holds modules | a box under `boxes`, with a name and a line |
 | a new file in a flat project | `also` on the only box that imports it |
 
 **Architecture is never decided mechanically:** a new row or region; a box that changes region,
-splits or merges; a box that gains an inside; in a project whose code is one folder, a new box, or
+splits or merges; a box that gains its first module, or a view of its own; in a project whose code is one folder, a new box, or
 a file that two boxes import; a function that gains or loses a flow. Leave the figure alone and
 tell me in your report. An error that is architecture stays until I have answered: commit the code with the
 error left, and put it first in the hand-off. Once I have answered, write my answer into
@@ -232,29 +233,43 @@ Written with me. Four layers; each is optional and the page works without the la
    it empty when it does not apply. Where the code sits at the top of the repository, the folder
    is written `"./"`. `links` between regions have `from`, `to` (the regions' keys, such as
    `entry` and `core`), a short `label` and a sentence, `says`.
-2. **Inside a box**, only in a large system (see "One overview, unless the system is large").
-   `inside` lists its rows; a row is a folder and its boxes are folders in it. A box with an
-   inside may give `links` between its rows, and `from` and `uses`: the outside boxes it works
-   with, each with a sentence.
+2. **Inside a box.** `inside` lists the modules a box holds: each is a box like any other, in a
+   folder inside its folder. That is all it takes. They are listed under it and drawn inside its
+   box, in the figure the box is in; one that is only a variation is listed and not drawn (see
+   "A module may hold modules"). Only a subsystem of a large system has a view of its own
+   (see "One overview, unless the system is large"): its `inside` then lists rows instead, each
+   an object with `boxes`; a row is a folder and its boxes are folders in it. Such a box may give
+   `links` between its rows, and `from` and `uses`: the outside boxes it works with, each with a
+   sentence.
 3. **Interface.** One string per line. A function is `name(arg: Type) → Type  // words`; a type
    is `Name = shape  // words`, `interface Name  // words` or `class Name(Parent)  // words`. See
    "Three kinds of type" below.
 4. **Flows.** A flow is the body of one listed function, as a short sketch: `of` (the box's
    folder, a colon, the function) and `sketch` (its lines). See "Flows" below.
 
-Boxes go two levels deep and no more. A box of the overview may have an inside; a box inside it
-has none, and the script stops on a third level. The rows of an inside only group its boxes in
-the figure, as the regions group the overview's: a row is not a module and lists nothing.
+Boxes go two levels deep and no more. A box of the overview may hold boxes, directly or in the
+rows of a view of its own; a box inside it holds none, and the script stops on a third level. The
+rows of a view only group its boxes in the figure, as the regions group the overview's: a row is
+not a module and lists nothing.
+
+**A module may hold modules, and stays an ordinary box.** When a module is made of parts I would
+name, each in a folder of its own, list them in its `inside`: a Devices module with macOS, Android
+and Windows; a Connectors module with a module per provider. The outer module lists what the rest
+of the system uses (the interfaces, the functions), each inner module what is its own (its
+classes). Do not leave such modules out of `system.json` to keep the figure simple, and do not
+turn the module into a subsystem with rows and a view to be allowed them.
+
+The figure draws an inner module only when it has a job of its own. One that is a variation on a
+common interface (every line it lists is a class with a parent: macOS, Android and Windows under
+Devices) is listed under the outer module and not drawn: the outer box is enough for me. The
+script decides this from the listing; there is nothing to mark.
 
 **One overview, unless the system is large.** Most projects are drawn whole in the overview, and
-no box has an inside. A box gets a view of its own only when it is a subsystem of a large system
-(a database's optimizer, an operating system's scheduler): it has several groups of parts, each a
-folder I would name, so its inside has several rows. Or when I ask for one. Or when the module is one capability with an
-implementation per platform or per provider, each in a folder of its own (a Devices module with
-macOS, Android and Windows): the module lists the interfaces, and each platform is a module
-inside it that lists its classes. Otherwise a box whose inside
-would be a single row is not a subsystem: leave it one box, and if its parts matter to me, draw
-them as boxes of the overview.
+no box has a view of its own. A box gets one only when it is a subsystem of a large system (a
+database's optimizer, an operating system's scheduler): it has several groups of parts, each a
+folder I would name, so its view has several rows. Or when I ask for one. A box whose view would
+be a single row is not a subsystem: list its modules directly, and they are drawn in the
+overview.
 
 **Complete, or not shown.** A figure that names things it does not explain confuses me more than
 it helps. Prefer a complete view to a quick one:
@@ -405,9 +420,9 @@ Propose the regions and boxes from the code as it is, and settle them with me be
 further. Draw what a system architect would put on a whiteboard: a box is a part with a job of its
 own, not a file, and its lines are what an architect needs to know to connect it to the others.
 That is around a dozen boxes; a simple project needs fewer, a complex one more. Once the
-figure is agreed, add the interface and one or two flows. Draw one overview and give no box an
-inside, unless the system is large (see "One overview, unless the system is large"). Where a
-component is spread out, give the box its main folder and list the rest under `also`. Leave
+figure is agreed, add the interface and one or two flows. Draw one overview and give no box a
+view of its own, unless the system is large (see "One overview, unless the system is large").
+Where a component is spread out, give the box its main folder and list the rest under `also`. Leave
 `changes.json` as `[]`. Do not move code to make the first figure look tidy.
 
 **Show me a figure before it is agreed as a draft.** Write it as a `system.json` of its own in

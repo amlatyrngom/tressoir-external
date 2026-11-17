@@ -231,6 +231,27 @@ TWO_LEVELS = ('Boxes go two levels deep and no more: a box of the overview may h
               'That is architecture: settle it with the owner.')
 
 
+def direct(box):
+    """Whether the box holds modules directly: its "inside" lists boxes, not the rows of a view of its own."""
+    ins = box.get('inside')
+    return isinstance(ins, list) and bool(ins) and not any(isinstance(x, dict) and 'boxes' in x for x in ins)
+
+
+def variation(box):
+    """Whether a box only gives interfaces a form of its own: every line it lists is a class with a parent, or a method of
+    one. Held by another box (a system among several, a provider), it is listed under that box and not drawn."""
+    ps = [parse_line(t) for t in box.get('interface') or [] if isinstance(t, str)]
+    forms = set(p['name'] for p in ps if p['kind'] == 'class' and p['parents'])
+    return bool(forms) and all(p['name'] in forms if p['type'] else p['name'].split('.')[0] in forms for p in ps)
+
+
+def rows_in(box):
+    """The rows of boxes inside a box: the rows it writes, or one row that is the list of the modules it holds directly
+    (the same list, so a box added to the row is added to the box)."""
+    ins = box.get('inside') or []
+    return [{'folder': box['folder'], 'boxes': ins, 'direct': True}] if direct(box) else ins
+
+
 def under(prefix, path):
     """Whether a path is this path, or lies under this folder."""
     return prefix == TOP or path == prefix or path.startswith(prefix if prefix.endswith('/') else prefix + '/')
@@ -248,7 +269,7 @@ def rows_of(system):
     out = []
 
     def inside(box):
-        for row in box.get('inside') or []:
+        for row in rows_in(box):
             out.append((row, box, None))
             for b in row.get('boxes') or []:
                 inside(b)
@@ -890,7 +911,7 @@ def move_box(out, old, new, name, problems):
     f = (row or {}).get('folder')
     if f and (new == f or not under(f, new)):
         problems.error('%s: the box %s cannot move to %s, which is not in %s, the folder of its %s. A box that changes row or region '
-                       'is not a move.%s' % (name, old, new, f, 'region' if key else 'row', owner))
+                       'is not a move.%s' % (name, old, new, f, 'region' if key else 'parent' if row.get('direct') else 'row', owner))
         return
     for other in world.boxes:
         if other not in world.around(old) and any(under(q, new) or under(new, q) for q in world.paths(other)):
@@ -1000,7 +1021,7 @@ def moved_to(world, folder, went):
     took = sorted(set(b for b in (world.box_of(p) for p in went) if b and b != folder))
     if took:
         return None, took
-    rows = set(r.get('folder') for r, _parent, _key in rows_of(world.sys) if r.get('folder'))
+    rows = set(r.get('folder') for r, _parent, _key in rows_of(world.sys) if r.get('folder') and not r.get('direct'))
     if folder.endswith('/') or len(went) > 1:
         common = os.path.commonpath(went) if len(went) > 1 else os.path.dirname(went[0])
         guess = common + '/' if common else None
@@ -1120,7 +1141,7 @@ def hits_of(entry, world, problems=None, base=None):
         for text in box.get('interface') or []:
             p = parse_line(text)
             hit.append(p['name'] if p['type'] else box['folder'] + '#' + p['name'])
-        for row in box.get('inside') or []:
+        for row in rows_in(box):
             for b in row.get('boxes') or []:
                 brought(b)
 
@@ -1198,6 +1219,8 @@ class Lists:
         box = World(self.sys).boxes.get(parent['folder'])
         if box is None:
             return None
+        if row.get('direct') and (direct(box) or not box.get('inside')):
+            return {'boxes': box.setdefault('inside', [])}
         for r in box.setdefault('inside', []):
             if r.get('folder') == row.get('folder'):
                 return r
@@ -1280,6 +1303,8 @@ def emit_box(b):
     out = {'name': b.get('name', b['folder']), 'folder': b['folder'], 'line': b.get('line', '')}
     if b.get('shared'):
         out['shared'] = True
+    if direct(b):          # the modules it holds directly are drawn inside its box, in the figure it is in
+        out['kids'] = [dict(emit_box(x), **({'quiet': True} if variation(x) else {})) for x in b['inside']]
     return out
 
 
@@ -1311,7 +1336,7 @@ def emit_views(system):
     views = [over]
     for row, _parent, _key in rows_of(system):
         for b in row.get('boxes') or []:
-            if not b.get('inside'):
+            if not b.get('inside') or direct(b):          # only a box that writes rows has a view of its own
                 continue
             v = {'id': b['folder'], 'rows': [], 'links': b.get('links') or []}
             for i, r in enumerate(b['inside']):
@@ -1390,11 +1415,15 @@ def box_fault(b, where, deep=1):
         return '"also" of %s must be a list of paths' % f
     if 'inside' in b:
         if not isinstance(b['inside'], list):
-            return '"inside" of %s must be a list of rows' % f
+            return '"inside" of %s must be a list: the modules inside it, or the rows of a view of its own' % f
         if deep > 1 and b['inside']:
             return 'the box %s is inside another box and has boxes inside it. %s' % (f, TWO_LEVELS.rstrip('.'))
-        for r in b['inside']:
-            fault = row_fault(r, 'the rows inside ' + f, deep + 1)
+        rows = [isinstance(x, dict) and 'boxes' in x for x in b['inside']]
+        if any(rows) and not all(rows):
+            return ('"inside" of %s lists both modules and rows. List its modules directly, or give it a view of its own with rows '
+                    '(each an object with "boxes"); not both' % f)
+        for r in rows_in(b):
+            fault = row_fault(r, 'the modules inside ' + f if r.get('direct') else 'the rows inside ' + f, deep + 1)
             if fault:
                 return fault
     if 'links' in b:
@@ -1864,7 +1893,7 @@ def note_dangling(system, world, problems):
                 problems.note('A link of the overview points at %s, which %s. Name the region by its key: entry, core, external or '
                               'platform. The link is not drawn.' % (l.get(k), 'is the folder of %s' % ' and '.join(shared) if shared else 'is not a region'))
     for folder, b in world.boxes.items():
-        rows = set(r.get('folder') for r in b.get('inside') or [])
+        rows = set(r.get('folder') for r in rows_in(b) if not r.get('direct'))
         for l in b.get('links') or []:
             for k in ('from', 'to'):
                 if l.get(k) not in rows:

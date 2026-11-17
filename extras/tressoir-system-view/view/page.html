@@ -49,6 +49,8 @@ button { font:inherit; color:inherit; cursor:pointer; background:none; border:0;
 .nd { --bd:var(--line); position:absolute; display:grid; place-items:center; border:1.5px solid var(--bd); border-radius:6px; background:var(--panel); font-size:12.5px; font-weight:650; line-height:1.1; text-align:center; overflow-wrap:anywhere; cursor:pointer; }
 /* a name wraps onto a second line only where its box is too narrow for it; pills and chips are sized to their text */
 .nd.tight { font-size:11px; } .nd.near { white-space:nowrap; }
+/* a box that holds modules: its name at the top, its modules drawn inside it */
+.nd.grp { place-items:start center; padding-top:4px; font-size:11.5px; background:color-mix(in srgb, var(--fg) 4%, var(--panel)); } .nd.kid { font-size:11px; font-weight:600; border-width:1.2px; }
 .nd.util { border-style:dashed; font-weight:500; }
 .nd.add { --bd:var(--add); background:color-mix(in srgb, var(--add) 13%, var(--panel)); color:var(--add); }
 .nd.chg { --bd:var(--chg); background:color-mix(in srgb, var(--chg) 13%, var(--panel)); color:var(--chg); }
@@ -200,7 +202,11 @@ if (S.api) { Object.keys(S.api).forEach(k => { S.api[k] = S.api[k].map(a => ({ s
   Object.keys(S.types).forEach(k => { const a = S.types[k]; S.types[k] = { sig:a[0], line:a[1], home:a[2], name:k, id:k }; }); }
 S.views.forEach(v => { if (v.id) { const b = S.views.flatMap(w => [...w.rows.flatMap(r => r.boxes), ...(w.band ? w.band.boxes : []), ...(w.sep || [])]).find(x => x.folder === v.id); v.name = b.name; v.line = b.line; } });
 // ============ reading the snapshot of the tab being shown ============
-const own = v => [...v.rows.flatMap(r => r.boxes), ...(v.band ? v.band.boxes : []), ...(v.sep || [])];
+// the boxes of a view: the ones its rows hold and, after each, the modules that one holds directly (they are drawn inside its box)
+const tops = v => [...v.rows.flatMap(r => r.boxes), ...(v.band ? v.band.boxes : []), ...(v.sep || [])], own = v => tops(v).flatMap(b => [b, ...(b.kids || [])]);
+// of the modules a box holds, the figure draws the ones with a job of their own. One that only gives the box's interfaces a form of its own (quiet: the script says which) is listed under the box and not drawn
+const drawn = b => (b.kids || []).filter(k => !k.quiet), holder = b => S.views.flatMap(tops).find(p => (p.kids || []).includes(b));
+const kin = (a, c) => (a.kids || []).includes(c) || (c.kids || []).includes(a), isKid = b => !!holder(b), inFig = folder => { const b = boxAt(folder); return b && b.quiet ? holder(b).folder : folder; };
 const regionsOf = v => [...v.rows, ...(v.band ? [v.band] : [])];
 const boxAt = folder => { for (const v of S.views) { const b = own(v).find(x => x.folder === folder); if (b) return b; } };
 const regionAt = id => { for (const v of S.views) { const r = regionsOf(v).find(x => x.id === id); if (r) return r; } };
@@ -310,7 +316,7 @@ const toldBy = cards => new Set(cards.flatMap(c => [...c.fs, ...c.ts.map(n => S.
 const toldUnder = folder => new Set([...Object.keys(S.api).filter(k => k.startsWith(folder)).flatMap(fnsOf), ...Object.values(S.types).filter(t => t.home.startsWith(folder) && there(t))].flatMap(causes));
 // what changed inside a box that none of its card's lines shows: the named changes; the boxes of its view whose own lines do show them; and the ones no listed line shows at all. `bare` says files changed and no named change explains it
 function inside(c){ const b = delta() && boxAt(c.folder); if (!b) return null; const on = toldBy([c]), all = touching(c.folder), rest = all.filter(x => !on.has(x)), bare = bst(b) === 'chg' && !all.length; if (!rest.length && !bare) return null;
-  const v = viewOf(c.folder), deep = toldUnder(c.folder); return { rest, bare, kids:(v ? own(v) : []).filter(k => bst(k) !== null && rest.some(x => toldUnder(k.folder).has(x))), priv:rest.filter(x => !deep.has(x)) }; }
+  const v = viewOf(c.folder), deep = toldUnder(c.folder); return { rest, bare, kids:(v ? own(v) : b.kids || []).filter(k => bst(k) !== null && rest.some(x => toldUnder(k.folder).has(x))), priv:rest.filter(x => !deep.has(x)) }; }
 // it is the last line on the card. It says where, and opens like any line to name the changes. At the top of the box's own view, where its boxes are listed just below, it keeps only what no listed line shows
 function insideLine(c, top){ const n = inside(c), cs = n && (top ? n.priv : n.rest); if (!n || (!cs.length && !n.bare)) return '';
   const where = (top ? [] : n.kids.map(k => k.name)).concat(n.priv.length || n.bare ? ['unlisted code'] : []).join(', ') || 'unlisted code', key = c.key + '~', on = openT.includes(key);
@@ -322,22 +328,33 @@ document.addEventListener('click', e => { if (e.target.closest('.ty[data-ty], .f
 
 // ============ layout: computed from the lists, the same on every tab ============
 const W = 668, GAP = 38;
-function layout(v){ const side = (v.band && v.band.boxes.length) || (v.sep && v.sep.length), RW = side ? 568 : 660, spine = 4 + RW / 2, out = { regions:[], pos:{}, edges:[], labs:[], near:[] };
+function layout(v){ const side = (v.band && v.band.boxes.length) || (v.sep && v.sep.length), RW = side ? 568 : 660, spine = 4 + RW / 2, out = { regions:[], pos:{}, edges:[], labs:[], near:[], head:{} };
   const near = v; let y = 8;
   const chips = (list, yy, word) => { const cw = 112, total = list.length * cw + (list.length - 1) * 8; out.labs.push({ text:word, x:8, y:yy + 7 }); list.forEach((f, k) => out.near.push({ folder:f, pos:[Math.round(spine - total / 2 + k * (cw + 8)), yy, cw, 24] })); };
   if (near.from) { chips(near.from.boxes, y, 'From'); out.edges.push({ id:'from', from:'outside', to:v.rows[0].id, p:[[spine, y + 24], [spine, y + 24 + 28]], title:'Into ' + v.name, says:near.from.says }); y += 24 + 28; }
   v.rows.forEach(r => { const slots = [];   // a planned box listed right after the box it replaces takes that box's place
     r.boxes.forEach((b, j) => { const p = r.boxes[j - 1]; if (j && TABS.some(t => t.delta && bstIn(t.id, b) === 'add' && bstIn(t.id, p) === 'del')) slots[slots.length - 1].push(b); else slots.push([b]); });
-    const n = slots.length, iw = RW - 16; let lines = 1, per = n, bw = (iw - 8 * (n - 1)) / n;
-    while (bw < 92 && lines < 3) { lines++; per = Math.ceil(n / lines); bw = (iw - 8 * (per - 1)) / per; }
-    bw = Math.min(Math.floor(bw), 116); const gap = per > 1 ? Math.min(44, (iw - per * bw) / (per - 1)) : 0, h = 22 + lines * 30 + (lines - 1) * 8 + 8;
-    for (let l = 0; l < lines; l++) { const part = slots.slice(l * per, (l + 1) * per), c = part.length, x0 = 12 + (iw - c * bw - (c - 1) * gap) / 2;
-      part.forEach((slot, k) => slot.forEach(b => { out.pos[b.folder] = [Math.round(x0 + k * (bw + gap)), y + 22 + l * 38, bw, 30]; })); }
+    // a box that holds modules is as wide as they need (each counts for most of a box) and taller: its name above, its modules in a line
+    const unit = slot => Math.max(...slot.map(b => drawn(b).length ? drawn(b).length * .72 + .12 : 1)), units = p => p.reduce((a, x) => a + unit(x), 0);
+    const iw = RW - 16, bh = slots.some(x => x.some(b => drawn(b).length)) ? 54 : 30, wide = ps => Math.min(...ps.map(p => (iw - 8 * (p.length - 1)) / units(p)));
+    const split = k => { const goal = Math.ceil(units(slots) / k - 1e-9), ps = [[]]; let u = 0;
+      slots.forEach(x => { if (ps[ps.length - 1].length && u + unit(x) > goal + 1e-9 && ps.length < k) { ps.push([]); u = 0; } ps[ps.length - 1].push(x); u += unit(x); }); return ps; };
+    let parts = [slots], bw = wide(parts); while (bw < 92 && parts.length < 3 && parts.length < slots.length) { const k = parts.length + 1; parts = split(k); bw = wide(parts); if (parts.length < k) break; }
+    bw = Math.min(Math.floor(bw), 116); const lines = parts.length, wOf = x => Math.round(unit(x) * bw), sum = p => p.reduce((a, x) => a + wOf(x), 0);
+    const gap = Math.min(44, ...parts.filter(p => p.length > 1).map(p => (iw - sum(p)) / (p.length - 1)), parts.some(p => p.length > 1) ? 44 : 0), h = 22 + lines * bh + (lines - 1) * 8 + 8;
+    parts.forEach((part, l) => { const c = part.length, x0 = 12 + (iw - sum(part) - (c - 1) * gap) / 2, yy = y + 22 + l * (bh + 8); let before = 0;
+      part.forEach((slot, k) => { const w = wOf(slot), x = Math.round(x0 + before + k * gap); before += w;
+        slot.forEach(b => { const ks = drawn(b); if (!ks.length) { out.pos[b.folder] = [x, yy + (bh - 30) / 2, Math.min(w, bw), 30]; return; }
+          const kw = (w - 12 - 4 * (ks.length - 1)) / ks.length; out.pos[b.folder] = [x, yy, w, bh]; out.head[b.folder] = 16; ks.forEach((q, i) => { out.pos[q.folder] = [Math.round(x + 6 + i * (kw + 4)), yy + 22, Math.floor(kw), 26]; }); }); }); });
     out.regions.push({ r, x:4, y, w:RW, h }); y += h + GAP; });
   y -= GAP; const first = out.regions[0], last = out.regions[out.regions.length - 1], at = id => out.regions.find(g => g.r.id === id);
-  if (v.band && v.band.boxes.length) { const to = out.regions[Math.max(0, out.regions.length - 2)], h = Math.max(to.y + to.h - first.y, 44 + v.band.boxes.length * 44 - 6);
-    out.regions.push({ r:v.band, x:584, y:first.y, w:76, h }); v.band.boxes.forEach((b, k) => { out.pos[b.folder] = [592, first.y + 44 + k * 44, 60, 30]; }); }
-  if (v.sep && v.sep.length) { out.labs.push({ text:'Separate', x:584, y:last.y + 4 }); v.sep.forEach((b, k) => { out.pos[b.folder] = [584, last.y + 22 + k * 38, 76, 30]; }); }
+  const stack = (boxes, x, yy, w, gap) => { boxes.forEach(b => { const ks = drawn(b); if (!ks.length) { out.pos[b.folder] = [x, yy, w, 30]; yy += 30 + gap; return; }
+    const head = 22 + 13 * (Math.min(3, Math.ceil(b.name.length * 7 / w)) - 1), gh = head + 2 + ks.length * 28;          // a long name takes a second line, or a third
+    out.pos[b.folder] = [x - 4, yy, w + 8, gh]; out.head[b.folder] = head - 6; ks.forEach((q, i) => { out.pos[q.folder] = [x, yy + head + i * 28, w, 24]; }); yy += gh + gap; }); return yy; };
+  let low = 0;
+  if (v.band && v.band.boxes.length) { const to = out.regions[Math.max(0, out.regions.length - 2)], h = Math.max(to.y + to.h - first.y, stack(v.band.boxes, 592, first.y + 44, 60, 14) - first.y - 6);
+    out.regions.push({ r:v.band, x:584, y:first.y, w:76, h }); low = first.y + h; }
+  if (v.sep && v.sep.length) { const sy = Math.max(last.y, low ? low + 10 : 0); out.labs.push({ text:'Separate', x:584, y:sy + 4 }); low = Math.max(low, stack(v.sep, 584, sy + 22, 76, 8) - 8); }
   // a link to or from the band is a tick at the row; a link between rows that are not neighbours, or one that goes up, runs beside the others with its word on the left
   (v.links || []).forEach((l, i) => { const a = at(l.from), b = at(l.to); if (!a || !b || a === b) return;
     const row = v.band && (l.from === v.band.id ? b : l.to === v.band.id ? a : null);
@@ -345,19 +362,19 @@ function layout(v){ const side = (v.band && v.band.boxes.length) || (v.sep && v.
     const down = b.y > a.y, far = !down || Math.abs(out.regions.indexOf(a) - out.regions.indexOf(b)) > 1, x = spine - 38 - (far ? 14 : 0), y0 = down ? a.y + a.h : a.y;
     out.edges.push({ id:'l' + i, from:l.from, to:l.to, p:[[x, y0], [x, down ? b.y : b.y + b.h]], label:l.label, says:l.says, dot:true, l: far ? [x - 5, y0 + (down ? GAP : -GAP) / 2 + 3, 'end'] : undefined }); });
   if (near.uses) { out.edges.push({ id:'uses', from:last.r.id, to:'outside', p:[[spine, y], [spine, y + 28]], title:v.name + ' relies on', says:near.uses.says, dot:true }); y += 28; chips(near.uses.boxes, y, 'Uses'); y += 24; }
-  out.H = y + 8; return out; }
+  out.H = Math.max(y, low) + 8; return out; }
 
 // ============ figure ============
 const head = (a, t) => { const D = Math.hypot(t[0] - a[0], t[1] - a[1]), ux = (t[0] - a[0]) / D, uy = (t[1] - a[1]) / D; return `<polygon points="${t[0]},${t[1]} ${t[0] - ux * 6.5 - uy * 3.2},${t[1] - uy * 6.5 + ux * 3.2} ${t[0] - ux * 6.5 + uy * 3.2},${t[1] - uy * 6.5 - ux * 3.2}"/>`; };
 function edgeSvg(e){ const p = e.p, n = p.length, pts = p.map(q => q.join(',')).join(' '), l = e.l || [p[0][0] + 5, (p[0][1] + p[1][1]) / 2 + 3, 'start'];
   return `<g class="ed" data-pick="${e.pick || 'edge:' + e.id}" data-id="${e.id}" data-from="${e.from || ''}" data-to="${e.to || ''}"><polyline class="hit" points="${pts}"/><polyline class="ln" points="${pts}"/>${head(p[n - 2], p[n - 1])}${e.both ? head(p[1], p[0]) : e.dot ? `<circle cx="${p[0][0]}" cy="${p[0][1]}" r="2.6"/>` : ''}${e.label ? `<text x="${l[0]}" y="${l[1]}" text-anchor="${l[2]}">${esc(e.label)}</text>` : ''}</g>`; }
 function stage(){ const L = LAY = layout(V);
-  const st = b => { const s = bst(b); return s === null ? null : s || 'same'; }, boxes = own(V), over = (a, c) => a[0] < c[0] + c[2] && a[0] + a[2] > c[0] && a[1] < c[1] + c[3] && a[1] + a[3] > c[1];
+  const st = b => { const s = bst(b); return s === null ? null : s || 'same'; }, boxes = own(V).filter(b => !b.quiet), over = (a, c) => a[0] < c[0] + c[2] && a[0] + a[2] > c[0] && a[1] < c[1] + c[3] && a[1] + a[3] > c[1];
   // a removed box keeps its place if nothing else needs it; otherwise it goes to a row under the figure
-  const live = boxes.filter(b => st(b) && st(b) !== 'del'), tray = boxes.filter(b => st(b) === 'del' && live.some(o => over(L.pos[b.folder], L.pos[o.folder]))), full = L.H + (tray.length ? 42 : 0);
+  const live = boxes.filter(b => st(b) && st(b) !== 'del'), tray = boxes.filter(b => st(b) === 'del' && live.some(o => !kin(b, o) && over(L.pos[b.folder], L.pos[o.folder]))), full = L.H + (tray.length ? 42 : 0);
   const regions = L.regions.map(g => `<div class="rg ${g.r.slot}" data-pick="region:${g.r.id}" style="left:${g.x}px;top:${g.y}px;width:${g.w}px;height:${g.h}px"><b style="left:8px;top:6px">${esc(g.r.title).replace(/&lt;br>/g, '<br>')}</b></div>`).join('');
   const nd = (b, pos, extra) => { const c = st(b); if (c === null) return '';
-    return `<div class="nd ${c} ${b.shared ? 'util' : ''} ${viewOf(b.folder) && !extra ? 'has' : ''} ${pos[2] < 80 ? 'tight' : ''} ${extra || ''}" data-pick="node:${esc(b.folder)}" style="left:${pos[0]}px;top:${pos[1]}px;width:${pos[2]}px;height:${pos[3]}px"><span>${esc(b.name)}</span></div>`; };
+    return `<div class="nd ${c} ${b.shared ? 'util' : ''} ${viewOf(b.folder) && !extra ? 'has' : ''} ${drawn(b).length && !extra ? 'grp' : ''} ${isKid(b) && !extra ? 'kid' : ''} ${pos[2] < 80 ? 'tight' : ''} ${extra || ''}" data-pick="node:${esc(b.folder)}"${L.head[b.folder] && !extra ? ` data-head="${L.head[b.folder]}"` : ''} style="left:${pos[0]}px;top:${pos[1]}px;width:${pos[2]}px;height:${pos[3]}px"><span>${esc(b.name)}</span></div>`; };
   const nodes = boxes.map(b => { const t = tray.indexOf(b); return nd(b, t < 0 ? L.pos[b.folder] : [76 + t * 124, L.H + 4, L.pos[b.folder][2], 30]); }).join('') + L.near.map(n => nd(boxAt(n.folder), n.pos, 'near')).join('')
     + L.labs.map(l => `<div class="lab" style="left:${l.x}px;top:${l.y}px">${l.text}</div>`).join('') + (tray.length ? `<div class="lab gone" style="left:8px;top:${L.H + 13}px">Removed</div>` : '');
   const edges = L.edges.map(edgeSvg).join('');
@@ -368,6 +385,8 @@ function declutter(stageEl){ const rect = el => ({ x:el.offsetLeft, y:el.offsetT
   const hit = (r, o, pad) => r.x < o.x + o.w + pad && r.x + r.w + pad > o.x && r.y < o.y + o.h + pad && r.y + r.h + pad > o.y;
   const gap = (r, s) => Math.max(0, s.x1 - (r.x + r.w), r.x - s.x2) + Math.max(0, s.y1 - (r.y + r.h), r.y - s.y2);
   stageEl.querySelectorAll('.nd').forEach(el => { const s = el.firstChild; let f = parseFloat(getComputedStyle(el).fontSize); while (s.offsetWidth > el.clientWidth - 8 && f > 9) { f -= .5; el.style.fontSize = f + 'px'; } });
+  // the name of a box that holds modules stays above them
+  stageEl.querySelectorAll('.nd[data-head]').forEach(el => { const s = el.firstChild; let f = parseFloat(getComputedStyle(el).fontSize); while (s.offsetHeight > +el.dataset.head && f > 8) { f -= .5; el.style.fontSize = f + 'px'; } });
   stageEl.querySelectorAll('.rg').forEach(el => { const t = el.querySelector('b'), R = rect(el), w = t.offsetWidth, h = t.offsetHeight; let best = null, low = 1e9;
     for (const [dx, dy] of [[8, 6], [R.w - w - 8, 6], [8, R.h - h - 6], [R.w - w - 8, R.h - h - 6]]) { const r = { x:R.x + dx, y:R.y + dy, w, h }, bad = boxes.filter(o => hit(r, o, 2)).length * 10 + placed.filter(o => hit(r, o, 2)).length * 10 + segs.filter(s => gap(r, s) < 2).length; if (bad < low) { low = bad; best = [dx, dy, r]; } }
     t.style.left = best[0] + 'px'; t.style.top = best[1] + 'px'; placed.push(best[2]); });
@@ -404,7 +423,7 @@ function describe(pick){ const d = delta(), row = c => { const m = cmark(c); ret
   return `<p class="t">${mono(short(id))} <span class="m">${esc(S.dirs[id] || '')}</span></p>${inDelta().filter(c => names.includes(c.name)).map(row).join('') + all.filter(l => !l.name).map(l => line(l, short(l.file))).join('') || none}`; }
 function show(){ const pick = hov || pin, i = (pick || ':').indexOf(':'), type = (pick || ':').slice(0, i), id = (pick || ':').slice(i + 1);
   document.querySelectorAll('.sel, .con').forEach(x => x.classList.remove('sel', 'con'));
-  if (pick) { document.querySelectorAll(`[data-pick="${CSS.escape(pick)}"]`).forEach(x => x.classList.add('sel')); if (type === 'region') document.querySelectorAll(`.ed[data-from="${id}"], .ed[data-to="${id}"]`).forEach(x => x.classList.add('con')); }
+  if (pick) { document.querySelectorAll(`[data-pick="${CSS.escape(type === 'node' ? 'node:' + inFig(id) : pick)}"]`).forEach(x => x.classList.add('sel')); if (type === 'region') document.querySelectorAll(`.ed[data-from="${id}"], .ed[data-to="${id}"]`).forEach(x => x.classList.add('con')); }
   $('strip').className = 'strip'; listing(pick); }
 // text is placed by measuring it. While the page is not displayed every measure is zero, so the placing waits (blind) and the figure is drawn again once it has a size
 let blind = false, figW = -1, blindT;
@@ -574,11 +593,11 @@ function fnList(c, ts){ const all = c.fs.filter(f => !(ownerOf(f) && ts.includes
   const parts = [['flows', flows.map(line).join('')], ['functions', rest.map(line).join('')], ['interfaces', of('interface')], ['classes', of('class')], ['types', of('type')]].filter(x => x[1]);
   return parts.map(x => (parts.length > 1 || x[0] === 'flows' ? note(x[0]) : '') + x[1]).join(''); }
 
-// ---- modules, two levels
+// ---- modules, two levels: the boxes of a view of its own, or the modules a box holds directly
 const NODE = {};
 function mkNode(b, parent){ const n = { folder:b.folder, name:b.name, line:b.line, parent, kids:[] }; NODE[n.folder] = n;
-  const v = !parent && viewOf(n.folder); if (v) n.kids = v.rows.flatMap(r => r.boxes).map(x => mkNode(x, n)); return n; }
-const TOP = own(S.views[0]).map(b => mkNode(b, null));
+  const v = !parent && viewOf(n.folder); n.kids = (v ? v.rows.flatMap(r => r.boxes) : b.kids || []).map(x => mkNode(x, n)); return n; }
+const TOP = tops(S.views[0]).map(b => mkNode(b, null));
 const nThere = n => bst(boxAt(n.folder)) !== null, pathOf = n => n.parent ? [...pathOf(n.parent), n] : [n];
 const flowsIn = n => fnsOf(n.folder).filter(flowOf).length + n.kids.reduce((s, k) => s + flowsIn(k), 0);
 // in a delta, a line that carries a mark is listed even where only flows are: what changed is never hidden

@@ -1713,15 +1713,18 @@ def calls(tmp):
 NEST = 'src/core/entries/'
 
 
-def nested(tmp, name):
+def nested(tmp, name, direct=False):
     """Mini with two boxes inside Entries, in one row whose folder is the box's own: the inner boxes sit directly in it.
-    Entries lists add as a bare name: the function of the box inside."""
+    Entries lists add as a bare name: the function of the box inside. direct: Entries lists the two as its modules, with
+    no row, so it has no view of its own."""
     figure = json.loads(json.dumps(MINI))
     box = figure['regions']['core']['boxes'][0]
     box['interface'] = ['add', 'listing() → [Entry]  // every entry', 'NewEntry = { text: Text }  // an entry not yet recorded']
     box['inside'] = [{'name': 'Parts', 'folder': NEST, 'line': 'what recording an entry takes', 'boxes': [
         {'name': 'Records', 'folder': NEST + 'records/', 'line': 'the entries themselves', 'interface': ['add(entry: NewEntry) → EntryId  // records one entry']},
         {'name': 'Keys', 'folder': NEST + 'keys/', 'line': 'one key per entry', 'interface': ['key(entry: NewEntry) → Key  // the same key on every run']}]}]
+    if direct:
+        box['inside'] = box['inside'][0]['boxes']
     figure['flows'] = [{'of': 'src/entry/cli/: main', 'sketch': ['return entries.add(NewEntry(argv))  # records it']},
                        {'of': NEST + ': add', 'sketch': ['return _store(entry, keys.key(entry))  # under its key']}]
     files = dict(MINI_FILES)
@@ -1798,6 +1801,55 @@ def levels(tmp):
     put(root, lambda s: s['regions']['core']['boxes'][0]['inside'][0]['boxes'][0].update(inside=[]))
     code, out, err = run(root, '--check')
     check('an empty "inside" on a box inside a box is no third level', code == 0 and 'ERROR' not in out, out + err)
+
+    # ---- a box that lists its modules directly: no row, and no view of its own
+    held = lambda root: [b['folder'] for b in system(root)['regions']['core']['boxes'][0]['inside']]
+    drawn = lambda data: next(b for r in data['views'][0]['rows'] for b in r['boxes'] if b['folder'] == NEST)
+    root = nested(tmp, 'levels-direct', direct=True)
+    code, out, err = run(root)
+    data = page_data(root)
+    check('a box that lists its modules directly builds with no error and no note', code == 0 and 'ERROR' not in out and 'note' not in worded(out), out + err)
+    check('it has no view of its own: the overview draws its modules inside its box',
+          [v['id'] for v in data['views']] == [''] and [k['folder'] for k in drawn(data).get('kids', [])] == [records, keys], data['views'])
+    check('its lines, its bare name and the flow of that name are read as in a box with rows',
+          data['api'].get(NEST) == [['add(entry: NewEntry) → EntryId', 'records one entry'], ['listing() → [Entry]', 'every entry']]
+          and [f['of'] for f in flows_of(root)] == ['src/entry/cli/: main', records + ': add'] and data['flows'][MAIN][0][3] == [records + '#add'], data.get('api'))
+    write(root, index + 'index.py', 'def find(x):\n    return x\n')
+    found = {'name': 'Index', 'folder': index, 'line': 'finds entries', 'interface': ['find(x: Text) → Entry?  // finds one']}
+    entries(root, {'name': 'An index', 'line': 'entries are found by their text', 'files': {index + 'index.py': '+ finds an entry'}, 'boxes': [found]})
+    code, out, err = run(root)
+    data = page_data(root)
+    check('an entry adds a new box in the folder of such a box: it goes last among its modules, and is drawn there as added',
+          code == 0 and 'ERROR' not in out and held(root) == [records, keys, index] and system(root)['regions']['core']['boxes'][0]['inside'][2] == found
+          and [k['folder'] for k in drawn(data)['kids']] == [records, keys, index] and data['snap']['cc']['boxes'].get(index) == 'add', out + err)
+    back(root)
+    git(root, 'mv', NEST + 'keys', NEST + 'hashes')
+    entries(root, {'name': 'Keys become hashes', 'line': 'h', 'files': {NEST + 'hashes/keys.py': 'moved'}, 'moves': {NEST + 'keys/': NEST + 'hashes/'}})
+    code, out, err = run(root)
+    check('a module listed directly may move within the box that holds it', code == 0 and 'ERROR' not in out and held(root) == [records, NEST + 'hashes/'], out + err)
+    back(root)
+
+    def form(s):
+        box = s['regions']['core']['boxes'][0]
+        box['interface'] += ['interface KeyMaker  // makes the key of an entry', 'KeyMaker.make(entry: NewEntry) → Key  // the key']
+        box['inside'].append({'name': 'Hashes', 'folder': NEST + 'hashes/', 'line': 'keys by hashing',
+                              'interface': ['class HashKeys(KeyMaker)  // a key that is a hash', 'HashKeys.make(entry: NewEntry) → Key  // hashes the text']})
+    put(root, form)
+    code, out, err = run(root)
+    data = page_data(root)
+    check('a module that lists only classes that implement an interface is marked as not drawn; one that lists a function is drawn',
+          code == 0 and 'ERROR' not in out and [(k['folder'], k.get('quiet', False)) for k in drawn(data)['kids']] == [(records, False), (keys, False), (NEST + 'hashes/', True)]
+          and data['api'].get(NEST + 'hashes/') == [['HashKeys.make(entry: NewEntry) → Key', 'hashes the text']], out + err)
+    back(root)
+    put(root, lambda s: s['regions']['core']['boxes'][0]['inside'].append({'name': 'More', 'folder': NEST, 'line': 'm', 'boxes': []}))
+    code, out, err = run(root)
+    check('modules and rows in the same "inside" stop the script, which says to choose',
+          code == 2 and 'Traceback' not in err and '"inside" of src/core/entries/ lists both modules and rows' in err, out + err)
+    back(root)
+    put(root, lambda s: s['regions']['core']['boxes'][0]['inside'][0].update(inside=[{'name': 'Rows', 'folder': records + 'rows/', 'line': 'the rows'}]))
+    code, out, err = run(root)
+    check('a module listed directly holds no modules itself: that would be a third level',
+          code == 2 and 'Traceback' not in err and 'the box src/core/entries/records/ is inside another box and has boxes inside it' in err and 'two levels deep' in err, out + err)
 
 
 def third(tmp):

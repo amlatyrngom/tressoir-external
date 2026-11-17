@@ -44,12 +44,21 @@ SWEEP = """(narrow) => { const bad = [], strip = document.getElementById('strip'
       ends.forEach(id => { const g = rg['region:' + id];
         if (!meets(R(ln), g, 2)) bad.push(where + ': the link ' + ends.join(' to ') + ' does not reach ' + id);
         if (meets(R(ln), g, -3)) bad.push(where + ': the link ' + ends.join(' to ') + ' runs into ' + id); }); });
+    // a module that another holds directly is drawn inside that one's box, clear of its name and of the modules beside it
+    const at = b => [...st.querySelectorAll('.nd:not(.near)')].find(e => e.dataset.pick === 'node:' + b.folder), within = (a, b) => a.left >= b.left - .5 && a.right <= b.right + .5 && a.top >= b.top - .5 && a.bottom <= b.bottom + .5;
+    tops(V).forEach(b => (b.kids || []).filter(k => k.quiet).forEach(k => { quiet++; if (at(k)) bad.push(where + ': ' + k.name + ' only gives interfaces a form of its own, and is drawn'); }));
+    if (!V.id) tops(V).filter(b => drawn(b).length && bst(b) !== null).forEach(b => { const g = at(b), ks = drawn(b).filter(k => bst(k) !== null && bst(k) !== 'del').map(at);
+      if (!g || !g.classList.contains('grp') || ks.some(k => !k)) { bad.push(where + ': ' + b.name + ' holds modules, and it or one of them is not drawn'); return; } held += ks.length;
+      ks.forEach((k, i) => { if (!within(R(k), R(g))) bad.push(where + ': the module ' + k.textContent + ' is not drawn inside ' + b.name);
+        if (hit(R(k), R(g.querySelector('span')))) bad.push(where + ': the module ' + k.textContent + ' is on the name of ' + b.name);
+        ks.slice(i + 1).forEach(o => { if (hit(R(k), R(o))) bad.push(where + ': the modules ' + k.textContent + ' and ' + o.textContent + ' are on each other'); }); }); });
+    [...st.querySelectorAll('.nd:not(.kid):not(.near):not(.del)')].forEach((a, i, all) => all.slice(i + 1).forEach(b => { if (hit(R(a), R(b))) bad.push(where + ': the boxes ' + a.textContent + ' and ' + b.textContent + ' are on each other'); }));
     const picks = [...st.querySelectorAll('.rg')].map(e => e.dataset.pick);
     if (new Set(picks).size !== picks.length) bad.push(where + ': two regions are picked by the same name (' + picks.join(', ') + ')');
     texts.forEach(([t, r]) => boxes.forEach(([n, b]) => { if (hit(r, b)) bad.push(where + ': "' + t + '" is on the box ' + n); }));
     texts.forEach(([t, r], i) => texts.slice(i + 1).forEach(([u, q]) => { if (hit(r, q)) bad.push(where + ': "' + t + '" is on "' + u + '"'); })); });
   const wide = where => { states++; if (narrow && document.documentElement.scrollWidth > innerWidth + 1) bad.push(where + ': the page is ' + document.documentElement.scrollWidth + ' pixels wide'); };
-  let where = '', flows = 0, cards = 0, longs = 0, shorts = 0;
+  let where = '', flows = 0, cards = 0, longs = 0, shorts = 0, held = 0, quiet = 0;
   // a docstring has words; one that takes more than a line has its quotes on lines of their own
   const docstrings = at => { docs(); strip.querySelectorAll('.ds').forEach(d => { const q = d.children[0], b = d.children[1], line = parseFloat(getComputedStyle(b).lineHeight) || 20;
     if (!b.textContent.trim()) bad.push(at + ': a docstring with no words is shown');
@@ -104,6 +113,10 @@ SWEEP = """(narrow) => { const bad = [], strip = document.getElementById('strip'
       const m = [...box.querySelectorAll('.mref[data-fflow]')].pop() || (() => { for (const t of Object.values(S.types).filter(there)) { box.innerHTML = uses(t); const x = box.querySelector('.mref[data-fflow]'); if (x) return x; } })();
       if (m) { document.body.appendChild(box); const to = m.dataset.fbox; m.click(); box.remove(); if (pin !== 'node:' + to) bad.push('the function ' + m.textContent + ' named under a type does not select its module ' + to); } }
     if (S.types && Object.keys(S.types).length && !cards) bad.push('types are listed and no reference opened a card');
+    if (S.views.flatMap(tops).some(b => drawn(b).length) && !held) bad.push('a box holds modules and the check of their places saw none');
+    if (S.views.flatMap(tops).some(b => (b.kids || []).some(k => k.quiet)) && !quiet) bad.push('a box holds a module that is not drawn and the check saw none');
+    const q = S.views.flatMap(tops).flatMap(b => (b.kids || []).filter(k => k.quiet && bst(k) !== null).map(k => [k, b]))[0];
+    if (q) { go(''); nsel(q[0].folder); const el = document.querySelector('#fig .nd.sel'); if (!el || el.dataset.pick !== 'node:' + q[1].folder) bad.push('picking ' + q[0].name + ', which is not drawn, does not mark the box that holds it'); pin = null; show(); }
     if (narrow && S.api && !longs) bad.push('on a narrow screen no docstring took more than one line: the check of long docstrings saw none');
     if (!narrow && S.api && innerWidth > 1200 && !shorts) bad.push('on a wide screen no docstring fitted on one line: the check of short docstrings saw none');
   } catch (e) { bad.push(where + ': ' + e); }
@@ -148,7 +161,25 @@ def build(tmp):
     if code != 0:
         sys.exit('could not build the page of unusual links:\n%s%s' % (out, err))
     shutil.copy(Path(root) / 'WORK' / 'SYSTEM_VIEW.html', Path(tmp) / 'links.html')
-    return pages + [Path(tmp) / 'links.html']
+    # boxes that hold modules directly, which the examples do not have: one in a row, one in the region at the side, one apart
+    root = kit.repository(str(Path(tmp) / 'held'), 'marlin')
+    path = Path(root) / 'WORK' / 'SYSTEM_VIEW' / 'system.json'
+    system = json.loads(path.read_text(encoding='utf-8'))
+    regions = system['regions']
+    # (the folders of the three are no folder of the project, so that no change the example plans has two places to go)
+    regions['platform']['boxes'] = [{'name': 'Operating system', 'folder': 'src/platform/all/', 'line': 'what differs per system', 'inside': regions['platform']['boxes']}]
+    plain = [b for b in regions['external']['boxes'] if not b.get('inside')]
+    regions['external']['boxes'] = [{'name': 'Connectors', 'folder': 'src/connectors/all/', 'line': 'what Marlin reaches outside itself', 'inside': plain}]
+    regions['separate']['boxes'] = [{'name': 'Tools', 'folder': 'tools/', 'line': 'kept apart', 'inside': regions['separate']['boxes']}]
+    # and one that only gives an interface a form of its own, which is listed and not drawn
+    regions['platform']['boxes'][0]['interface'] = ['interface Disk  // where pages are kept']
+    regions['platform']['boxes'][0]['inside'].append({'name': 'Windows', 'folder': 'src/platform/windows/', 'line': 'on Windows', 'interface': ['class WindowsDisk(Disk)  // through the Windows API']})
+    path.write_text(json.dumps(system, ensure_ascii=False), encoding='utf-8')
+    code, out, err = kit.run(root)
+    if code != 0:
+        sys.exit('could not build the page of boxes that hold modules:\n%s%s' % (out, err))
+    shutil.copy(Path(root) / 'WORK' / 'SYSTEM_VIEW.html', Path(tmp) / 'held.html')
+    return pages + [Path(tmp) / 'links.html', Path(tmp) / 'held.html']
 
 
 def main():
